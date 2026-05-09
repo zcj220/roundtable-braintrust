@@ -10,7 +10,7 @@ const memoryValues = ["仅偏好记忆", "话题内记忆", "关闭记忆"];
 const modelValues = ["系统分配", "统一主模型", "角色自配"];
 
 const ROLE_COLORS = ["sky", "gold", "amber", "rose", "teal", "violet", "emerald", "coral", "slate"];
-const MAX_SELECTED_ROLES = 10;
+const MAX_SELECTED_ROLES = 8;
 
 const baseRoles = [
   {
@@ -430,10 +430,14 @@ const state = {
   mappings: { main: "", challenger: "", judge: "" },
   selectedIds: new Set(),
   seatAssignments: {},
+  discussionOrder: {},
+  seatModelAssignments: {},
   topics: [],
   activeTopicId: "",
   pendingAttachments: [],
 };
+
+let pendingConfirmResolver = null;
 
 const peopleLibraryBackdrop = document.getElementById("people-library-backdrop");
 const peopleLibraryModal = document.getElementById("people-library-modal");
@@ -462,11 +466,19 @@ const seatPickerBackdrop = document.getElementById("seat-picker-backdrop");
 const seatPickerModal = document.getElementById("seat-picker-modal");
 const closeSeatPicker = document.getElementById("close-seat-picker");
 const openSeatPickerButton = document.getElementById("open-seat-picker");
+const openSeatPickerRoleEditor = document.getElementById("open-seat-picker-role-editor");
 const seatPickerCount = document.getElementById("seat-picker-count");
 const seatPickerFeedback = document.getElementById("seat-picker-feedback");
 const seatSourceTabs = document.getElementById("seat-source-tabs");
 const seatPickerSearch = document.getElementById("seat-picker-search");
 const seatPickerGrid = document.getElementById("seat-picker-grid");
+
+const confirmBackdrop = document.getElementById("confirm-backdrop");
+const confirmModal = document.getElementById("confirm-modal");
+const confirmTitle = document.getElementById("confirm-title");
+const confirmMessage = document.getElementById("confirm-message");
+const confirmCancel = document.getElementById("confirm-cancel");
+const confirmAccept = document.getElementById("confirm-accept");
 
 const settingsDrawer = document.getElementById("settings-drawer");
 const settingsDrawerBackdrop = document.getElementById("settings-drawer-backdrop");
@@ -485,9 +497,6 @@ const profileTestStatus = document.getElementById("profile-test-status");
 const resetModelProfile = document.getElementById("reset-model-profile");
 const deleteModelProfileButton = document.getElementById("delete-model-profile");
 const testModelProfileButton = document.getElementById("test-model-profile");
-const mappingMain = document.getElementById("mapping-main");
-const mappingChallenger = document.getElementById("mapping-challenger");
-const mappingJudge = document.getElementById("mapping-judge");
 const providerTemplateSelect = document.getElementById("provider-template-select");
 const connectedModelList = document.getElementById("connected-model-list");
 
@@ -678,8 +687,11 @@ function buildReportFileName() {
   return `${rawTitle}-讨论结论报告.txt`;
 }
 
-function downloadTextFile(fileName, content) {
-  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+function buildExportBaseName() {
+  return buildReportFileName().replace(/\.txt$/i, "") || "roundtable-report";
+}
+
+function downloadBlob(fileName, blob) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -688,6 +700,195 @@ function downloadTextFile(fileName, content) {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+}
+
+function downloadTextFile(fileName, content) {
+  downloadBlob(fileName, new Blob([content], { type: "text/plain;charset=utf-8" }));
+}
+
+function escapeExportHtml(value) {
+  return escapeHtml(value).replace(/\n/g, "<br />");
+}
+
+function getDiscussionMessagesForExport() {
+  return [...discussionStream.querySelectorAll(".chat-item")].map((item) => ({
+    label: item.querySelector(".chat-meta strong")?.textContent?.trim() || "",
+    sublabel: item.querySelector(".chat-meta span")?.textContent?.trim() || "",
+    body: [...item.querySelectorAll(".chat-bubble p, .attachment-pill")].map((node) => node.textContent.trim()).filter(Boolean).join("\n"),
+  }));
+}
+
+function buildFullExportText() {
+  const parts = [
+    `话题：${deriveTopicTitle()}`,
+    `任务定义：${state.lastSummary || "尚未确认"}`,
+    "",
+    "讨论过程：",
+    ...getDiscussionMessagesForExport().flatMap((message, index) => [
+      `${index + 1}. ${message.label}${message.sublabel ? ` · ${message.sublabel}` : ""}`,
+      message.body || "",
+      "",
+    ]),
+  ];
+
+  if (state.latestReportText) {
+    parts.push("最终结论：", state.latestReportText, "");
+  }
+
+  return parts.join("\n").trim();
+}
+
+function buildFullExportHtml() {
+  const messageMarkup = getDiscussionMessagesForExport()
+    .map((message, index) => `
+      <article class="export-message">
+        <h3>${index + 1}. ${escapeHtml(message.label)}${message.sublabel ? ` <span>${escapeHtml(message.sublabel)}</span>` : ""}</h3>
+        <p>${escapeExportHtml(message.body || "")}</p>
+      </article>
+    `)
+    .join("");
+
+  return `
+    <!doctype html>
+    <html lang="zh-CN">
+      <head>
+        <meta charset="UTF-8" />
+        <title>${escapeHtml(buildExportBaseName())}</title>
+        <style>
+          body { font-family: "Microsoft YaHei UI", "Noto Sans SC", sans-serif; color: #111827; line-height: 1.7; padding: 32px; }
+          h1, h2, h3 { font-family: "Noto Serif SC", "Source Han Serif SC", serif; }
+          h1 { margin: 0 0 12px; font-size: 28px; }
+          h2 { margin: 28px 0 12px; font-size: 20px; }
+          h3 { margin: 0 0 8px; font-size: 15px; }
+          h3 span { color: #6b7280; font-weight: 400; }
+          .summary, .report, .export-message { border: 1px solid #e5e7eb; border-radius: 14px; padding: 14px 16px; margin-bottom: 14px; }
+          .summary, .report { background: #f8fafc; }
+          p { margin: 0; white-space: normal; }
+        </style>
+      </head>
+      <body>
+        <h1>${escapeHtml(deriveTopicTitle())}</h1>
+        <div class="summary"><strong>任务定义</strong><p>${escapeExportHtml(state.lastSummary || "尚未确认")}</p></div>
+        <h2>讨论过程</h2>
+        ${messageMarkup}
+        <h2>最终结论</h2>
+        <div class="report"><p>${escapeExportHtml(state.latestReportText || "暂无最终结论")}</p></div>
+      </body>
+    </html>
+  `;
+}
+
+function downloadDocxFile(fileName, htmlContent) {
+  if (window.htmlDocx?.asBlob) {
+    downloadBlob(fileName, window.htmlDocx.asBlob(htmlContent));
+    return;
+  }
+  downloadBlob(fileName.replace(/\.docx$/i, ".html"), new Blob([htmlContent], { type: "text/html;charset=utf-8" }));
+}
+
+function exportPdfDocument(title, htmlContent) {
+  const preview = window.open("", "_blank", "noopener,noreferrer,width=1024,height=768");
+  if (!preview) {
+    updateSeatFeedback("浏览器拦截了 PDF 导出窗口，请允许弹窗后再试。", "pending");
+    return;
+  }
+  preview.document.open();
+  preview.document.write(htmlContent);
+  preview.document.close();
+  preview.document.title = title;
+  preview.focus();
+  preview.print();
+}
+
+function getConfiguredProfileById(profileId) {
+  return state.modelProfiles.find((profile) => profile.id === profileId && profile.configured) || null;
+}
+
+function getSeatDefaultProfileId(role) {
+  const assignment = getRoleAssignment(role);
+  const fallbackId = assignment === "judge"
+    ? state.mappings.judge
+    : assignment === "challenger"
+      ? state.mappings.challenger
+      : state.mappings.main;
+  return getConfiguredProfileById(fallbackId)?.id || getConfiguredProfiles()[0]?.id || "";
+}
+
+function ensureSeatModelAssignment(role) {
+  if (!role) {
+    return "";
+  }
+  const currentId = state.seatModelAssignments[role.id];
+  if (currentId && getConfiguredProfileById(currentId)) {
+    return currentId;
+  }
+  const fallbackId = getSeatDefaultProfileId(role);
+  state.seatModelAssignments[role.id] = fallbackId;
+  return fallbackId;
+}
+
+function sanitizeSeatModelAssignments() {
+  const validIds = new Set(getConfiguredProfiles().map((profile) => profile.id));
+  state.seatModelAssignments = Object.fromEntries(
+    Object.entries(state.seatModelAssignments).filter(([, profileId]) => validIds.has(profileId))
+  );
+}
+
+function buildSeatModelOptionsMarkup(role) {
+  const configuredProfiles = getConfiguredProfiles();
+  const selectedId = ensureSeatModelAssignment(role);
+  if (!configuredProfiles.length) {
+    return '<option value="">未设置模型</option>';
+  }
+  return configuredProfiles
+    .map((profile) => `<option value="${profile.id}" ${selectedId === profile.id ? "selected" : ""}>${escapeHtml(profile.displayName)}</option>`)
+    .join("");
+}
+
+function getRoleModelProfile(role) {
+  return getConfiguredProfileById(ensureSeatModelAssignment(role)) || getPrimarySummaryProfile();
+}
+
+function openConfirmDialog({ title, message, confirmText = "确认", cancelText = "取消" }) {
+  confirmTitle.textContent = title;
+  confirmMessage.textContent = message;
+  confirmAccept.textContent = confirmText;
+  confirmCancel.textContent = cancelText;
+  confirmBackdrop.classList.add("open");
+  confirmModal.classList.add("open");
+  confirmModal.setAttribute("aria-hidden", "false");
+  return new Promise((resolve) => {
+    pendingConfirmResolver = resolve;
+  });
+}
+
+function closeConfirmDialog(confirmed) {
+  confirmBackdrop.classList.remove("open");
+  confirmModal.classList.remove("open");
+  confirmModal.setAttribute("aria-hidden", "true");
+  if (pendingConfirmResolver) {
+    pendingConfirmResolver(confirmed);
+    pendingConfirmResolver = null;
+  }
+}
+
+function getReportExportActionsMarkup() {
+  return `
+    <div class="message-actions">
+      <button class="ghost-link js-export-txt" type="button">导出 TXT</button>
+      <button class="ghost-link js-export-docx" type="button">导出 DOCX</button>
+      <button class="ghost-link js-export-pdf" type="button">导出 PDF</button>
+    </div>
+  `;
+}
+
+function upgradeLegacyReportActions() {
+  discussionStream.querySelectorAll(".js-download-report").forEach((button) => {
+    const container = button.closest(".message-actions");
+    if (container) {
+      container.outerHTML = getReportExportActionsMarkup();
+    }
+  });
 }
 
 function getActiveTopic() {
@@ -736,7 +937,7 @@ function formatTurnContext(turn) {
 function buildDiscussionContext(summary, roundNotes, liveTurns) {
   const finishedRounds = roundNotes.length
     ? `前面轮次记录：\n${roundNotes
-        .map((note) => `第 ${note.round} 轮\n${note.turns.map((turn) => formatTurnContext(turn)).join("\n\n")}`)
+        .map((note) => `第 ${note.round} 轮\n${note.moderatorSummary || note.turns.map((turn) => formatTurnContext(turn)).join("\n\n")}`)
         .join("\n\n")}`
     : "";
   const currentTurns = liveTurns.length
@@ -749,6 +950,20 @@ function buildDiscussionContext(summary, roundNotes, liveTurns) {
     currentTurns,
     discussionEvidenceRules(),
   ].filter(Boolean).join("\n\n");
+}
+
+function getRoleAssignment(role) {
+  return state.seatAssignments[role.id] || "participant";
+}
+
+function getAssignmentInstruction(assignment) {
+  if (assignment === "challenger") {
+    return "你是本轮主讲，要提出最核心的主论点、主要依据和最值得展开的解释。";
+  }
+  if (assignment === "neutral") {
+    return "你是本轮中立评议者，要指出前面发言里哪些更稳、哪些证据不足、哪些判断需要收紧。";
+  }
+  return "你是本轮旁证成员，要补充背景、细节、案例和现实约束，但不要越位成裁判。";
 }
 
 function sanitizeDisplayedModelText(text) {
@@ -813,6 +1028,16 @@ function deriveTopicSummary() {
   return seatFeedback.textContent.trim() || speakerDescription.textContent.trim() || "等待补充任务定义。";
 }
 
+function formatTopicTimestamp(timestamp) {
+  return new Date(timestamp).toLocaleString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 function buildCurrentTopicSnapshot() {
   return {
     modeIndex: state.modeIndex,
@@ -831,6 +1056,8 @@ function buildCurrentTopicSnapshot() {
     recommendedRoles: state.recommendedRoles,
     selectedIds: [...state.selectedIds],
     seatAssignments: { ...state.seatAssignments },
+    discussionOrder: { ...state.discussionOrder },
+    seatModelAssignments: { ...state.seatModelAssignments },
     pendingAttachments: [],
     userInput: userInput.value,
     discussionHtml: discussionStream.innerHTML,
@@ -889,7 +1116,7 @@ function renderTopicList() {
           <article class="topic-card ${topic.id === state.activeTopicId ? "active" : ""} ${index > 0 ? "hidden-topic" : ""}" data-topic-id="${topic.id}">
             <div class="topic-card-head">
               <p class="topic-tag">${topic.status === "active" ? "进行中" : topic.status === "completed" ? "已完成" : "已归档"}</p>
-              <span class="compact-link">${new Date(topic.updatedAt).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })}</span>
+              <span class="compact-link">${formatTopicTimestamp(topic.updatedAt)}</span>
             </div>
             <h3>${escapeHtml(topic.title)}</h3>
             <p>${escapeHtml(topic.summary)}</p>
@@ -925,11 +1152,15 @@ function applyTopicSnapshot(snapshot) {
   state.seatSource = snapshot.seatSource || "recommended";
   state.recommendedRoles = snapshot.recommendedRoles || [];
   if (state.lastSummary && state.recommendedRoles.length < 8) {
-    state.recommendedRoles = createRecommendedRoles(state.lastSummary);
+    state.recommendedRoles = createFallbackRecommendedRoles(state.lastSummary);
   }
   state.selectedIds = new Set(snapshot.selectedIds || []);
   state.seatAssignments = snapshot.seatAssignments || {};
+  state.discussionOrder = snapshot.discussionOrder || {};
+  state.seatModelAssignments = snapshot.seatModelAssignments || {};
+  sanitizeSeatModelAssignments();
   ensureCoreAssignments();
+  syncDiscussionOrder();
   state.pendingAttachments = snapshot.pendingAttachments || [];
   userInput.value = snapshot.userInput || "";
   discussionStream.innerHTML = snapshot.discussionHtml || "";
@@ -940,15 +1171,16 @@ function applyTopicSnapshot(snapshot) {
     snapshot.speaker?.avatar || "系"
   );
   seatFeedback.textContent = snapshot.feedback?.text || "人物尚未生成";
-  seatFeedback.className = snapshot.feedback?.className || "seat-feedback";
+  seatFeedback.className = `seat-feedback seat-feedback-hidden ${snapshot.feedback?.className?.replace("seat-feedback", "").trim() || ""}`.trim();
   seatPickerFeedback.textContent = seatFeedback.textContent;
-  seatPickerFeedback.className = seatFeedback.className.replace("seat-feedback", "drawer-feedback");
+  seatPickerFeedback.className = `drawer-feedback ${snapshot.feedback?.className?.replace("seat-feedback", "").trim() || ""}`.trim();
   updateLiveStatus(snapshot.liveStatus?.text || "等待开始讨论", snapshot.liveStatus?.className?.split(" ").slice(1).join(" ") || "");
   updateCompactSummary();
   updateCurrentTopicTitle(deriveTopicTitle());
   renderSeatPicker();
   renderSeatStack();
   renderAttachmentStrip();
+  upgradeLegacyReportActions();
   autoResizeTextarea();
   scrollToLatest();
 }
@@ -991,7 +1223,11 @@ async function deleteTopic(topicId) {
     return;
   }
 
-  const confirmed = window.confirm(`删除任务“${topic.title}”？`);
+  const confirmed = await openConfirmDialog({
+    title: "删除任务",
+    message: `删除任务“${topic.title}”？这会同时移除这条任务里的讨论记录和导出结果。`,
+    confirmText: "删除",
+  });
   if (!confirmed) {
     return;
   }
@@ -1032,7 +1268,7 @@ function cycleSetting(stateKey, values) {
 
 function setAutoFollow(enabled) {
   state.autoFollow = enabled;
-  followToggle.textContent = enabled ? "跟随新消息" : "查看底部";
+  followToggle.textContent = enabled ? "跟随新消息" : "查看消息";
   followToggle.classList.toggle("cool", enabled);
 }
 
@@ -1205,26 +1441,33 @@ async function runDiscussionFlow() {
     return;
   }
 
-  const mainRole = getRoleByAssignment("main");
-  const challengerRole = getRoleByAssignment("challenger");
   const judgeRole = getRoleByAssignment("judge");
-  const participantRoles = [...state.selectedIds]
+  const orderedSpeakers = getOrderedSelectedRoleIds()
     .map((roleId) => getRoleById(roleId))
-    .filter((role) => role && state.seatAssignments[role.id] === "participant");
-  const mainProfile = getMappedProfile("main");
-  const challengerProfile = getMappedProfile("challenger");
-  const judgeProfile = getMappedProfile("judge");
+    .filter((role) => role && getRoleAssignment(role) !== "judge");
+  const moderatorProfile = getPrimarySummaryProfile();
+  const moderatorRole = {
+    id: "host-ai",
+    name: "主持AI",
+    seat: "讨论主持者",
+    description: "负责开场、控制节奏、每轮小结、压缩上下文，并在最后整理给用户的结论稿。",
+    traits: { stance: "保持中立主持", method: "总结压缩", temper: "清晰" },
+    systemPrompt: "你是主持AI。你的职责是主持、压缩和组织讨论，而不是替代嘉宾发言。",
+    color: "sky",
+    avatar: "主",
+  };
 
   if (!state.lastSummary) {
     updateSeatFeedback("先让主 AI 整理并确认任务定义，再开始讨论。", "pending");
     return;
   }
-  if (!mainRole || !challengerRole || !judgeRole) {
-    updateSeatFeedback("至少要给主 AI、反方 / 质询、裁判 / 收束各分配一个人物。", "pending");
+  if (!orderedSpeakers.length || !judgeRole) {
+    updateSeatFeedback("至少要有若干讨论人物，并给裁判分配一个人物。", "pending");
     return;
   }
-  if (!mainProfile || !challengerProfile || !judgeProfile) {
-    updateSeatFeedback("先在设置里把主 AI、反方、裁判都映射到已接入模型。", "pending");
+  const judgeProfile = judgeRole ? getRoleModelProfile(judgeRole) : null;
+  if (!moderatorProfile || !judgeProfile || orderedSpeakers.some((role) => !getRoleModelProfile(role))) {
+    updateSeatFeedback("先接入至少一个可用模型，并在每个席位卡里选好模型。", "pending");
     return;
   }
 
@@ -1234,7 +1477,7 @@ async function runDiscussionFlow() {
   const budget = getRoundTokenBudget();
   const totalRounds = Math.max(1, Number(discussionRoundsInput.value || state.discussionRounds || 1));
   state.discussionRounds = totalRounds;
-  setSpeakerCard("讨论进行中", "多角色轮次发言", `将按 ${totalRounds} 轮执行主 AI、补充成员与反方交锋，最后由裁判总结。`, "系");
+  setSpeakerCard("讨论进行中", "主持AI按顺序推进", `将按你设定的顺序逐位发言；每轮末由主持AI做压缩小结，最后由裁判定稿。`, "系");
   updateLiveStatus(`准备开始：本次共 ${totalRounds} 轮。`, "pending");
   updateSeatFeedback(`开始讨论，当前执行 ${totalRounds} 轮`, "success");
 
@@ -1242,6 +1485,19 @@ async function runDiscussionFlow() {
   const signal = state.discussionAbortController.signal;
 
   try {
+    const openingPrompt = [
+      `你现在是本场圆桌的主持人，需要在正式讨论前做开场。`,
+      `任务定义：${state.lastSummary}`,
+      rolePromptBlock(moderatorRole),
+      `本次讨论顺序：${orderedSpeakers.map((role, index) => `${index + 1}.${role.name}`).join("，")}`,
+      "请用自然中文先说明：今天讨论的主题是什么、会怎么讨论、大家重点会围绕哪些争议点展开。",
+      "篇幅控制在 180 到 320 字，不要写成提纲。",
+    ].join("\n\n");
+    setSpeakerCardForRole(moderatorRole, `开场前 · 正在思考`, `正在整理今天这场讨论的主题、顺序和焦点。`);
+    updateLiveStatus(`开场：${moderatorRole.name} 正在思考`, "pending");
+    const openingText = await requestModelText(moderatorProfile, openingPrompt, Math.min(520, budget.participant), signal);
+    appendRoleMessage(moderatorRole, `开场 · ${moderatorRole.name}`, openingText, moderatorProfile.displayName);
+
     for (let round = 1; round <= totalRounds; round += 1) {
       if (state.discussionAbortRequested) {
         throw new DOMException("用户结束了本轮讨论。", "AbortError");
@@ -1249,64 +1505,43 @@ async function runDiscussionFlow() {
 
       const summary = state.lastSummary;
       const liveTurns = [];
-      const mainPrompt = [
-        `你现在是圆桌讨论中的主持型主 AI，第 ${round}/${totalRounds} 轮发言。`,
-        "你要先把本轮核心观点讲清楚，用自然中文写给人看，不要写成法条、代码注释、提纲标题或 Markdown。",
-        "请像一个成熟的人类讨论者一样说话，至少写 3 段完整内容，要有判断、有解释和可确认的例子。",
-        buildDiscussionContext(summary, roundNotes, liveTurns),
-        rolePromptBlock(mainRole),
-        `篇幅要求：${budget.charHint}`,
-        "要求：直接输出本轮发言正文，不要自我介绍，不要使用 ###、**、1. 这类格式。",
-      ].filter(Boolean).join("\n\n");
-      setSpeakerCardForRole(mainRole, `第 ${round} 轮 · 正在思考`, `正在结合前面全部讨论内容组织这一轮主发言。`);
-      updateLiveStatus(`第 ${round} 轮：${mainRole.name} 正在思考`, "pending");
-      updateSeatFeedback(`第 ${round} 轮：${mainRole.name} 正在思考`, "pending");
-      const mainText = await requestModelText(mainProfile, mainPrompt, budget.main, signal);
-      setSpeakerCardForRole(mainRole, `第 ${round} 轮 · 正在发言`, `这一轮主发言已生成，马上写入讨论流。`);
-      updateLiveStatus(`第 ${round} 轮：${mainRole.name} 正在发言`, "pending");
-      appendRoleMessage(mainRole, `第 ${round} 轮 · ${mainRole.name}`, mainText, mainProfile.displayName);
-      liveTurns.push({ role: mainRole, assignmentLabel: `第 ${round} 轮 · ${mainRole.name}`, text: mainText });
-
-      for (const participantRole of participantRoles) {
-        const participantPrompt = [
-          `你现在是圆桌讨论中的补充成员，第 ${round}/${totalRounds} 轮发言。`,
-          "你的职责不是抢结论，而是基于你的专业身份补充背景、例子、事实依据、历史语境或现实约束。",
-          "请用自然中文写给人看，像一个真实的人在补充观点，至少写 2 段，尽量给出具体例子。",
+      for (const speakerRole of orderedSpeakers) {
+        const assignment = getRoleAssignment(speakerRole);
+        const isLead = assignment === "challenger";
+        const discussionProfile = getRoleModelProfile(speakerRole);
+        const speakerPrompt = [
+          `你现在是本场讨论里的第 ${state.discussionOrder[speakerRole.id] || 1} 位发言者，第 ${round}/${totalRounds} 轮发言。`,
+          getAssignmentInstruction(assignment),
+          "请只基于任务、主持AI前面轮次的小结，以及本轮已经出现的发言继续往下讲。不要假装看到了还没发言的人。",
           buildDiscussionContext(summary, roundNotes, liveTurns),
-          rolePromptBlock(participantRole),
-          `篇幅要求：${budget.charHint}`,
-          "要求：可以补充，也可以指出主 AI 暂时忽略的点，但不要直接代替反方反驳。",
+          rolePromptBlock(speakerRole),
+          `篇幅要求：${isLead ? budget.charHint : "控制在 280 到 520 字内。"}`,
+          "要求：直接输出本轮发言正文，不要自我介绍，不要使用 Markdown 标题和列表。",
         ].join("\n\n");
-        setSpeakerCardForRole(participantRole, `第 ${round} 轮 · 正在思考`, `正在读取本轮前面所有发言，并补充可确认的背景与例子。`);
-        updateLiveStatus(`第 ${round} 轮：${participantRole.name} 正在思考`, "pending");
-        updateSeatFeedback(`第 ${round} 轮：${participantRole.name} 正在思考`, "pending");
-        const participantText = await requestModelText(mainProfile, participantPrompt, budget.participant, signal);
-        setSpeakerCardForRole(participantRole, `第 ${round} 轮 · 正在发言`, `补充内容已生成，马上写入讨论流。`);
-        updateLiveStatus(`第 ${round} 轮：${participantRole.name} 正在发言`, "pending");
-        appendRoleMessage(participantRole, `第 ${round} 轮 · ${participantRole.name}`, participantText, mainProfile.displayName);
-        liveTurns.push({ role: participantRole, assignmentLabel: `第 ${round} 轮 · ${participantRole.name}`, text: participantText });
+        setSpeakerCardForRole(speakerRole, `第 ${round} 轮 · 正在思考`, `正在读取任务和前面已发言内容，并准备按顺序接续。`);
+        updateLiveStatus(`第 ${round} 轮：${speakerRole.name} 正在思考`, "pending");
+        updateSeatFeedback(`第 ${round} 轮：${speakerRole.name} 正在思考`, "pending");
+        const speakerText = await requestModelText(discussionProfile, speakerPrompt, isLead ? budget.main : budget.participant, signal);
+        setSpeakerCardForRole(speakerRole, `第 ${round} 轮 · 正在发言`, `当前顺序发言已生成，马上写入讨论流。`);
+        updateLiveStatus(`第 ${round} 轮：${speakerRole.name} 正在发言`, "pending");
+        appendRoleMessage(speakerRole, `第 ${round} 轮 · ${speakerRole.name}`, speakerText, discussionProfile.displayName);
+        liveTurns.push({ role: speakerRole, assignmentLabel: `第 ${round} 轮 · ${speakerRole.name}`, text: speakerText });
       }
 
-      const challengerPrompt = [
-        `你现在是圆桌讨论中的反方 / 质询，第 ${round}/${totalRounds} 轮发言。`,
-        "你的任务是严谨、有理有据地反驳主 AI 当前观点，并吸收补充成员提供的知识继续追问。",
-        "请像一个强反驳能力的人类辩手一样说话，不要写成报告提纲或法条清单。",
-        "至少写 3 段，要明确指出哪里站不住脚、为什么站不住脚、有没有更合理的解释，并尽量举具体例子。",
-        buildDiscussionContext(summary, roundNotes, liveTurns),
-        rolePromptBlock(challengerRole),
-        `篇幅要求：${budget.charHint}`,
-        "要求：直接输出反驳正文，不要复述任务，不要空泛表态，不要使用 Markdown 标题和列表。",
+      const moderatorRoundSummaryPrompt = [
+        `你现在是本场讨论的主持AI，需要在第 ${round}/${totalRounds} 轮结束后做一段主持小结。`,
+        "你的任务是压缩本轮重点，明确谁提出了什么、谁提出了反对或保留、哪些例子或依据最关键。",
+        "这段小结既要给用户看，也要为下一轮压缩上下文，所以要信息密、语言自然、不要太长。",
+        `任务定义：${summary}`,
+        `本轮记录：${liveTurns.map((turn) => `${turn.assignmentLabel}\n${turn.text}`).join("\n\n")}`,
+        "要求：控制在 260 到 420 字内，点出本轮最关键的共识、分歧和例证。",
       ].join("\n\n");
-      setSpeakerCardForRole(challengerRole, `第 ${round} 轮 · 正在思考`, `正在阅读本轮已有发言，并检查其中哪些内容缺依据、哪条链路有漏洞。`);
-      updateLiveStatus(`第 ${round} 轮：${challengerRole.name} 正在思考`, "pending");
-      updateSeatFeedback(`第 ${round} 轮：${challengerRole.name} 正在思考`, "pending");
-      const challengerText = await requestModelText(challengerProfile, challengerPrompt, budget.challenger, signal);
-      setSpeakerCardForRole(challengerRole, `第 ${round} 轮 · 正在发言`, `反方质询已生成，马上写入讨论流。`);
-      updateLiveStatus(`第 ${round} 轮：${challengerRole.name} 正在发言`, "pending");
-      appendRoleMessage(challengerRole, `第 ${round} 轮 · ${challengerRole.name}`, challengerText, challengerProfile.displayName);
-      liveTurns.push({ role: challengerRole, assignmentLabel: `第 ${round} 轮 · ${challengerRole.name}`, text: challengerText });
+      setSpeakerCardForRole(moderatorRole, `第 ${round} 轮后 · 正在思考`, `正在压缩本轮发言，整理谁说了什么、哪里有争议。`);
+      updateLiveStatus(`第 ${round} 轮后：主持AI 正在总结`, "pending");
+      const moderatorSummary = await requestModelText(moderatorProfile, moderatorRoundSummaryPrompt, Math.min(700, budget.participant), signal);
+      appendRoleMessage(moderatorRole, `第 ${round} 轮小结 · 主持AI`, moderatorSummary, moderatorProfile.displayName);
 
-      roundNotes.push({ round, turns: [...liveTurns] });
+      roundNotes.push({ round, turns: [...liveTurns], moderatorSummary });
     }
 
     const judgePrompt = [
@@ -1328,7 +1563,7 @@ async function runDiscussionFlow() {
     appendRoleMessage(judgeRole, `最终总结 · ${judgeRole.name}`, judgeText, judgeProfile.displayName);
 
     updateLiveStatus(`正在整理本次讨论的最终文字报告`, "pending");
-    const reportText = await createConclusionReport(mainProfile, judgeText, roundNotes, signal);
+    const reportText = await createConclusionReport(moderatorProfile, judgeText, roundNotes, signal);
     state.latestReportText = reportText;
     state.latestReportFileName = buildReportFileName();
     appendMarkup(
@@ -1340,11 +1575,7 @@ async function runDiscussionFlow() {
         avatarLabel: "系",
         avatarClass: "avatar-system",
         tone: "system",
-        actions: `
-          <div class="message-actions">
-            <button class="ghost-link js-download-report" type="button">下载结论</button>
-          </div>
-        `,
+        actions: getReportExportActionsMarkup(),
       })
     );
 
@@ -1354,7 +1585,7 @@ async function runDiscussionFlow() {
       activeTopic.status = "completed";
       activeTopic.summary = "本次讨论已完成，结论可下载。";
     }
-    setSpeakerCard("讨论完成", "多角色轮次已结束", `已按 ${totalRounds} 轮 完成主 AI、补充成员、反方与最终裁判讨论。`, "系");
+    setSpeakerCard("讨论完成", "主持总结已完成", `已按 ${totalRounds} 轮完成顺序讨论、逐轮主持压缩和最终裁判流程。`, "系");
     updateLiveStatus(`讨论完成：结论报告已生成，可下载。`, "success");
     updateSeatFeedback("本轮讨论已完成。你可以继续补充任务，或调整角色后再来一轮。", "success");
     await syncCurrentTopicSnapshot();
@@ -1525,16 +1756,40 @@ function getRoleById(roleId) {
   return getPeopleRoleById(roleId) || getRecommendedRoleById(roleId);
 }
 
+function getOrderedSelectedRoleIds() {
+  return [...state.selectedIds].sort((left, right) => {
+    const leftOrder = state.discussionOrder[left] ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder = state.discussionOrder[right] ?? Number.MAX_SAFE_INTEGER;
+    return leftOrder - rightOrder;
+  });
+}
+
+function syncDiscussionOrder() {
+  const orderedRoleIds = getOrderedSelectedRoleIds();
+  const nextOrder = {};
+  orderedRoleIds.forEach((roleId, index) => {
+    nextOrder[roleId] = index + 1;
+  });
+  state.discussionOrder = nextOrder;
+}
+
+function setDiscussionOrder(roleId, nextPosition) {
+  const orderedRoleIds = getOrderedSelectedRoleIds().filter((currentRoleId) => currentRoleId !== roleId);
+  const safeIndex = Math.max(0, Math.min(orderedRoleIds.length, nextPosition - 1));
+  orderedRoleIds.splice(safeIndex, 0, roleId);
+  state.discussionOrder = Object.fromEntries(orderedRoleIds.map((currentRoleId, index) => [currentRoleId, index + 1]));
+}
+
 const ROUND_ROLE_LABELS = {
-  main: "主 AI",
-  challenger: "反方 / 质询",
-  judge: "裁判 / 收束",
-  participant: "补充成员",
+  challenger: "主讲",
+  participant: "旁证",
+  neutral: "中立评议",
+  judge: "裁判",
 };
 
 function getSeatSourceLabel(role) {
   return role.source === "recommended"
-    ? "系统推荐"
+    ? "系统临时生成"
     : role.source === "favorite"
       ? "收藏人物"
       : role.source === "custom"
@@ -1549,11 +1804,11 @@ function suggestSeatAssignment(role) {
   if (!currentAssignments.includes("judge") && /(judge|裁判|收束|裁决)/.test(text)) {
     return "judge";
   }
-  if (!currentAssignments.includes("challenger") && /(critic|challenger|反方|质询|批评|反驳)/.test(text)) {
-    return "challenger";
+  if (!currentAssignments.includes("neutral") && /(中立|平衡|长老|教师|历史|神学|审慎|辨识)/.test(text)) {
+    return "neutral";
   }
-  if (!currentAssignments.includes("main")) {
-    return "main";
+  if (!currentAssignments.includes("challenger") && /(主讲|牧师|学者|讲解|解释|释经|calvin|luther|spurgeon|henry|法律)/.test(text)) {
+    return "challenger";
   }
   return "participant";
 }
@@ -1609,9 +1864,9 @@ function ensureCoreAssignments() {
     }
   };
 
-  promote("main", (role) => /主|解释|结构|讲解|产品|法律/.test(`${role.name}${role.seat}`));
-  promote("challenger", (role) => /历史|医生|质询|风险|审计|警务/.test(`${role.name}${role.seat}`));
-  promote("judge", (role) => /裁判|裁决|中立/.test(`${role.name}${role.seat}`));
+  promote("challenger", (role) => /学者|主讲|释经|神学|法律|马丁路德|加尔文|奥古斯丁|马太亨利|司布真/.test(`${role.name}${role.seat}`));
+  promote("neutral", (role) => /长老|历史|教师|审慎|辨识|中立/.test(`${role.name}${role.seat}`));
+  promote("judge", (role) => /裁判|裁决|中立裁判/.test(`${role.name}${role.seat}`));
 
   state.seatAssignments = assignments;
 }
@@ -1689,7 +1944,9 @@ function renderPeopleSummary() {
 }
 
 function renderSeatStack() {
-  const selectedRoles = [...state.selectedIds].map((roleId) => getRoleById(roleId)).filter(Boolean);
+  syncDiscussionOrder();
+  const selectedRoles = getOrderedSelectedRoleIds().map((roleId) => getRoleById(roleId)).filter(Boolean);
+  const orderedDiscussantCount = selectedRoles.filter((role) => getRoleAssignment(role) !== "judge").length;
   seatPickerCount.textContent = `已选 ${selectedRoles.length} / ${MAX_SELECTED_ROLES}`;
 
   if (!selectedRoles.length) {
@@ -1701,6 +1958,14 @@ function renderSeatStack() {
     .map((role) => {
       const traits = Object.values(role.traits).map((trait) => `<span>${escapeHtml(trait)}</span>`).join("");
       const assignment = ensureSeatAssignment(role);
+      const currentProfile = getConfiguredProfileById(ensureSeatModelAssignment(role));
+      const orderValue = state.discussionOrder[role.id] || 1;
+      const orderOptions = Array.from({ length: Math.max(1, orderedDiscussantCount) })
+        .map((_, index) => `<option value="${index + 1}" ${orderValue === index + 1 ? "selected" : ""}>顺序 ${index + 1}</option>`)
+        .join("");
+      const orderMarkup = assignment === "judge"
+        ? `<label class="seat-assignment"><span>讨论顺序</span><div class="seat-assignment-static">最终裁判</div></label>`
+        : `<label class="seat-assignment"><span>讨论顺序</span><select class="seat-order-select" data-role-id="${role.id}">${orderOptions}</select></label>`;
       return `
         <article class="seat-card selected" data-role-id="${role.id}">
           <div class="seat-card-main">
@@ -1718,10 +1983,20 @@ function renderSeatStack() {
                 ${roundRoleOptionsMarkup(assignment)}
               </select>
             </label>
+            ${orderMarkup}
+            <label class="seat-assignment">
+              <span>使用模型</span>
+              <select class="seat-model-select" data-role-id="${role.id}">
+                ${buildSeatModelOptionsMarkup(role)}
+              </select>
+            </label>
             <div class="seat-traits">${traits}</div>
           </div>
           <div class="seat-actions">
-            <span class="seat-model">${escapeHtml(getSeatSourceLabel(role))}</span>
+            <div class="seat-meta-stack">
+              <span class="seat-source">${escapeHtml(getSeatSourceLabel(role))}</span>
+              <span class="seat-model">${escapeHtml(currentProfile?.displayName || "未设置模型")}</span>
+            </div>
             <button class="icon-button compact danger seat-delete" data-role-id="${role.id}" type="button" aria-label="移出本轮" title="移出本轮">
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm1 7h2v8h-2v-8Zm4 0h2v8h-2v-8ZM7 10h2v8H7v-8Z" fill="currentColor"></path>
@@ -1749,7 +2024,7 @@ function renderPeopleLibrary() {
   });
 
   if (!roles.length) {
-    peopleLibraryGrid.innerHTML = '<div class="empty-panel">当前筛选条件下没有人物。你可以新建一个，或者先去系统推荐里收藏人物。</div>';
+    peopleLibraryGrid.innerHTML = '<div class="empty-panel">当前筛选条件下没有人物。你可以新建一个，或者先去系统临时生成里收藏人物。</div>';
     return;
   }
 
@@ -1793,7 +2068,7 @@ function renderSeatPicker() {
   roles = filterRoles(roles, seatPickerSearch.value);
 
   if (!roles.length) {
-    seatPickerGrid.innerHTML = `<div class="empty-panel">${state.seatSource === "recommended" ? "当前还没有系统推荐。先确认任务，系统会按内容自动生成一组人物。" : "人物库里暂时没有匹配项。你可以去人物库新建或收藏人物。"}</div>`;
+    seatPickerGrid.innerHTML = `<div class="empty-panel">${state.seatSource === "recommended" ? "当前还没有系统临时生成的人物。先确认任务，系统会按本次内容现生成一组针对性人物。" : "人物库里暂时没有匹配项。你可以去人物库新建或收藏人物。"}</div>`;
     return;
   }
 
@@ -1843,19 +2118,7 @@ function renderAttachmentStrip() {
 }
 
 function renderModelMappings() {
-  const configuredProfiles = getConfiguredProfiles();
-  const options = ['<option value="">未设置</option>']
-    .concat(configuredProfiles.map((profile) => `<option value="${profile.id}">${escapeHtml(profile.displayName)}</option>`))
-    .join("");
-
-  mappingMain.innerHTML = options;
-  mappingChallenger.innerHTML = options;
-  mappingJudge.innerHTML = options;
-
-  const configuredIds = new Set(configuredProfiles.map((profile) => profile.id));
-  mappingMain.value = configuredIds.has(state.mappings.main) ? state.mappings.main : "";
-  mappingChallenger.value = configuredIds.has(state.mappings.challenger) ? state.mappings.challenger : "";
-  mappingJudge.value = configuredIds.has(state.mappings.judge) ? state.mappings.judge : "";
+  sanitizeSeatModelAssignments();
 }
 
 function renderConnectedModelList() {
@@ -1867,13 +2130,8 @@ function renderConnectedModelList() {
 
   connectedModelList.innerHTML = configuredProfiles
     .map((profile) => {
-      const mappingLabels = [
-        state.mappings.main === profile.id ? "主 AI" : "",
-        state.mappings.challenger === profile.id ? "反方" : "",
-        state.mappings.judge === profile.id ? "裁判" : "",
-      ].filter(Boolean);
       return `
-        <article class="connected-model-card ${mappingLabels.length ? "active" : ""}">
+        <article class="connected-model-card">
           <div class="connected-model-main">
             <strong><span class="model-health-dot ${getProfileHealth(profile)}"></span>${escapeHtml(profile.displayName)}</strong>
             <p>${escapeHtml(profile.providerName)} · ${escapeHtml(profile.modelId)}</p>
@@ -1906,7 +2164,7 @@ function renderProviderTemplateSelect() {
 
 function updateSeatFeedback(message, tone = "") {
   seatFeedback.textContent = message;
-  seatFeedback.className = `seat-feedback ${tone}`.trim();
+  seatFeedback.className = `seat-feedback seat-feedback-hidden ${tone}`.trim();
   seatPickerFeedback.textContent = message;
   seatPickerFeedback.className = `drawer-feedback ${tone}`.trim();
 }
@@ -2027,11 +2285,105 @@ function makeRecommendedRole(roleId, createdAt, description) {
     id: `recommended-${createdAt}-${roleId}`,
     description: description || sourceRole.description,
     source: "recommended",
-    sourceLabel: "系统推荐",
+    sourceLabel: "系统临时生成",
   };
 }
 
-function createRecommendedRoles(summary) {
+function extractJsonArray(text) {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("[")) {
+    return trimmed;
+  }
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    return fenced[1].trim();
+  }
+  const start = trimmed.indexOf("[");
+  const end = trimmed.lastIndexOf("]");
+  if (start >= 0 && end > start) {
+    return trimmed.slice(start, end + 1);
+  }
+  return "";
+}
+
+function normalizeGeneratedRole(generatedRole, index, createdAt) {
+  const name = String(generatedRole.name || generatedRole.title || `临时角色${index + 1}`).trim();
+  const seat = String(generatedRole.seat || generatedRole.role || "专题分析者").trim();
+  const description = String(generatedRole.description || generatedRole.focus || generatedRole.why || `${name} 负责从自己的专业角度参与本次讨论。`).trim();
+  const method = String(generatedRole.method || generatedRole.style || generatedRole.approach || "针对性分析").trim();
+  const stance = String(generatedRole.stance || generatedRole.position || "补充关键视角").trim();
+  const temper = String(generatedRole.temper || generatedRole.tone || "冷静").trim();
+  const prompt = String(generatedRole.systemPrompt || generatedRole.prompt || `${name}，请围绕本次话题从“${description}”出发发言。`).trim();
+  const color = ROLE_COLORS.includes(generatedRole.color) ? generatedRole.color : ROLE_COLORS[index % ROLE_COLORS.length];
+  const avatar = String(generatedRole.avatar || name.slice(0, 1) || "人").slice(0, 1);
+
+  return {
+    id: `recommended-${createdAt}-${index}`,
+    name,
+    seat,
+    description,
+    traits: {
+      stance,
+      method,
+      temper,
+    },
+    color,
+    avatar,
+    source: "recommended",
+    sourceLabel: "系统临时生成",
+    systemPrompt: prompt,
+  };
+}
+
+async function requestGeneratedRecommendedRoles(summary) {
+  const profile = getPrimarySummaryProfile();
+  if (!profile) {
+    throw new Error("还没有可用模型，无法生成系统临时角色。");
+  }
+
+  const promptSections = [
+    "你现在要为一次特定话题的圆桌讨论生成一组临时角色。",
+    "这些角色不是人物库里的通用职业，而是只为本次话题服务的临时推荐。",
+    "请根据话题本身去想，哪些人最该来，不要机械套模板。",
+    "优先混合三种角色来源：一类是针对这个行业或问题的虚拟复合专家；一类是相关领域历史上著名的人物、思想代表、经典作者或标志性实有人物；一类是公众非常熟悉、且与本次问题视角高度匹配的著名虚构人物。",
+    "只要贴题，就不要保守。不要全给职业头衔，也不要全给抽象专家，要让这桌人一看就有辨识度、有冲突、有记忆点。",
+    "如果话题明显适合引入历史名人或著名虚构人物，就至少放进 3 到 5 个这类角色；如果不适合，再以高匹配的虚拟专家为主。",
+    "例如：案件讨论要考虑刑侦、法医、现场环境、法律、建筑/设备、安全、媒体传播、心理等；野外求生要考虑生存、急救、地形、气象、后勤等。",
+    "输出 12 到 13 个角色，优先让视角互补，避免塞入明显无关的人。",
+    "生成时要避免同质化：不要重复 3 个本质一样的专家；每个角色都应该提供一种别人替代不了的看法。",
+    "严格输出 JSON 数组，不要解释，不要 Markdown。",
+    "每个元素必须包含字段：name, seat, description, stance, method, temper, systemPrompt。可选字段：color, avatar。",
+    "systemPrompt 要明确该角色本次该怎么看问题，description 要说明为什么这个角色适合这个话题。",
+    `本次话题：${summary}`,
+  ];
+
+  let lastError = new Error("系统临时角色生成失败：未知错误。");
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const retryNote = attempt === 1 ? "" : "上一次输出没有通过解析。这一次请只返回合法 JSON 数组，首字符必须是 [，末字符必须是 ]，中间不要夹任何解释。";
+    const prompt = [...promptSections, retryNote].filter(Boolean).join("\n\n");
+    try {
+      const raw = await requestModelText(profile, prompt, 1800);
+      const jsonText = extractJsonArray(raw);
+      if (!jsonText) {
+        throw new Error("系统临时角色生成失败：模型没有返回可解析的 JSON 数组。");
+      }
+
+      const parsed = JSON.parse(jsonText);
+      if (!Array.isArray(parsed) || !parsed.length) {
+        throw new Error("系统临时角色生成失败：返回结果不是有效角色列表。");
+      }
+
+      const createdAt = Date.now();
+      return parsed.slice(0, 12).map((item, index) => normalizeGeneratedRole(item, index, createdAt));
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
+  throw lastError;
+}
+
+function createFallbackRecommendedRoles(summary) {
   const createdAt = Date.now();
   const shortSummary = summary.slice(0, 18);
 
@@ -2120,6 +2472,9 @@ async function deleteRole(roleId) {
   await dbDelete(ROLE_STORE, roleId);
   state.selectedIds.delete(roleId);
   delete state.seatAssignments[roleId];
+  delete state.discussionOrder[roleId];
+  delete state.seatModelAssignments[roleId];
+  syncDiscussionOrder();
   await hydrateState();
   renderPeopleSummary();
   renderPeopleLibrary();
@@ -2187,6 +2542,11 @@ async function deleteModelProfile(profileIdValue) {
   if (state.mappings.judge === profileIdValue) {
     state.mappings.judge = "";
   }
+  Object.keys(state.seatModelAssignments).forEach((roleId) => {
+    if (state.seatModelAssignments[roleId] === profileIdValue) {
+      delete state.seatModelAssignments[roleId];
+    }
+  });
   await saveAppState("modelMappings", state.mappings);
   await hydrateState();
   renderConnectedModelList();
@@ -2206,7 +2566,11 @@ async function favoriteRecommendedRole(roleId) {
     return;
   }
 
-  const confirmed = window.confirm(`把“${role.name}”永久加入你的人物库？`);
+  const confirmed = await openConfirmDialog({
+    title: "加入人物库",
+    message: `把“${role.name}”永久加入你的人物库？后面你可以继续修改这个人物。`,
+    confirmText: "加入",
+  });
   if (!confirmed) {
     return;
   }
@@ -2230,9 +2594,13 @@ function toggleSeatSelection(roleId) {
   if (state.selectedIds.has(roleId)) {
     state.selectedIds.delete(roleId);
     delete state.seatAssignments[roleId];
+    delete state.discussionOrder[roleId];
+    delete state.seatModelAssignments[roleId];
+    syncDiscussionOrder();
     renderSeatPicker();
     renderSeatStack();
     updateSeatFeedback(`已移出席位：${getRoleById(roleId)?.name || "人物"}`, "");
+    void syncCurrentTopicSnapshot();
     return;
   }
 
@@ -2247,14 +2615,17 @@ function toggleSeatSelection(roleId) {
   }
 
   state.selectedIds.add(roleId);
+  syncDiscussionOrder();
   const role = getRoleById(roleId);
   if (role) {
     state.seatAssignments[roleId] = suggestSeatAssignment(role);
+    ensureSeatModelAssignment(role);
   }
   ensureCoreAssignments();
   renderSeatPicker();
   renderSeatStack();
   updateSeatFeedback(`已加入席位：${getRoleById(roleId)?.name || "人物"}`, "success");
+  void syncCurrentTopicSnapshot();
 }
 
 async function handleRoleEditorSave() {
@@ -2471,15 +2842,30 @@ function renderSeedConversation() {
   });
 }
 
-function finishSeatGeneration() {
-  state.recommendedRoles = createRecommendedRoles(state.lastSummary || "当前话题");
+async function finishSeatGeneration() {
+  try {
+    state.recommendedRoles = await requestGeneratedRecommendedRoles(state.lastSummary || "当前话题");
+    updateSeatFeedback(`系统已按本次话题临时生成 ${state.recommendedRoles.length} 个推荐角色。`, "success");
+  } catch (error) {
+    console.error(error);
+    state.recommendedRoles = createFallbackRecommendedRoles(state.lastSummary || "当前话题");
+    updateSeatFeedback("临时角色生成失败，已切回本地推荐池。你也可以继续调整或重试。", "pending");
+  }
   state.selectedIds.clear();
   state.seatAssignments = {};
-  state.recommendedRoles.slice(0, Math.min(5, state.recommendedRoles.length)).forEach((role) => state.selectedIds.add(role.id));
+  state.discussionOrder = {};
+  state.seatModelAssignments = {};
+  const defaultRecommended = [
+    ...state.recommendedRoles.slice(0, Math.min(4, state.recommendedRoles.length)).map((role) => role.id),
+    state.recommendedRoles.find((role) => role.id.includes("neutral-judge"))?.id,
+  ].filter(Boolean);
+  [...new Set(defaultRecommended)].slice(0, 5).forEach((roleId) => state.selectedIds.add(roleId));
+  syncDiscussionOrder();
   [...state.selectedIds].forEach((roleId) => {
     const role = getRoleById(roleId);
     if (role) {
       state.seatAssignments[roleId] = suggestSeatAssignment(role);
+      ensureSeatModelAssignment(role);
     }
   });
   ensureCoreAssignments();
@@ -2492,15 +2878,17 @@ function finishSeatGeneration() {
       speakerId: "system",
       label: "系",
       sublabel: "人物生成完成",
-      body: "本轮推荐已经生成。你现在可以去选角器里从系统推荐和人物库里混合挑选，也可以把推荐人物收藏进人物库。",
+      body: "本次系统临时人物已经生成。你现在可以去选角器里从系统临时生成和人物库里混合挑选，也可以把临时人物收藏进人物库。",
       avatarLabel: "系",
       avatarClass: "avatar-system",
       tone: "system",
     })
   );
-  setSpeakerCard("人物已生成", "可开始配置席位", "推荐人物和人物库现在都可以混合使用。", "系");
-  updateLiveStatus(`已生成 ${state.recommendedRoles.length} 个推荐角色，可继续挑选和调整。`, "success");
-  updateSeatFeedback("人物已生成，可从系统推荐和人物库里混合选席位", "success");
+  setSpeakerCard("人物已生成", "可开始配置席位", "系统临时生成的人物和人物库现在都可以混合使用。", "系");
+  updateLiveStatus(`已临时生成 ${state.recommendedRoles.length} 个针对性角色，可继续挑选和调整。`, "success");
+  if (!seatFeedback.textContent.includes("临时生成失败")) {
+    updateSeatFeedback("人物已生成，可从系统临时生成和人物库里混合选席位", "success");
+  }
   void syncCurrentTopicSnapshot();
 }
 
@@ -2513,6 +2901,8 @@ function startSeatGeneration() {
   state.seatsReady = false;
   state.selectedIds.clear();
   state.seatAssignments = {};
+  state.discussionOrder = {};
+  state.seatModelAssignments = {};
   renderSeatStack();
   updateSeatFeedback("正在生成人物，请稍候", "pending");
   updateLiveStatus("正在根据当前任务生成推荐角色。", "pending");
@@ -2522,14 +2912,16 @@ function startSeatGeneration() {
       speakerId: "system",
       label: "系",
       sublabel: "已确认任务定义",
-      body: "已确认。系统正在按你的任务目标、表达方式和冲突强度生成推荐人物。",
+      body: "已确认。系统正在按本次任务临时生成人物，并尽量给出更有针对性的角色组合。",
       avatarLabel: "系",
       avatarClass: "avatar-system",
       tone: "system",
     })
   );
   clearTimeout(state.generatingTimer);
-  state.generatingTimer = setTimeout(finishSeatGeneration, 900);
+  state.generatingTimer = setTimeout(() => {
+    void finishSeatGeneration();
+  }, 900);
   void syncCurrentTopicSnapshot();
 }
 
@@ -2543,6 +2935,7 @@ function seedConversation() {
   state.latestReportText = "";
   state.latestReportFileName = "";
   state.recommendedRoles = [];
+  state.seatModelAssignments = {};
   state.seatAssignments = {};
   state.pendingAttachments = [];
   renderSeedConversation();
@@ -2564,6 +2957,10 @@ function removePendingAttachment(index) {
   renderAttachmentStrip();
 }
 
+confirmCancel.addEventListener("click", () => closeConfirmDialog(false));
+confirmAccept.addEventListener("click", () => closeConfirmDialog(true));
+confirmBackdrop.addEventListener("click", () => closeConfirmDialog(false));
+
 function bindEvents() {
   openPeopleLibraryButton.addEventListener("click", () => {
     renderPeopleLibrary();
@@ -2578,9 +2975,17 @@ function bindEvents() {
     renderSeatPicker();
     openSeatPicker();
     updateSeatFeedback(
-      state.seatsReady ? "在这里给本轮讨论挑人。推荐和人物库是两个来源。" : "人物还没生成。你现在可以先浏览人物库，确认任务后会出现系统推荐。",
+      state.seatsReady ? "在这里给本轮讨论挑人。系统临时生成和人物库是两个来源。" : "人物还没生成。你现在可以先浏览人物库，确认任务后会出现系统临时生成。",
       state.seatsReady ? "success" : "pending"
     );
+  });
+
+  openSeatPickerRoleEditor.addEventListener("click", () => {
+    closeSeatPickerModal();
+    resetRoleEditor();
+    roleEditorSourceLabel.value = "自定义补位";
+    toggleRoleEditor(true);
+    openPeopleLibrary();
   });
 
   closeSeatPicker.addEventListener("click", closeSeatPickerModal);
@@ -2672,12 +3077,33 @@ function bindEvents() {
     }
     state.selectedIds.delete(button.dataset.roleId);
     delete state.seatAssignments[button.dataset.roleId];
+    delete state.discussionOrder[button.dataset.roleId];
+    syncDiscussionOrder();
     renderSeatStack();
     renderSeatPicker();
     updateSeatFeedback(`已移出席位：${getRoleById(button.dataset.roleId)?.name || "人物"}`, "");
+    void syncCurrentTopicSnapshot();
   });
 
   seatStack.addEventListener("change", (event) => {
+    const modelSelect = event.target.closest(".seat-model-select");
+    if (modelSelect) {
+      state.seatModelAssignments[modelSelect.dataset.roleId] = modelSelect.value;
+      renderSeatStack();
+      updateSeatFeedback(`已为 ${getRoleById(modelSelect.dataset.roleId)?.name || "人物"} 切换模型：${getConfiguredProfileById(modelSelect.value)?.displayName || "未设置"}`, "success");
+      void syncCurrentTopicSnapshot();
+      return;
+    }
+
+    const orderSelect = event.target.closest(".seat-order-select");
+    if (orderSelect) {
+      setDiscussionOrder(orderSelect.dataset.roleId, Number(orderSelect.value || 1));
+      renderSeatStack();
+      updateSeatFeedback(`已调整讨论顺序：${getRoleById(orderSelect.dataset.roleId)?.name || "人物"} -> 第 ${orderSelect.value} 位`, "success");
+      void syncCurrentTopicSnapshot();
+      return;
+    }
+
     const select = event.target.closest(".seat-assignment-select");
     if (!select) {
       return;
@@ -2687,6 +3113,7 @@ function bindEvents() {
     renderSeatStack();
     const role = getRoleById(select.dataset.roleId);
     updateSeatFeedback(`已设置 ${role?.name || "人物"} 本轮扮演：${ROUND_ROLE_LABELS[select.value]}`, "success");
+    void syncCurrentTopicSnapshot();
   });
 
   modelProfileForm.addEventListener("submit", handleModelProfileSave);
@@ -2719,18 +3146,6 @@ function bindEvents() {
     }
     fillModelProfileForm(profile);
     setProfileTestStatus(profile.locked ? "已载入系统内置接入，可填写密钥后直接使用" : "已载入自定义接入，可继续修改或删除", "");
-  });
-
-  [mappingMain, mappingChallenger, mappingJudge].forEach((select) => {
-    select.addEventListener("change", async () => {
-      state.mappings = {
-        main: mappingMain.value,
-        challenger: mappingChallenger.value,
-        judge: mappingJudge.value,
-      };
-      await saveAppState("modelMappings", state.mappings);
-      renderConnectedModelList();
-    });
   });
 
   connectedModelList.addEventListener("click", (event) => {
@@ -2794,10 +3209,16 @@ function bindEvents() {
       startSeatGeneration();
       return;
     }
-    if (event.target.closest(".js-download-report")) {
-      if (state.latestReportText && state.latestReportFileName) {
-        downloadTextFile(state.latestReportFileName, state.latestReportText);
-      }
+    if (event.target.closest(".js-export-txt") || event.target.closest(".js-download-report")) {
+      downloadTextFile(`${buildExportBaseName()}-完整讨论.txt`, buildFullExportText());
+      return;
+    }
+    if (event.target.closest(".js-export-docx")) {
+      downloadDocxFile(`${buildExportBaseName()}-完整讨论.docx`, buildFullExportHtml());
+      return;
+    }
+    if (event.target.closest(".js-export-pdf")) {
+      exportPdfDocument(`${buildExportBaseName()}-完整讨论`, buildFullExportHtml());
       return;
     }
     if (event.target.closest(".js-supplement-topic")) {
@@ -2812,17 +3233,23 @@ function bindEvents() {
     }
     const attachments = [...state.pendingAttachments];
     appendUserMessage(content || "我上传了附件，请结合附件继续整理。", state.pendingAttachments);
+    state.pendingAttachments = [];
+    renderAttachmentStrip();
+    userInput.value = "";
+    autoResizeTextarea();
     setSpeakerCard("主 AI 整理中", "正在调用真实模型", "会先用你已接入的主 AI 整理任务，再回来让你确认。", "系");
     sendCommand.disabled = true;
     try {
       const summary = await requestAiTaskSummary(content || "已收到附件，请结合附件整理任务定义", attachments);
       appendAiSummary(summary);
-      state.pendingAttachments = [];
-      renderAttachmentStrip();
-      userInput.value = "";
-      autoResizeTextarea();
     } catch (error) {
       console.error(error);
+      if (!userInput.value && !state.pendingAttachments.length) {
+        state.pendingAttachments = attachments;
+        renderAttachmentStrip();
+        userInput.value = content;
+        autoResizeTextarea();
+      }
       appendMarkup(
         createMessageMarkup({
           speakerId: "system",
@@ -2842,6 +3269,14 @@ function bindEvents() {
 
   newTopicButton.addEventListener("click", () => {
     handleNewTopic();
+  });
+
+  openSeatPickerRoleEditor.addEventListener("click", () => {
+    closeSeatPickerModal();
+    resetRoleEditor();
+    roleEditorSourceLabel.value = "自定义补位";
+    toggleRoleEditor(true);
+    openPeopleLibrary();
   });
 
   toggleTopicsButton.addEventListener("click", () => {

@@ -12,6 +12,21 @@
 
     <input id="attachment-input" type="file" multiple hidden />
 
+    <div class="modal-backdrop" id="confirm-backdrop"></div>
+    <section class="confirm-modal panel" id="confirm-modal" aria-hidden="true">
+      <div class="modal-header compact-modal-header">
+        <div>
+          <p class="section-label">确认操作</p>
+          <h2 id="confirm-title">请确认这次操作</h2>
+        </div>
+      </div>
+      <p class="confirm-message" id="confirm-message">这项操作会直接生效。</p>
+      <div class="header-actions confirm-actions">
+        <button class="ghost-link" id="confirm-cancel" type="button">取消</button>
+        <button class="action-primary compact-primary" id="confirm-accept" type="button">确认</button>
+      </div>
+    </section>
+
     <div class="modal-backdrop" id="people-library-backdrop"></div>
     <section class="workspace-modal panel" id="people-library-modal">
       <div class="modal-header">
@@ -138,14 +153,15 @@
           <h2>为本轮讨论挑选参与者</h2>
         </div>
         <div class="header-actions">
-          <span class="tiny-badge warm" id="seat-picker-count">已选 0 / 5</span>
+          <span class="tiny-badge warm" id="seat-picker-count">已选 0 / 8</span>
+          <button class="ghost-link" id="open-seat-picker-role-editor" type="button">+ 添加自定义人物</button>
           <button class="ghost-link" id="close-seat-picker" type="button">关闭</button>
         </div>
       </div>
       <div class="modal-toolbar">
         <p class="drawer-feedback" id="seat-picker-feedback">请先确认任务，系统会先生成推荐人物</p>
         <div class="tab-row" id="seat-source-tabs">
-          <button class="tab-pill active" data-source="recommended" type="button">系统推荐</button>
+          <button class="tab-pill active" data-source="recommended" type="button">系统临时生成</button>
           <button class="tab-pill" data-source="library" type="button">人物库</button>
         </div>
         <input id="seat-picker-search" class="search-input" type="text" placeholder="搜索人物、职业、标签、说明" />
@@ -229,23 +245,9 @@
         </div>
         <div class="settings-subsection">
           <div class="side-title-row">
-            <h3>角色模型映射</h3>
+            <h3>席位模型选择</h3>
           </div>
-          <p class="field-note">这里只显示你已经保存过的接入配置。先在上面保存，再在这里分配给主 AI、反方和裁判。</p>
-          <div class="mapping-grid">
-            <label class="mapping-field">
-              <span>主 AI</span>
-              <select id="mapping-main"></select>
-            </label>
-            <label class="mapping-field">
-              <span>反方 / 质询</span>
-              <select id="mapping-challenger"></select>
-            </label>
-            <label class="mapping-field">
-              <span>裁判 / 收束</span>
-              <select id="mapping-judge"></select>
-            </label>
-          </div>
+          <p class="field-note">这里不再按“主AI / 反方 / 裁判”做全局映射。你在右侧配置好席位后，可以直接在每个席位卡里选择要使用的模型，界面会显示你自定义保存的模型名。</p>
         </div>
       </div>
     </aside>
@@ -361,12 +363,13 @@
               <button class="ghost-link add-seat-trigger" id="open-seat-picker" type="button">打开选角器</button>
             </div>
           </div>
-          <p class="seat-feedback" id="seat-feedback">人物尚未生成</p>
+          <p class="seat-feedback seat-feedback-hidden" id="seat-feedback" aria-hidden="true">人物尚未生成</p>
           <div class="seat-stack" id="seat-stack"></div>
         </section>
       </aside>
     </div>
 
+    <script src="https://unpkg.com/html-docx-js/dist/html-docx.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

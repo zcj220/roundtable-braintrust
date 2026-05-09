@@ -786,6 +786,10 @@ textarea {
   color: var(--warm-soft);
 }
 
+.seat-feedback.seat-feedback-hidden {
+  display: none !important;
+}
+
 .seat-card {
   display: flex;
   justify-content: space-between;
@@ -898,6 +902,18 @@ textarea {
   width: 120px;
 }
 
+.seat-meta-stack {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+
+.seat-source {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+}
+
 .seat-model {
   font-size: 11px;
   color: var(--warm-soft);
@@ -916,20 +932,41 @@ textarea {
   text-align: right;
 }
 
-.seat-assignment-select {
+.seat-assignment-select,
+.seat-order-select,
+.seat-model-select {
+  width: 100%;
+  padding: 8px 34px 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.03)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'%3E%3Cpath fill='%23f4c899' d='M3.1 5.1 7 9l3.9-3.9.9.9L7 10.9 2.2 6z'/%3E%3C/svg%3E") no-repeat right 10px center,
+    #101827;
+  color: var(--text);
+  font-size: 12px;
+  color-scheme: normal;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+}
+
+.seat-assignment-select option,
+.seat-order-select option,
+.seat-model-select option {
+  background: #111a2a;
+  color: #eef3ff;
+}
+
+.seat-assignment-static {
   width: 100%;
   padding: 8px 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.04);
-  color: var(--text);
+  color: var(--warm-soft);
   font-size: 12px;
-  color-scheme: dark;
-}
-
-.seat-assignment-select option {
-  background: #111a2a;
-  color: #eef3ff;
+  text-align: center;
 }
 
 .seat-empty,
@@ -970,6 +1007,41 @@ textarea {
 .modal-backdrop.open {
   opacity: 1;
   pointer-events: auto;
+}
+
+.confirm-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 22;
+  width: min(440px, calc(100vw - 32px));
+  padding: 20px;
+  border-radius: 24px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, calc(-50% + 16px));
+  transition: transform 180ms ease, opacity 180ms ease;
+  display: grid;
+  gap: 16px;
+}
+
+.confirm-modal.open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -50%);
+}
+
+.compact-modal-header {
+  align-items: flex-start;
+}
+
+.confirm-message {
+  color: var(--text);
+  line-height: 1.7;
+}
+
+.confirm-actions {
+  justify-content: flex-end;
 }
 
 .workspace-modal.open {
