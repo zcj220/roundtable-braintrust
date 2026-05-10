@@ -11,7 +11,6 @@ const ROLE_IDENTITY_TIMEOUT_MS = 22000;
 const MODEL_TEST_TIMEOUT_MS = 18000;
 const MIN_RECOMMENDED_ROLE_COUNT = 8;
 const MAX_EXEMPLAR_ROLE_RATIO = 0.25;
-const VOICE_SAMPLE_FILE = "../assets/ttsmaker-file-2026-5-10-20-8-17.mp3";
 
 const modeValues = ["自由讨论", "立场内求最强答案", "客观求真", "灵感探索"];
 const participationValues = ["每轮后表态", "全程旁观"];
@@ -822,7 +821,7 @@ let dbPromise;
 let roleEditorContext = null;
 let modelProfileTemplateId = "";
 let modelProfileEditMode = false;
-let voicePreviewAudio = null;
+let preferredReadAloudVoice = null;
 
 function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -2698,18 +2697,30 @@ function stopReadAloudPlayback() {
   if (window.speechSynthesis) {
     window.speechSynthesis.cancel();
   }
-  if (voicePreviewAudio) {
-    voicePreviewAudio.pause();
-    voicePreviewAudio.currentTime = 0;
-  }
 }
 
-function ensureVoicePreviewAudio() {
-  if (!voicePreviewAudio) {
-    voicePreviewAudio = new Audio(VOICE_SAMPLE_FILE);
-    voicePreviewAudio.preload = "auto";
+function getPreferredReadAloudVoice() {
+  if (!window.speechSynthesis) {
+    return null;
   }
-  return voicePreviewAudio;
+
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) {
+    return null;
+  }
+
+  if (preferredReadAloudVoice && voices.some((voice) => voice.voiceURI === preferredReadAloudVoice.voiceURI)) {
+    return preferredReadAloudVoice;
+  }
+
+  const preferred = state.appLanguage === "en"
+    ? voices.find((voice) => /^en(-|_|$)/i.test(voice.lang) && /female|zira|aria|jenny|samantha/i.test(`${voice.name} ${voice.voiceURI}`))
+      || voices.find((voice) => /^en(-|_|$)/i.test(voice.lang))
+    : voices.find((voice) => /^zh(-|_|$)/i.test(voice.lang) && /xiaoxiao|xiaoyi|female|huihui/i.test(`${voice.name} ${voice.voiceURI}`))
+      || voices.find((voice) => /^zh(-|_|$)/i.test(voice.lang));
+
+  preferredReadAloudVoice = preferred || voices[0] || null;
+  return preferredReadAloudVoice;
 }
 
 function sanitizeReadAloudText(text) {
@@ -2721,19 +2732,8 @@ function sanitizeReadAloudText(text) {
 }
 
 function readTextAloud(text, options = {}) {
-  const { preview = false } = options;
   if (!state.voiceReadEnabled) {
     return;
-  }
-
-  if (preview) {
-    try {
-      const audio = ensureVoicePreviewAudio();
-      audio.currentTime = 0;
-      void audio.play().catch(() => {});
-    } catch (error) {
-      console.error(error);
-    }
   }
 
   const normalized = sanitizeReadAloudText(text);
@@ -2746,6 +2746,11 @@ function readTextAloud(text, options = {}) {
   utterance.lang = state.appLanguage === "en" ? "en-US" : "zh-CN";
   utterance.rate = state.appLanguage === "en" ? 1 : 1.02;
   utterance.pitch = 1;
+  const preferredVoice = getPreferredReadAloudVoice();
+  if (preferredVoice) {
+    utterance.voice = preferredVoice;
+    utterance.lang = preferredVoice.lang || utterance.lang;
+  }
   window.speechSynthesis.speak(utterance);
 }
 
@@ -6671,7 +6676,6 @@ function bindEvents() {
     renderVoiceReadToggle();
     await saveAppState("voiceReadEnabled", state.voiceReadEnabled);
     if (state.voiceReadEnabled) {
-      readTextAloud(langText("朗读已开启，后续新消息会自动朗读。", "Read-aloud is on. New messages will be spoken automatically."), { preview: true });
       updateSeatFeedback(langText("已开启朗读。后续系统新消息会自动朗读。", "Read-aloud enabled. New system messages will be spoken automatically."), "success");
       return;
     }
