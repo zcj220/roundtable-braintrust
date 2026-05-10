@@ -4452,12 +4452,20 @@ function looksLikeContinueDiscussionCommand(content, attachments = []) {
     && !/(新任务|新话题|换个话题|重新整理任务|重新生成人物)/.test(normalized);
 }
 
-function canResumeCompletedDiscussion() {
+function hasReusableCurrentRoster() {
   return !!(
-    state.seatsReady
+    state.topicConfirmed
+    && state.seatsReady
     && !state.generatingSeats
     && !state.discussionRunning
-    && state.latestReportText
+    && state.selectedIds instanceof Set
+    && state.selectedIds.size > 0
+  );
+}
+
+function canResumeCompletedDiscussion() {
+  return !!(
+    hasReusableCurrentRoster()
     && Array.isArray(state.discussionRoundNotes)
     && state.discussionRoundNotes.length
   );
@@ -6962,6 +6970,12 @@ function bindEvents() {
 
   discussionStream.addEventListener("click", (event) => {
     if (event.target.closest(".js-confirm-topic")) {
+      if (hasReusableCurrentRoster()) {
+        setSpeakerCard(langText("沿用当前人物", "Reusing Current Roster"), langText("同一话题不再重配", "No regeneration for the same topic"), langText("当前话题的人物已经确定，系统将沿用这批人物继续讨论，不会重新推荐。", "The roster for this topic is already set. The system will reuse it and will not regenerate personas."), "系");
+        updateSeatFeedback(langText("当前话题的人物已经确定，不会重新生成人物。", "The roster for this topic is already set, so personas will not be regenerated."), "success");
+        void syncCurrentTopicSnapshot();
+        return;
+      }
       startSeatGeneration();
       return;
     }
@@ -7053,6 +7067,37 @@ function bindEvents() {
         runDiscussionFlow();
         return;
       }
+    }
+
+    if (hasReusableCurrentRoster() && looksLikeContinueDiscussionCommand(content, attachments)) {
+      state.discussionRoundNotes = [
+        ...state.discussionRoundNotes,
+        {
+          round: `${getCompletedRoundCount()} 轮后续谈`,
+          turns: [
+            {
+              role: {
+                id: "user-round-input",
+                name: "用户",
+                seat: "用户续谈",
+                description: "同一话题中由用户发出的继续讨论要求。",
+                systemPrompt: "这是用户要求继续讨论的补充说明。",
+              },
+              assignmentLabel: langText("同题续谈要求", "Continuation request for the same topic"),
+              text: content || langText("请沿用当前人物继续讨论。", "Please continue with the current roster."),
+            },
+          ],
+          moderatorSummary: `用户要求继续讨论，沿用当前人物：${content || "继续讨论"}`,
+        },
+      ];
+      state.discussionRounds = Math.max(1, Number(discussionRoundsInput.value || state.discussionRounds || 1)) + 1;
+      discussionRoundsInput.value = String(state.discussionRounds);
+      setSpeakerCard(langText("继续讨论中", "Continuing Discussion"), langText("沿用当前人物继续", "Continuing with the current roster"), langText(`已识别为同一话题续谈，将沿用当前人物进入第 ${state.discussionRounds} 轮。`, `This was recognized as a continuation of the same topic. The current roster will be reused for round ${state.discussionRounds}.`), "系");
+      updateSeatFeedback(langText("已识别为同题续谈，将沿用当前人物继续，不会重新生成人物。", "Same-topic continuation detected. The current roster will be reused without regenerating personas."), "success");
+      updateLiveStatus(langText("继续讨论：沿用当前人物。", "Continuing discussion with the current roster."), "pending");
+      void syncCurrentTopicSnapshot();
+      runDiscussionFlow();
+      return;
     }
 
     setSpeakerCard(langText("主 AI 整理中", "Primary AI Processing"), langText("正在调用真实模型", "Calling the live model"), langText("会先用你已接入的主 AI 整理任务，再回来让你确认。", "The connected primary AI will first organize the task and then return for your confirmation."), "系");
