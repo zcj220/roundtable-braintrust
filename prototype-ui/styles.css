@@ -1657,7 +1657,7 @@ select.round-input option {
 .connected-model-card {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
   padding: 12px 14px;
   border-radius: 18px;
@@ -1667,19 +1667,28 @@ select.round-input option {
 
 .connected-model-main {
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .connected-model-card strong {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
   font-size: 15px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.connected-model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .model-latency-pill {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 11px;
@@ -1687,13 +1696,6 @@ select.round-input option {
   color: var(--muted);
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.connected-model-card p {
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
 }
 
 .connected-model-card.active {
@@ -1705,8 +1707,14 @@ select.round-input option {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
+  flex: 0 0 auto;
+}
+
+.connected-model-actions .model-latency-pill {
+  margin-right: 2px;
+  white-space: nowrap;
 }
 
 .connected-model-actions .ghost-link {

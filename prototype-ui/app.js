@@ -4209,11 +4209,14 @@ function renderConnectedModelList() {
       return `
         <article class="connected-model-card ${isHost ? "active" : ""}">
           <div class="connected-model-main">
-            <strong><span class="model-health-dot ${getProfileHealth(profile)}"></span>${escapeHtml(profile.displayName)}<span class="model-latency-pill">${escapeHtml(formatProfileLatency(profile))}</span></strong>
-            <p>${escapeHtml(profile.providerName)} · ${escapeHtml(profile.modelId)}</p>
-            ${isHost ? `<div class="connected-model-host"><span class="profile-tag active">${escapeHtml(t("hostAiTag"))}</span></div>` : ""}
+            <strong>
+              <span class="model-health-dot ${getProfileHealth(profile)}"></span>
+              <span class="connected-model-name">${escapeHtml(profile.displayName)}</span>
+              ${isHost ? `<span class="profile-tag active">${escapeHtml(t("hostAiTag"))}</span>` : ""}
+            </strong>
           </div>
           <div class="connected-model-actions">
+            <span class="model-latency-pill">${escapeHtml(formatProfileLatency(profile))}</span>
             <button class="ghost-link" data-action="test-profile" data-profile-id="${profile.id}" type="button">${escapeHtml(t("testProfile"))}</button>
             <button class="ghost-link" data-action="edit-profile" data-profile-id="${profile.id}" type="button">${escapeHtml(t("editProfile"))}</button>
             <button class="icon-button compact danger" data-action="delete-profile" data-profile-id="${profile.id}" type="button" aria-label="${escapeHtml(t("deleteProfile"))}" title="${escapeHtml(t("deleteProfile"))}">
