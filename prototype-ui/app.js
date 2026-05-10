@@ -2287,7 +2287,7 @@ const UI_TEXT = {
     connectedModelListNote: "这里直接展示已接入模型。新增、修改或切换模板时，点击右侧“配置模型”打开弹窗操作。",
     hostModelTitle: "主持 AI",
     hostModelSelectLabel: "谁来担任主持 AI",
-    hostModelNote: "这里只指定主持 AI 用哪个已接入模型。其他人物席位仍然在席位卡里各自选择模型，不在这里统一覆盖。",
+    hostModelNote: "这里只指定主持 AI 用哪个已接入模型。建议优先选择测试延迟更低的模型做主持。其他人物席位仍然在席位卡里各自选择模型，不在这里统一覆盖。",
     peopleLibraryCurrentTag: "当前库",
     peopleLibraryOpen: "查看",
     discussionSettingsTitle: "讨论设置",
@@ -2396,7 +2396,7 @@ const UI_TEXT = {
     connectedModelListNote: "This area shows the connected models directly. To add, edit, or switch templates, use the button on the right to open the configuration modal.",
     hostModelTitle: "Host AI",
     hostModelSelectLabel: "Which model should act as the host AI",
-    hostModelNote: "Only the host AI is assigned here. Other personas still choose their own model from their seat cards and are not overridden globally.",
+    hostModelNote: "This only assigns the host AI. Prefer lower-latency tested models for the host when possible. Other personas still choose their own model from their seat cards and are not overridden globally.",
     peopleLibraryCurrentTag: "Current Library",
     peopleLibraryOpen: "Open",
     discussionSettingsTitle: "Discussion Settings",
@@ -3898,6 +3898,7 @@ function normalizeProfile(profile) {
     return {
       ...builtin,
       ...profile,
+      lastTestLatencyMs: Number(profile.lastTestLatencyMs) > 0 ? Number(profile.lastTestLatencyMs) : 0,
       compatibility: profile.compatibility === "anthropic" ? "anthropic" : builtin.compatibility || "openai",
       locked: true,
       configured: !!profile.configured,
@@ -3909,8 +3910,34 @@ function normalizeProfile(profile) {
     locked: false,
     configured: profile.configured !== false,
     ...profile,
+    lastTestLatencyMs: Number(profile.lastTestLatencyMs) > 0 ? Number(profile.lastTestLatencyMs) : 0,
     compatibility: profile.compatibility === "anthropic" ? "anthropic" : "openai",
   };
+}
+
+function getProfileLatencyScore(profile) {
+  const latency = Number(profile?.lastTestLatencyMs || 0);
+  return latency > 0 ? latency : Number.MAX_SAFE_INTEGER;
+}
+
+function sortConfiguredProfilesByLatency(profiles) {
+  return [...profiles].sort((left, right) => {
+    const latencyDiff = getProfileLatencyScore(left) - getProfileLatencyScore(right);
+    if (latencyDiff !== 0) {
+      return latencyDiff;
+    }
+    return (left.displayName || "").localeCompare(right.displayName || "", "zh-CN");
+  });
+}
+
+function formatProfileLatency(profile) {
+  const latency = Number(profile?.lastTestLatencyMs || 0);
+  if (!(latency > 0)) {
+    return langText("未测速", "No latency yet");
+  }
+  return latency < 1000
+    ? langText(`延迟 ${latency}ms`, `Latency ${latency}ms`)
+    : langText(`延迟 ${(latency / 1000).toFixed(2)}s`, `Latency ${(latency / 1000).toFixed(2)}s`);
 }
 
 function getSelectableBuiltinProfiles(currentTemplateId = modelProfileTemplateId || profileId.value || "") {
@@ -4150,7 +4177,7 @@ function renderAttachmentStrip() {
 
 function renderModelMappings() {
   sanitizeSeatModelAssignments();
-  const configuredProfiles = getConfiguredProfiles();
+  const configuredProfiles = sortConfiguredProfilesByLatency(getConfiguredProfiles());
   if (!hostModelSelect) {
     return;
   }
@@ -4164,13 +4191,13 @@ function renderModelMappings() {
     state.mappings.main = configuredProfiles[0].id;
   }
   hostModelSelect.innerHTML = configuredProfiles
-    .map((profile) => `<option value="${profile.id}" ${profile.id === state.mappings.main ? "selected" : ""}>${escapeHtml(profile.displayName)}</option>`)
+    .map((profile) => `<option value="${profile.id}" ${profile.id === state.mappings.main ? "selected" : ""}>${escapeHtml(profile.displayName)} · ${escapeHtml(formatProfileLatency(profile))}</option>`)
     .join("");
   hostModelSelect.disabled = state.discussionRunning;
 }
 
 function renderConnectedModelList() {
-  const configuredProfiles = getConfiguredProfiles();
+  const configuredProfiles = sortConfiguredProfilesByLatency(getConfiguredProfiles());
   if (!configuredProfiles.length) {
     connectedModelList.innerHTML = `<div class="empty-panel">${escapeHtml(t("connectedModelsEmpty"))}</div>`;
     return;
@@ -4182,7 +4209,7 @@ function renderConnectedModelList() {
       return `
         <article class="connected-model-card ${isHost ? "active" : ""}">
           <div class="connected-model-main">
-            <strong><span class="model-health-dot ${getProfileHealth(profile)}"></span>${escapeHtml(profile.displayName)}</strong>
+            <strong><span class="model-health-dot ${getProfileHealth(profile)}"></span>${escapeHtml(profile.displayName)}<span class="model-latency-pill">${escapeHtml(formatProfileLatency(profile))}</span></strong>
             <p>${escapeHtml(profile.providerName)} · ${escapeHtml(profile.modelId)}</p>
             ${isHost ? `<div class="connected-model-host"><span class="profile-tag active">${escapeHtml(t("hostAiTag"))}</span></div>` : ""}
           </div>
@@ -6302,6 +6329,7 @@ async function testProfileConnectivity() {
 
   try {
     let response;
+    const startedAt = performance.now();
     if (profile.compatibility === "anthropic") {
       response = await fetch(joinUrl(profile.baseUrl, profile.endpointPath || "/messages"), {
         method: "POST",
@@ -6330,19 +6358,20 @@ async function testProfileConnectivity() {
         }),
       });
     }
+    const latencyMs = Math.max(1, Math.round(performance.now() - startedAt));
 
     if (!response.ok) {
       if (existing) {
-        await saveModelProfile({ ...existing, ...profile, lastTestStatus: "error" });
+        await saveModelProfile({ ...existing, ...profile, lastTestStatus: "error", lastTestLatencyMs: latencyMs });
       }
       setProfileTestStatus(`测试失败 ${response.status}`, "error");
       return;
     }
 
     if (existing) {
-      await saveModelProfile({ ...existing, ...profile, lastTestStatus: "success" });
+      await saveModelProfile({ ...existing, ...profile, lastTestStatus: "success", lastTestLatencyMs: latencyMs });
     }
-    setProfileTestStatus("测试通过", "success");
+    setProfileTestStatus(langText(`测试通过 · ${formatProfileLatency({ lastTestLatencyMs: latencyMs })}`, `Test passed · ${formatProfileLatency({ lastTestLatencyMs: latencyMs })}`), "success");
   } catch (error) {
     console.error(error);
     if (existing) {
@@ -6367,6 +6396,7 @@ async function testStoredProfileConnectivity(profileIdValue) {
   try {
     let response;
     const requestControl = createRequestSignal(null, MODEL_TEST_TIMEOUT_MS);
+    const startedAt = performance.now();
     if (profile.compatibility === "anthropic") {
       response = await fetch(joinUrl(profile.baseUrl, profile.endpointPath || "/messages"), {
         method: "POST",
@@ -6393,16 +6423,17 @@ async function testStoredProfileConnectivity(profileIdValue) {
         body: JSON.stringify(buildOpenAiCompatibleRequestBody(profile, "请只回复：通了", 16)),
       });
     }
+    const latencyMs = Math.max(1, Math.round(performance.now() - startedAt));
     requestControl.cleanup();
 
     const nextStatus = response.ok ? "success" : "error";
-    await saveModelProfile({ ...existing, lastTestStatus: nextStatus });
-    updateSeatFeedback(response.ok ? `测试通过：${profile.displayName}` : formatHttpFailureMessage(profile, response, "测试失败"), response.ok ? "success" : "pending");
+    await saveModelProfile({ ...existing, lastTestStatus: nextStatus, lastTestLatencyMs: latencyMs });
+    updateSeatFeedback(response.ok ? `${profile.displayName} 测试通过，${formatProfileLatency({ lastTestLatencyMs: latencyMs })}` : formatHttpFailureMessage(profile, response, "测试失败"), response.ok ? "success" : "pending");
     if (profileId.value === profile.id) {
-      setProfileTestStatus(response.ok ? "测试通过" : formatHttpFailureMessage(profile, response, "测试失败"), response.ok ? "success" : "error");
+      setProfileTestStatus(response.ok ? langText(`测试通过 · ${formatProfileLatency({ lastTestLatencyMs: latencyMs })}`, `Test passed · ${formatProfileLatency({ lastTestLatencyMs: latencyMs })}`) : formatHttpFailureMessage(profile, response, "测试失败"), response.ok ? "success" : "error");
     }
   } catch (error) {
-    await saveModelProfile({ ...existing, lastTestStatus: "error" });
+    await saveModelProfile({ ...existing, lastTestStatus: "error", lastTestLatencyMs: 0 });
     const timeoutMessage = error?.name === "AbortError" ? `测试超时：${profile.displayName}` : `测试失败：${profile.displayName}`;
     updateSeatFeedback(timeoutMessage, "pending");
     if (profileId.value === profile.id) {
