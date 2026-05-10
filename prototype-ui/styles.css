@@ -1383,10 +1383,19 @@ select.round-input option {
 .seat-chip-row {
   align-items: flex-start;
   min-width: 0;
+  width: 100%;
+  flex-wrap: nowrap;
 }
 
 .seat-chip-row > div {
   min-width: 0;
+  flex: 1 1 auto;
+}
+
+.seat-chip-row > .seat-avatar,
+.seat-chip-row > .library-avatar,
+.seat-chip-row > .picker-avatar {
+  flex: 0 0 40px;
 }
 
 .role-card-head {
