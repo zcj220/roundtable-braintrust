@@ -382,8 +382,13 @@
           <div class="inline-actions">
             <button class="action-primary compact-primary" id="start-discussion" type="button">开始讨论</button>
             <button class="action-secondary compact-primary" id="stop-discussion" type="button" disabled>结束讨论</button>
-            <button class="ghost-link compact-link" id="toggle-ai-role-recommendation" type="button">AI 推荐人物：开</button>
             <button class="ghost-link add-seat-trigger" id="open-seat-picker" type="button">打开选角器</button>
+            <button class="seat-inline-toggle" id="toggle-ai-role-recommendation" type="button" aria-pressed="true"></button>
+            <button class="seat-voice-toggle" id="toggle-voice-read" type="button" aria-pressed="false" aria-label="切换朗读">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M5 9h4l5-4v14l-5-4H5V9Zm11.2-1.8a1 1 0 0 1 1.4 0A7.9 7.9 0 0 1 20 12a7.9 7.9 0 0 1-2.4 4.8 1 1 0 1 1-1.4-1.4A5.9 5.9 0 0 0 18 12a5.9 5.9 0 0 0-1.8-3.4 1 1 0 0 1 0-1.4Zm-2.8 2.8a1 1 0 0 1 1.4 0A4 4 0 0 1 16 12a4 4 0 0 1-1.2 2.8 1 1 0 0 1-1.4-1.4A2 2 0 0 0 14 12a2 2 0 0 0-.6-1.4 1 1 0 0 1 0-1.4Z" fill="currentColor"></path>
+              </svg>
+            </button>
           </div>
           <p class="seat-feedback seat-feedback-hidden" id="seat-feedback" aria-hidden="true">人物尚未生成</p>
           <div class="seat-stack" id="seat-stack"></div>

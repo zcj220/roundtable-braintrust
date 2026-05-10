@@ -11,6 +11,7 @@ const ROLE_IDENTITY_TIMEOUT_MS = 22000;
 const MODEL_TEST_TIMEOUT_MS = 18000;
 const MIN_RECOMMENDED_ROLE_COUNT = 8;
 const MAX_EXEMPLAR_ROLE_RATIO = 0.25;
+const VOICE_SAMPLE_FILE = "../assets/ttsmaker-file-2026-5-10-20-8-17.mp3";
 
 const modeValues = ["自由讨论", "立场内求最强答案", "客观求真", "灵感探索"];
 const participationValues = ["每轮后表态", "全程旁观"];
@@ -682,6 +683,7 @@ const state = {
   discussionRoundNotes: [],
   recommendedRoleGenerationMeta: null,
   aiAutoRecommendEnabled: true,
+  voiceReadEnabled: false,
   topicConfirmed: false,
   seatsReady: false,
   generatingSeats: false,
@@ -811,6 +813,7 @@ const newTopicButton = document.getElementById("new-topic");
 const startDiscussionButton = document.getElementById("start-discussion");
 const stopDiscussionButton = document.getElementById("stop-discussion");
 const toggleAiRoleRecommendationButton = document.getElementById("toggle-ai-role-recommendation");
+const toggleVoiceReadButton = document.getElementById("toggle-voice-read");
 const seatFeedback = document.getElementById("seat-feedback");
 const seatStack = document.getElementById("seat-stack");
 const seatConfigProgress = document.getElementById("seat-config-progress");
@@ -819,6 +822,7 @@ let dbPromise;
 let roleEditorContext = null;
 let modelProfileTemplateId = "";
 let modelProfileEditMode = false;
+let voicePreviewAudio = null;
 
 function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -2350,6 +2354,7 @@ function applyLanguageToStaticUi() {
     openSeatPickerButton.textContent = t("openSeatPicker");
   }
   renderAiRoleRecommendationToggle();
+  renderVoiceReadToggle();
   if (closePeopleLibrary) {
     closePeopleLibrary.textContent = roleEditor.classList.contains("hidden") ? t("exitLibrary") : t("returnToList");
   }
@@ -2668,10 +2673,91 @@ function renderAiRoleRecommendationToggle() {
   if (!toggleAiRoleRecommendationButton) {
     return;
   }
-  toggleAiRoleRecommendationButton.textContent = state.aiAutoRecommendEnabled
-    ? langText("AI 推荐人物：开", "AI Personas: On")
-    : langText("AI 推荐人物：关", "AI Personas: Off");
-  toggleAiRoleRecommendationButton.classList.toggle("cool", state.aiAutoRecommendEnabled);
+  toggleAiRoleRecommendationButton.innerHTML = `
+    <span class="seat-toggle-label">${escapeHtml(langText("AI 推荐人物", "AI Personas"))}</span>
+    <span class="seat-toggle-track" aria-hidden="true"></span>
+  `;
+  toggleAiRoleRecommendationButton.classList.toggle("is-on", state.aiAutoRecommendEnabled);
+  toggleAiRoleRecommendationButton.setAttribute("aria-pressed", state.aiAutoRecommendEnabled ? "true" : "false");
+}
+
+function renderVoiceReadToggle() {
+  if (!toggleVoiceReadButton) {
+    return;
+  }
+  const label = state.voiceReadEnabled
+    ? langText("关闭朗读", "Turn read-aloud off")
+    : langText("开启朗读", "Turn read-aloud on");
+  toggleVoiceReadButton.classList.toggle("is-on", state.voiceReadEnabled);
+  toggleVoiceReadButton.setAttribute("aria-pressed", state.voiceReadEnabled ? "true" : "false");
+  toggleVoiceReadButton.setAttribute("aria-label", label);
+  toggleVoiceReadButton.title = label;
+}
+
+function stopReadAloudPlayback() {
+  if (window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+  if (voicePreviewAudio) {
+    voicePreviewAudio.pause();
+    voicePreviewAudio.currentTime = 0;
+  }
+}
+
+function ensureVoicePreviewAudio() {
+  if (!voicePreviewAudio) {
+    voicePreviewAudio = new Audio(VOICE_SAMPLE_FILE);
+    voicePreviewAudio.preload = "auto";
+  }
+  return voicePreviewAudio;
+}
+
+function sanitizeReadAloudText(text) {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .replace(/[★•]/g, " ")
+    .trim()
+    .slice(0, 800);
+}
+
+function readTextAloud(text, options = {}) {
+  const { preview = false } = options;
+  if (!state.voiceReadEnabled) {
+    return;
+  }
+
+  if (preview) {
+    try {
+      const audio = ensureVoicePreviewAudio();
+      audio.currentTime = 0;
+      void audio.play().catch(() => {});
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  const normalized = sanitizeReadAloudText(text);
+  if (!normalized || !window.speechSynthesis) {
+    return;
+  }
+
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(normalized);
+  utterance.lang = state.appLanguage === "en" ? "en-US" : "zh-CN";
+  utterance.rate = state.appLanguage === "en" ? 1 : 1.02;
+  utterance.pitch = 1;
+  window.speechSynthesis.speak(utterance);
+}
+
+function maybeReadAppendedMessage(element) {
+  if (!state.voiceReadEnabled || !element || element.classList.contains("user")) {
+    return;
+  }
+  const body = element.querySelector(".chat-bubble p")?.textContent?.trim() || "";
+  if (!body) {
+    return;
+  }
+  readTextAloud(body);
 }
 
 function getMappedProfile(assignment) {
@@ -3436,6 +3522,7 @@ function createMessageMarkup({ speakerId, label, sublabel = "", body, avatarLabe
 
 function appendMarkup(markup) {
   discussionStream.insertAdjacentHTML("beforeend", markup);
+  maybeReadAppendedMessage(discussionStream.lastElementChild);
   if (state.autoFollow) {
     scrollToLatest();
   }
@@ -3565,7 +3652,7 @@ function roundRoleOptionsMarkup(selectedValue) {
 }
 
 function setSeatAssignment(roleId, nextAssignment) {
-  if (nextAssignment !== "participant") {
+  if (nextAssignment === "judge") {
     Object.keys(state.seatAssignments).forEach((currentRoleId) => {
       if (currentRoleId !== roleId && state.seatAssignments[currentRoleId] === nextAssignment) {
         state.seatAssignments[currentRoleId] = "participant";
@@ -5599,6 +5686,7 @@ async function hydrateState() {
   state.peopleRoles = (await dbGetAll(ROLE_STORE)).map(ensureRoleDefaults);
   state.modelProfiles = (await dbGetAll(PROFILE_STORE)).map(normalizeProfile);
   state.appLanguage = await loadAppState("appLanguage", "zh");
+  state.voiceReadEnabled = await loadAppState("voiceReadEnabled", false);
   state.mappings = await loadAppState("modelMappings", {
     main: defaultProfiles[0].id,
     challenger: defaultProfiles[1].id,
@@ -6578,6 +6666,19 @@ function bindEvents() {
     void syncCurrentTopicSnapshot();
   });
 
+  toggleVoiceReadButton?.addEventListener("click", async () => {
+    state.voiceReadEnabled = !state.voiceReadEnabled;
+    renderVoiceReadToggle();
+    await saveAppState("voiceReadEnabled", state.voiceReadEnabled);
+    if (state.voiceReadEnabled) {
+      readTextAloud(langText("朗读已开启，后续新消息会自动朗读。", "Read-aloud is on. New messages will be spoken automatically."), { preview: true });
+      updateSeatFeedback(langText("已开启朗读。后续系统新消息会自动朗读。", "Read-aloud enabled. New system messages will be spoken automatically."), "success");
+      return;
+    }
+    stopReadAloudPlayback();
+    updateSeatFeedback(langText("已关闭朗读。", "Read-aloud disabled."), "");
+  });
+
   openSeatPickerRoleEditor.addEventListener("click", () => {
     closeSeatPickerModal();
     openRoleEditorForCreate("自定义补位");
@@ -6754,7 +6855,9 @@ function bindEvents() {
       return;
     }
     setSeatAssignment(select.dataset.roleId, select.value);
-    ensureCoreAssignments();
+    if (select.value === "judge" || !getRoleByAssignment("judge")) {
+      ensureCoreAssignments();
+    }
     renderSeatStack();
     const role = getRoleById(select.dataset.roleId);
     updateSeatFeedback(langText(`已设置 ${role?.name || "人物"} 本轮扮演：${getRoundRoleLabel(select.value)}`, `Set ${role?.name || "persona"} as: ${getRoundRoleLabel(select.value)}`), "success");
