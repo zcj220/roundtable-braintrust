@@ -495,13 +495,14 @@ button {
 }
 
 .live-status-banner.loading-dots::after,
-#speaker-description.loading-dots::after {
-  content: "...";
+#speaker-name.loading-dots::after {
+  content: "......";
   display: inline-block;
-  width: 0;
+  width: 3em;
   overflow: hidden;
   vertical-align: bottom;
-  animation: loading-dots 1.2s steps(4, end) infinite;
+  white-space: nowrap;
+  animation: loading-dots 1.2s steps(7, end) infinite;
 }
 
 .live-status-banner.success {
@@ -771,6 +772,7 @@ textarea {
   align-items: start;
   margin-top: 12px;
   padding: 12px;
+  min-height: 156px;
 }
 
 .speaker-avatar {
@@ -779,8 +781,39 @@ textarea {
   border-radius: 16px;
 }
 
+.speaker-copy {
+  min-height: 132px;
+}
+
 .speaker-copy h3 {
   font-size: 17px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0;
+  min-height: 1.5em;
+  margin-bottom: 2px;
+}
+
+.speaker-copy p {
+  margin: 0;
+}
+
+#speaker-role {
+  min-height: 0;
+}
+
+#speaker-role:empty {
+  display: none;
+}
+
+#speaker-description {
+  min-height: 4.5em;
+  max-height: 4.5em;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .compact-config-grid {
@@ -905,8 +938,8 @@ select.round-input option {
 
 .seat-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
   align-items: flex-start;
 }
 
@@ -927,7 +960,7 @@ select.round-input option {
 .picker-card-main {
   min-width: 0;
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .seat-traits,
@@ -971,6 +1004,27 @@ select.round-input option {
   text-overflow: initial;
   font-size: 11px;
   line-height: 1.45;
+}
+
+.seat-card p {
+  font-size: 12px;
+  line-height: 1.5;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.seat-card .seat-traits {
+  grid-template-columns: 1fr;
+  gap: 3px;
+}
+
+.seat-card .seat-traits span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.35;
 }
 
 .seat-traits span strong,
@@ -1197,18 +1251,31 @@ select.round-input option {
 
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-auto-rows: max-content;
   gap: 12px;
   min-height: 0;
   overflow: auto;
   padding-right: 4px;
   align-items: start;
+  align-content: start;
+  justify-items: stretch;
 }
 
-.library-card,
+.library-card {
+  display: grid;
+  grid-template-rows: 44px auto auto auto;
+  gap: 10px;
+  min-height: 356px;
+  height: auto;
+  align-self: start;
+  align-content: start;
+  overflow: hidden;
+}
+
 .picker-card {
   display: grid;
-  grid-template-rows: auto minmax(132px, auto) auto auto;
+  grid-template-rows: 44px auto auto auto;
   gap: 10px;
   min-height: 356px;
   height: auto;
@@ -1224,23 +1291,51 @@ select.round-input option {
   background: linear-gradient(180deg, rgba(216, 139, 68, 0.12), rgba(255, 255, 255, 0.03));
 }
 
-.library-card h3,
+.library-card h3 {
+  margin-top: 2px;
+  font-size: 15px;
+  line-height: 1.28;
+}
+
 .picker-card h3 {
   margin-top: 2px;
   font-size: 15px;
   line-height: 1.28;
 }
 
-.seat-card h3,
-.role-title {
+.library-card h3,
+.picker-card h3 {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  min-height: calc(1.28em * 2);
+}
+
+.seat-card h3 {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  min-height: calc(1.28em * 2);
+}
+
+.seat-card .role-title-stack {
+  min-height: calc(1.28em * 2);
 }
 
 .role-title-stack {
   min-width: 0;
+  display: grid;
+  align-content: start;
+}
+
+.library-card .role-title-stack {
+  min-height: calc(1.28em * 2);
+}
+
+.picker-card .role-title-stack {
+  min-height: calc(1.28em * 2);
 }
 
 .library-card .seat-role,
@@ -1248,19 +1343,32 @@ select.round-input option {
   font-size: 11px;
 }
 
-.library-card p,
+.library-card p {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .picker-card p {
   font-size: 12px;
   line-height: 1.55;
 }
 
 .library-card > p,
-.picker-card > p,
-.card-description {
+.library-card .card-description {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 7;
+  -webkit-line-clamp: 4;
+  min-height: calc(1.55em * 4);
+}
+
+.picker-card > p,
+.picker-card .card-description {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  min-height: calc(1.55em * 3);
 }
 
 .seat-chip-row,
@@ -1280,7 +1388,7 @@ select.round-input option {
 
 .role-card-head {
   align-items: flex-start;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   flex-wrap: nowrap;
 }
@@ -1299,6 +1407,47 @@ select.round-input option {
   justify-content: space-between;
   gap: 12px;
   margin-top: auto;
+}
+
+.seat-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.library-card .mini-tags {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-top: 0;
+  align-content: start;
+  min-height: calc(1.45em * 3 + 4px);
+}
+
+.picker-card .mini-tags {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-top: 0;
+  align-content: start;
+  min-height: calc(1.45em * 3);
+}
+
+.library-card .mini-tags span {
+  display: block;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.picker-card .mini-tags span {
+  display: block;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .card-actions-right {
@@ -1364,6 +1513,24 @@ select.round-input option {
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(180deg, rgba(11, 18, 33, 0.98), rgba(13, 22, 39, 0.98));
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.role-ai-assist-block {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(94, 199, 212, 0.16);
+  background: rgba(94, 199, 212, 0.06);
+}
+
+.role-ai-actions {
+  align-items: center;
+}
+
+.compact-feedback {
+  margin: 0;
+  flex: 1 1 260px;
 }
 
 .connected-model-list {
@@ -1678,6 +1845,7 @@ body.theme-light .search-input,
 body.theme-light .role-editor input,
 body.theme-light .role-editor textarea,
 body.theme-light .role-editor select,
+body.theme-light .role-ai-assist-block,
 body.theme-light .settings-form input,
 body.theme-light .settings-form select,
 body.theme-light .chip-button,

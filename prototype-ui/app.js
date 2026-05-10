@@ -4,6 +4,10 @@ const ROLE_STORE = "peopleRoles";
 const PROFILE_STORE = "modelProfiles";
 const APP_STATE_STORE = "appState";
 const MODEL_REQUEST_TIMEOUT_MS = 70000;
+const ROLE_PLANNING_TIMEOUT_MS = 35000;
+const ROLE_GENERATION_TIMEOUT_MS = 55000;
+const ROLE_EMERGENCY_TIMEOUT_MS = 40000;
+const ROLE_IDENTITY_TIMEOUT_MS = 22000;
 const MODEL_TEST_TIMEOUT_MS = 18000;
 const MIN_RECOMMENDED_ROLE_COUNT = 8;
 const MAX_EXEMPLAR_ROLE_RATIO = 0.25;
@@ -33,7 +37,7 @@ const ROLE_COLORS = ["sky", "gold", "amber", "rose", "teal", "violet", "emerald"
 
 function buildBaseRoleSystemPrompt({ name, seat, description, stance, method, temper }) {
   return [
-    `你现在扮演一位${name}。你的身份定位是：${seat}。`,
+    `你现在扮演一位${name}。你长期最稳定的观察重心是：${seat}。`,
     `你的职业背景与长期经验是：${description}`,
     `你的核心倾向是：${stance}。你最常用的方法是：${method}。你的表达气质应保持：${temper}。`,
     "你不是一个抽象标签，而是一个长期在一线、研究或实务里反复处理这类问题的人。发言时先体现这个身份的人会怎么看、先抓什么、最担心什么，再给出判断。",
@@ -349,6 +353,25 @@ function getDisplayRoleName(role) {
   return role?.source === "recommended" ? sanitizeGeneratedRoleName(role.name) : role?.name || "";
 }
 
+function getRoleCardTitle(role) {
+  if (!role) {
+    return "";
+  }
+  const preferredTitle = role.source === "recommended"
+    ? String(role.seat || role.name || "").trim()
+    : String(role.name || role.seat || "").trim();
+  return shortenText(preferredTitle, role.source === "recommended" ? 14 : 18);
+}
+
+function getCompactRoleDescription(role) {
+  const raw = String(role?.description || "").replace(/\s+/g, " ").trim();
+  if (!raw) {
+    return "";
+  }
+  const firstClause = raw.split(/[。！？]/)[0]?.trim() || raw;
+  return shortenText(firstClause, 30);
+}
+
 function canEditRole(role) {
   return !!role && role.source !== "recommended";
 }
@@ -357,7 +380,8 @@ function canDeleteRole(role) {
   return !!role && role.source !== "recommended";
 }
 
-function buildRoleTraitsMarkup(role) {
+function buildRoleTraitsMarkup(role, options = {}) {
+  const { compact = false } = options;
   const traitPairs = [
     [langText("立场", "Stance"), role.traits?.stance],
     [langText("专长", "Method"), role.traits?.method],
@@ -365,8 +389,46 @@ function buildRoleTraitsMarkup(role) {
   ].filter(([, value]) => value);
 
   return traitPairs
-    .map(([label, value]) => `<span><strong>${label}：</strong>${escapeHtml(value)}</span>`)
+    .map(([label, value]) => {
+      const text = compact ? shortenText(String(value || ""), 14) : String(value || "");
+      return `<span title="${escapeHtml(String(value || ""))}"><strong>${label}：</strong>${escapeHtml(text)}</span>`;
+    })
     .join("");
+}
+
+function buildRoleLibraryCardMarkup(role, options = {}) {
+  const { selected = false, editable = false, deletable = false, recommended = false, savedFavorite = false } = options;
+  const traits = buildRoleTraitsMarkup(role);
+  const favoriteAction = recommended
+    ? `<button class="card-favorite ${savedFavorite ? "saved" : ""}" data-action="favorite" type="button" aria-label="${savedFavorite ? "取消收藏" : "收藏到人物库"}" title="${savedFavorite ? "取消收藏" : "收藏到人物库"}">★</button>`
+    : "";
+  const editAction = editable
+    ? `<button class="card-action" data-action="edit" type="button">${escapeHtml(langText("修改", "Edit"))}</button>`
+    : "";
+  const deleteAction = deletable
+    ? `<button class="card-action" data-action="delete" type="button">${escapeHtml(langText("删除", "Delete"))}</button>`
+    : "";
+  const footerMarkup = editAction || deleteAction || favoriteAction
+    ? `<div class="card-actions-right">${editAction}${deleteAction}${favoriteAction}</div>`
+    : `<span class="role-lock-note">${escapeHtml(langText("预置人物，不可修改或删除", "Built-in persona cannot be edited or deleted"))}</span>`;
+
+  return `
+    <article class="${recommended ? "picker-card" : "library-card"} ${selected ? "selected" : ""}" data-role-id="${role.id}">
+      <div class="role-card-head">
+        <div class="seat-chip-row">
+          <span class="${recommended ? "picker-avatar" : "library-avatar"}" style="${avatarStyle(role)}">${escapeHtml(roleAvatar(role))}</span>
+          <div class="role-title-stack">
+            <h3 class="role-title">${escapeHtml(getDisplayRoleName(role))}</h3>
+          </div>
+        </div>
+      </div>
+      <p class="card-description">${escapeHtml(role.description || "")}</p>
+      <div class="mini-tags">${traits}</div>
+      <div class="role-card-footer">
+        ${footerMarkup}
+      </div>
+    </article>
+  `;
 }
 
 const RECOMMENDED_ROLE_IDENTITY_SUMMARIES = {
@@ -401,8 +463,8 @@ function buildRecommendedRoleIdentitySummary(role) {
   const method = role?.traits?.method || langText("针对性分析", "targeted analysis");
   const temper = role?.traits?.temper || langText("冷静", "calm");
   return langText(
-    `${role?.name || "该人物"}的身份定位是${role?.seat || "专题分析者"}，长期按“${method}”的方法处理问题，通常以“${stance}”的倾向观察局面，表达气质偏${temper}。`,
-    `${role?.name || "This persona"} serves as a ${role?.seat || "topic analyst"}, usually works through ${method}, tends toward ${stance}, and speaks in a ${temper} manner.`
+    `${role?.name || "该人物"}长期按“${method}”的方法处理问题，通常以“${stance}”的倾向观察局面，表达气质偏${temper}。`,
+    `${role?.name || "This persona"} usually works through ${method}, tends toward ${stance}, and speaks in a ${temper} manner.`
   );
 }
 
@@ -670,6 +732,9 @@ const roleEditorTemper = document.getElementById("role-editor-temper");
 const roleEditorColor = document.getElementById("role-editor-color");
 const roleEditorColorPicker = document.getElementById("role-editor-color-picker");
 const roleEditorSourceLabel = document.getElementById("role-editor-source-label");
+const roleEditorAiRequirements = document.getElementById("role-editor-ai-requirements");
+const roleEditorAiFeedback = document.getElementById("role-editor-ai-feedback");
+const generateRoleWithAiButton = document.getElementById("generate-role-with-ai");
 
 const seatPickerBackdrop = document.getElementById("seat-picker-backdrop");
 const seatPickerModal = document.getElementById("seat-picker-modal");
@@ -911,13 +976,13 @@ function setSpeakerCard(title, role, description, avatar = "系", avatarInlineSt
     speakerAvatar.removeAttribute("style");
   }
   speakerName.textContent = title;
-  speakerRole.textContent = role;
+  speakerRole.textContent = role || "";
   speakerDescription.textContent = description;
 }
 
 function setStatusLoadingState(active) {
   liveStatusBanner.classList.toggle("loading-dots", !!active);
-  speakerDescription.classList.toggle("loading-dots", !!active);
+  speakerName.classList.toggle("loading-dots", !!active);
 }
 
 function setSpeakerCardForRole(role, status, description) {
@@ -939,12 +1004,12 @@ function getRoundLabel() {
 
 function getRoundTokenBudget() {
   if (state.densityIndex === 0) {
-    return { main: 620, participant: 420, challenger: 620, judge: 900, report: 1000, charHint: "控制在 220 到 420 字内，结论要直接。" };
+    return { main: 620, participant: 420, challenger: 620, rebuttal: 620, judge: 900, report: 1000, charHint: "控制在 220 到 420 字内，结论要直接。" };
   }
   if (state.densityIndex === 2) {
-    return { main: 1300, participant: 950, challenger: 1300, judge: 1650, report: 1750, charHint: "控制在 700 到 980 字内，但不要空话。" };
+    return { main: 1300, participant: 950, challenger: 1300, rebuttal: 1300, judge: 1650, report: 1750, charHint: "控制在 700 到 980 字内，但不要空话。" };
   }
-  return { main: 900, participant: 700, challenger: 900, judge: 1200, report: 1300, charHint: "控制在 500 到 750 字内。" };
+  return { main: 900, participant: 700, challenger: 900, rebuttal: 900, judge: 1200, report: 1300, charHint: "控制在 500 到 750 字内。" };
 }
 
 function getDensityDescription() {
@@ -1298,6 +1363,8 @@ function getSpeakerModeInstruction(assignment) {
       "模式要求：先把你这一侧最强、最完整、最能成立的版本讲出来，不允许故意把任何一方说弱。",
       assignment === "challenger"
         ? "如果你承担主讲职责，要把本方 strongest case 的主论点、关键依据和最难反驳的部分讲扎实。"
+        : assignment === "rebuttal"
+          ? "如果你承担辩驳职责，你要默认站在主讲对面，专门拆主讲当前版本里最脆弱、最可疑、最经不起追问的地方。"
         : assignment === "neutral"
           ? "如果你承担中立评议职责，要判断双方是否都被公平表达，指出哪一边其实还没讲到 strongest case。"
           : "如果你承担旁证职责，要补足本方 strongest case 的背景、案例、约束和现实回应。",
@@ -1311,6 +1378,8 @@ function getSpeakerModeInstruction(assignment) {
       "如果前文给了模糊出处、似是而非的事实、跳跃推理或偷换概念，要直接点破并收紧结论。",
       assignment === "neutral"
         ? "作为中立评议者，你要主动压实证据，而不是做礼貌性总结。"
+        : assignment === "rebuttal"
+          ? "作为辩驳者，你要优先检查主讲刚才的证据链是否真的闭合，哪些地方只是推断冒充事实。"
         : "不要求你保持语气温和，但要求你优先服从真假和证据链，而不是服从角色偏好。",
       "承接前轮要求：把前面已经形成的共识当成本轮默认约束，优先在尚未确认的点和证据缺口上继续推进，不要把已经收住的点重新说散。",
     ].join("\n");
@@ -1321,6 +1390,8 @@ function getSpeakerModeInstruction(assignment) {
       "对自己的新想法可以大胆提出，对别人的新想法不能只会附和或只会否定，要说明为什么可能行、为什么不行，或者怎样改才可能行。",
       assignment === "challenger"
         ? "作为主讲，你应当主动提出一个值得继续追的新方向，而不是只做保守评论。"
+        : assignment === "rebuttal"
+          ? "作为辩驳者，你要优先指出主讲新方向里最容易翻车的前提和最可能被忽略的代价。"
         : "作为非主讲角色，你可以沿着别人的思路做变体、筛选和条件修正。",
       "承接前轮要求：把前面已经被证明值得继续试的方向、仍属探索但可保留的方向、以及已经判定风险过高的方向分开对待，不要把明显应放弃的想法重新包装成主方向。",
     ].join("\n");
@@ -1330,6 +1401,8 @@ function getSpeakerModeInstruction(assignment) {
     "你可以选择顺着前文扩展，也可以选择把前文没分清的层面拆开讲，但最终要帮助用户把问题看得更开、更清楚。",
     assignment === "neutral"
       ? "作为中立评议者，你要帮助用户看清哪些讨论线已经展开、哪些还没展开。"
+      : assignment === "rebuttal"
+        ? "作为辩驳者，你要专门盯住主讲当前拆法里的漏洞、遗漏和不成立的跳步。"
       : "不要试图一口气把所有层面说完，优先把你这一条线讲透。",
     "承接前轮要求：把前面已经展开过的讨论线、已经形成的暂时共识和仍未展开的线区分开，优先补还没讲透的部分，而不是重复已经讲开的线。",
   ].join("\n");
@@ -1520,8 +1593,11 @@ function getAssignmentInstruction(assignment) {
   if (assignment === "challenger") {
     return "你是本轮主讲，要提出最核心的主论点、主要依据和最值得展开的解释。";
   }
+  if (assignment === "rebuttal") {
+    return "你是本轮辩驳者，要正面对主讲提出压力测试，优先质疑其依据、跳步、漏洞和被忽略的代价。";
+  }
   if (assignment === "neutral") {
-    return "你是本轮中立评议者，要指出前面发言里哪些更稳、哪些证据不足、哪些判断需要收紧。";
+    return "你是本轮中立评议者，要拉开与主讲、辩驳者的距离，指出谁更稳、哪里证据不足、哪些判断需要收紧。";
   }
   return "你是本轮旁证成员，要补充背景、细节、案例和现实约束，但不要越位成裁判。";
 }
@@ -1622,7 +1698,7 @@ function deriveTopicSummary() {
     return "本次讨论已完成，结论可下载。";
   }
   if (state.lastSummary) {
-    return state.lastSummary;
+    return formatTaskSummaryForDisplay(state.lastSummary);
   }
   return seatFeedback.textContent.trim() || speakerDescription.textContent.trim() || "等待补充任务定义。";
 }
@@ -1779,9 +1855,6 @@ function applyTopicSnapshot(snapshot) {
   state.aiAutoRecommendEnabled = snapshot.aiAutoRecommendEnabled !== false;
   state.seatSource = snapshot.seatSource || "recommended";
   state.recommendedRoles = normalizeRecommendedRoleList(snapshot.recommendedRoles || []);
-  if (state.lastSummary && state.aiAutoRecommendEnabled && state.recommendedRoles.length > 0 && state.recommendedRoles.length < MIN_RECOMMENDED_ROLE_COUNT) {
-    state.recommendedRoles = createFallbackRecommendedRoles(state.lastSummary, state.rolePlanningBrief);
-  }
   if (!state.aiAutoRecommendEnabled && !state.recommendedRoles.length) {
     state.seatSource = "library";
   }
@@ -1795,6 +1868,7 @@ function applyTopicSnapshot(snapshot) {
   state.pendingAttachments = snapshot.pendingAttachments || [];
   userInput.value = snapshot.userInput || "";
   discussionStream.innerHTML = snapshot.discussionHtml || "";
+  refreshTaskSummaryMessages();
   setSpeakerCard(
     snapshot.speaker?.name || langText("任务整理中", "Task Intake"),
     snapshot.speaker?.role || langText("等待用户输入", "Waiting for user input"),
@@ -1809,12 +1883,20 @@ function applyTopicSnapshot(snapshot) {
   updateCompactSummary();
   renderAiRoleRecommendationToggle();
   updateCurrentTopicTitle(deriveTopicTitle());
+  const activeTopic = getActiveTopic();
+  if (activeTopic) {
+    activeTopic.title = deriveTopicTitle();
+    activeTopic.summary = deriveTopicSummary();
+    activeTopic.updatedAt = Date.now();
+  }
+  renderTopicList();
   renderSeatPicker();
   renderSeatStack();
   renderAttachmentStrip();
   upgradeLegacyReportActions();
   autoResizeTextarea();
   scrollToLatest();
+  void persistTopics();
   void refreshRecommendedRolePrompts(state.lastSummary);
 }
 
@@ -1988,6 +2070,10 @@ const UI_TEXT = {
     focus: "重点关注",
     output: "输出形式",
     taskDefinitionOutput: "给出简明任务定义",
+    roleAiAssistLabel: "AI 辅助生成",
+    roleAiAssistPlaceholder: "输入职业、能力或要求，比如：护士、野外求生者、擅长地理判断的人、懂欧美审美的工业设计师",
+    roleAiGenerateButton: "AI 生成草稿",
+    roleAiGenerateHint: "也可以先输入一个职业或要求，让 AI 帮你生成一版人物草稿，再继续修改。",
     currentTaskEmpty: "目前还没有任务",
     seedSubtitle: "任务创建开始",
     seedBody: "现在有什么需求请直接发送。我会先在这里帮你整理、追问、确认，然后再开始生成人物。",
@@ -2005,7 +2091,6 @@ const UI_TEXT = {
     peopleSearchPlaceholder: "搜索人物名、职业、标签、用途",
     roleNameLabel: "人物名称",
     roleNamePlaceholder: "比如：文本原义派",
-    roleSeatLabel: "席位定位",
     roleDescriptionLabel: "人物说明",
     roleDescriptionPlaceholder: "写这个人物的身份背景、长期经验和典型关切",
     rolePromptLabel: "专有提示词",
@@ -2091,6 +2176,10 @@ const UI_TEXT = {
     focus: "Key Focus",
     output: "Output Format",
     taskDefinitionOutput: "Provide a concise task definition",
+    roleAiAssistLabel: "AI Assist",
+    roleAiAssistPlaceholder: "Describe a role, profession, or requirement, for example: nurse, wilderness survival expert, geographer with strong terrain judgment, industrial designer who understands Western aesthetics",
+    roleAiGenerateButton: "Generate Draft with AI",
+    roleAiGenerateHint: "You can enter a profession or requirement here and let AI draft a persona first, then refine it manually.",
     currentTaskEmpty: "No task yet",
     seedSubtitle: "Task Intake Started",
     seedBody: "Send your request directly. The primary AI will first organize, question, and confirm it here before generating participants.",
@@ -2108,7 +2197,6 @@ const UI_TEXT = {
     peopleSearchPlaceholder: "Search names, roles, tags, or use cases",
     roleNameLabel: "Persona Name",
     roleNamePlaceholder: "For example: literal reading advocate",
-    roleSeatLabel: "Seat",
     roleDescriptionLabel: "Persona Background",
     roleDescriptionPlaceholder: "Describe this persona's background, long-term experience, and typical concerns",
     rolePromptLabel: "Persona Prompt",
@@ -2216,6 +2304,20 @@ function getSummaryLabels() {
   };
 }
 
+function getExpandedTaskSummaryLabels() {
+  return state.appLanguage === "en"
+    ? {
+        goal: "Task Definition",
+        flow: "Discussion Focus",
+        directions: "",
+      }
+    : {
+        goal: "任务定义",
+        flow: "讨论重点",
+        directions: "",
+      };
+}
+
 function applyLanguageToStaticUi() {
   if (currentTopicLabel) {
     currentTopicLabel.textContent = t("currentTopicLabel");
@@ -2259,8 +2361,10 @@ function applyLanguageToStaticUi() {
   setElementText("people-filter-custom", "filterCustom");
   setElementPlaceholder("people-search", "peopleSearchPlaceholder");
   setElementText("role-editor-name-label", "roleNameLabel");
+  setElementText("role-editor-ai-label", "roleAiAssistLabel");
+  setElementPlaceholder("role-editor-ai-requirements", "roleAiAssistPlaceholder");
+  setElementText("generate-role-with-ai", "roleAiGenerateButton");
   setElementPlaceholder("role-editor-name", "roleNamePlaceholder");
-  setElementText("role-editor-seat-label", "roleSeatLabel");
   setElementText("role-editor-description-label", "roleDescriptionLabel");
   setElementPlaceholder("role-editor-description", "roleDescriptionPlaceholder");
   setElementText("role-editor-prompt-label", "rolePromptLabel");
@@ -2270,6 +2374,10 @@ function applyLanguageToStaticUi() {
   setElementText("role-editor-temper-label", "roleTemperLabel");
   setElementText("role-editor-source-label-text", "roleSourceLabel");
   setElementPlaceholder("role-editor-source-label", "roleSourcePlaceholder");
+  if (roleEditorAiFeedback) {
+    roleEditorAiFeedback.textContent = t("roleAiGenerateHint");
+    roleEditorAiFeedback.className = "drawer-feedback compact-feedback";
+  }
   setElementText("cancel-role-editor", "cancelAndClose");
   setElementText("save-role-editor", "saveAndClose");
   setElementText("seat-picker-section-label", "seatPickerSectionLabel");
@@ -2321,18 +2429,6 @@ function applyLanguageToStaticUi() {
   setElementText("discussion-rounds-label", "discussionRoundsLabel");
   setElementText("discussion-size-label", "discussionSizeLabel");
 
-  localizeSelectOptions(roleEditorSeat, {
-    "主解释者": state.appLanguage === "en" ? "Lead Interpreter" : "主解释者",
-    "反方 / 质询者": state.appLanguage === "en" ? "Challenger / Cross-Examiner" : "反方 / 质询者",
-    "综合裁判": state.appLanguage === "en" ? "Final Judge" : "综合裁判",
-    "背景校正者": state.appLanguage === "en" ? "Context Corrector" : "背景校正者",
-    "应用落地者": state.appLanguage === "en" ? "Application Translator" : "应用落地者",
-    "风险提醒者": state.appLanguage === "en" ? "Risk Watcher" : "风险提醒者",
-    "表达转译者": state.appLanguage === "en" ? "Expression Translator" : "表达转译者",
-    "专业判断者": state.appLanguage === "en" ? "Domain Specialist" : "专业判断者",
-    "规则边界者": state.appLanguage === "en" ? "Boundary Keeper" : "规则边界者",
-    "自定义": state.appLanguage === "en" ? "Custom" : "自定义",
-  });
   localizeSelectOptions(roleEditorStance, {
     "支持原命题": state.appLanguage === "en" ? "Support the claim" : "支持原命题",
     "强力反驳": state.appLanguage === "en" ? "Strong rebuttal" : "强力反驳",
@@ -2380,10 +2476,90 @@ function containsEnglishPhrase(text) {
 }
 
 function extractHeadlineFromSummary(summary) {
-  const labels = getSummaryLabels();
-  const escaped = labels.goal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = summary.match(new RegExp(`${escaped}[:：]([^；。]+)`));
-  return match?.[1]?.trim() || summary;
+  const labels = [getExpandedTaskSummaryLabels().goal, getSummaryLabels().goal, "任务目标", "Task Goal", "goal", "task goal"];
+  for (const label of labels) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = String(summary || "").match(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*[:：]\\s*([^\\n]+)`, "i"));
+    if (match?.[1]?.trim()) {
+      return match[1].trim();
+    }
+  }
+  return String(summary || "").split(/\n+/).find(Boolean)?.trim() || String(summary || "");
+}
+
+function sanitizeTaskSummaryBlock(text) {
+  return String(text || "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/<think>[\s\S]*?<\/think>/gi, " ")
+    .replace(/^[-*•\d.)\s]+/gm, "")
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/\*\*/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function hasExplicitScopeConstraint(originalContent = "") {
+  return /(不涉及|不包含|不包括|不做|不用|排除|先不|暂不|不要讨论|不需要|只讨论|仅讨论|只围绕|仅围绕)/.test(normalizeRequestText(originalContent));
+}
+
+function sanitizeExpandedTaskSummary(summary, originalContent = "") {
+  const cleaned = sanitizeTaskSummaryBlock(summary);
+  if (!cleaned) {
+    return "";
+  }
+
+  const withoutDiscussionFocus = cleaned
+    .replace(/(?:^|\n)\s*(讨论重点|Discussion Focus|重点关注|关注重点|focus)\s*[:：][\s\S]*?(?=(?:\n\s*[\u4e00-\u9fa5A-Za-z ]+\s*[:：])|$)/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (hasExplicitScopeConstraint(originalContent)) {
+    return withoutDiscussionFocus;
+  }
+
+  return withoutDiscussionFocus
+    .replace(/(?:^|\n)\s*(任务范围|关键现场与关键环节|确认提示|Task Scope|Key Scenes and Critical Steps|Confirmation Prompt)\s*[:：][^\n]*(?:\n(?:[-*]|\d+[.)]).*)?/gim, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function buildFallbackExpandedTaskSummary(originalContent = "") {
+  const labels = getExpandedTaskSummaryLabels();
+  const summary = summarizeInput(originalContent || "");
+  const parts = parseSummaryParts(summary);
+  const fallbackGoal = parts.goal || (state.appLanguage === "en"
+    ? "Turn the current request into an open discussion task. Clarify what the group should explore, keep the framing open, and only keep context that helps the discussion move."
+    : "把当前需求整理成一条开放讨论任务，明确这次要探讨什么，保持讨论口径开放，只保留有助于展开讨论的必要上下文。");
+
+  return `${labels.goal}：${fallbackGoal}`;
+}
+
+function formatTaskSummaryForDisplay(summary) {
+  const labels = getExpandedTaskSummaryLabels();
+  const goal = sanitizeSummaryFragment(extractSummaryPart(summary, [labels.goal, "任务定义", "Task Definition", "任务目标", "Task Goal"]));
+
+  if (!goal) {
+    return String(summary || "").trim();
+  }
+
+  return `${labels.goal}：${goal}`;
+}
+
+function refreshTaskSummaryMessages() {
+  if (!discussionStream || !state.lastSummary) {
+    return;
+  }
+
+  const displaySummary = `${t("summaryPromptTitle")} ${formatTaskSummaryForDisplay(state.lastSummary)}`;
+  discussionStream.querySelectorAll(".chat-item.system").forEach((item) => {
+    const sublabel = item.querySelector(".chat-meta span")?.textContent?.trim();
+    if (sublabel === langText("整理后的任务定义", "Refined Task Definition")) {
+      const body = item.querySelector(".chat-bubble p");
+      if (body) {
+        body.textContent = displaySummary;
+      }
+    }
+  });
 }
 
 function summarizeInput(content) {
@@ -2465,24 +2641,17 @@ function isWeakSummaryValue(content, kind) {
 }
 
 function normalizeTaskSummary(rawSummary, originalContent) {
-  const labels = getSummaryLabels();
-  const fallbackSummary = summarizeInput(originalContent || "") || `${labels.goal}：${state.appLanguage === "en" ? "Organize the current request" : "整理当前需求"}；${labels.focus}：${state.appLanguage === "en" ? "The real question the user wants to explore" : "用户真正想探讨的问题"}；${labels.output}：${t("taskDefinitionOutput")}`;
-  const fallbackParts = parseSummaryParts(fallbackSummary);
-  const rawParts = parseSummaryParts(rawSummary || "");
+  const cleaned = sanitizeExpandedTaskSummary(rawSummary, originalContent);
+  const expandedLabels = getExpandedTaskSummaryLabels();
+  const hasExpandedStructure = [expandedLabels.goal, expandedLabels.flow, expandedLabels.directions]
+    .filter(Boolean)
+    .some((label) => new RegExp(`(?:^|\\n)\\s*${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*[:：]`, "i").test(cleaned));
 
-  const preferFallbackGoal = state.appLanguage === "zh" && containsEnglishPhrase(rawParts.goal) && containsChinese(originalContent);
-  const preferFallbackFocus = state.appLanguage === "zh" && containsEnglishPhrase(rawParts.focus) && containsChinese(originalContent);
-  const preferFallbackOutput = state.appLanguage === "zh" && containsEnglishPhrase(rawParts.output) && containsChinese(originalContent);
+  if (cleaned && hasExpandedStructure) {
+    return cleaned;
+  }
 
-  const goal = !preferFallbackGoal && !isWeakSummaryValue(rawParts.goal, "goal") ? rawParts.goal : (fallbackParts.goal || (state.appLanguage === "en" ? "Organize the current request" : "整理当前需求"));
-  const focus = !preferFallbackFocus && rawParts.focus ? rawParts.focus : (fallbackParts.focus || (state.appLanguage === "en" ? "The real question the user wants to explore" : "用户真正想探讨的问题"));
-  const output = !preferFallbackOutput && !isWeakSummaryValue(rawParts.output, "output") ? rawParts.output : (fallbackParts.output || t("taskDefinitionOutput"));
-
-  return [
-    `${labels.goal}：${shortenText(goal, 48)}`,
-    `${labels.focus}：${shortenText(focus, 52)}`,
-    `${labels.output}：${shortenText(output, 40)}`,
-  ].join("；");
+  return buildFallbackExpandedTaskSummary(originalContent);
 }
 
 function getPrimarySummaryProfile() {
@@ -2549,8 +2718,8 @@ function buildOpenAiCompatibleRequestBody(profile, prompt, maxTokens, extras = {
   return body;
 }
 
-async function requestModelText(profile, prompt, maxTokens = 420, signal) {
-  const requestControl = createRequestSignal(signal, MODEL_REQUEST_TIMEOUT_MS);
+async function requestModelText(profile, prompt, maxTokens = 420, signal, timeoutMs = MODEL_REQUEST_TIMEOUT_MS) {
+  const requestControl = createRequestSignal(signal, timeoutMs);
   let response;
   try {
     if (profile.compatibility === "anthropic") {
@@ -2600,6 +2769,11 @@ async function requestModelText(profile, prompt, maxTokens = 420, signal) {
     throw new Error(`${profile.displayName} 返回了空内容`);
   }
   return sanitizeDisplayedModelText(text);
+}
+
+function isModelTimeoutError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /响应超时|timed out|timeout/i.test(message);
 }
 
 function getRoleByAssignment(assignment) {
@@ -2751,7 +2925,7 @@ async function runSingleDiscussionRound({
 
   for (const speakerRole of orderedSpeakers) {
     const assignment = getRoleAssignment(speakerRole);
-    const isLead = assignment === "challenger";
+    const isLead = assignment === "challenger" || assignment === "rebuttal";
     const discussionProfile = getRoleModelProfile(speakerRole);
     const speakerPrompt = [
       `你现在是本场讨论里的第 ${state.discussionOrder[speakerRole.id] || 1} 位发言者，第 ${round}/${totalRounds} 轮发言。`,
@@ -3152,37 +3326,39 @@ async function requestAiTaskSummary(content, attachments = [], options = {}) {
     baseSummary,
     clarificationQuestions,
   });
-  const labels = getSummaryLabels();
+  const labels = getExpandedTaskSummaryLabels();
   const prompt = state.appLanguage === "en"
     ? [
         "You are the primary AI in the Roundtable Braintrust workspace.",
         treatAsSupplement
-          ? "The user is supplementing an existing task definition. Merge the new detail into the current task instead of rewriting the task into a narrower new one unless the user clearly changes direction."
-          : "Turn the user's spoken request into a concise task definition waiting for confirmation, instead of repeating the original wording.",
-        "Output exactly three lines and nothing else:",
+          ? "The user is supplementing an existing task understanding. Merge the new detail into the current task instead of rewriting it into a narrower new task unless the user clearly changes direction."
+          : "Turn the user's spoken request into a structured task understanding for confirmation instead of repeating the original wording.",
+        "Output exactly the following single section and nothing else:",
         `${labels.goal}: ...`,
-        `${labels.focus}: ...`,
-        `${labels.output}: ...`,
         "Requirements:",
         "1. Use English only.",
         "2. Remove filler words and repeated phrases.",
-        "3. No greetings, no explanation of your process, and no fourth line.",
+        "3. Write one open discussion-oriented task definition with a little helpful context folded into it when needed.",
+        "4. Do not add a separate focus list, discussion agenda, plot outline, chapter checklist, or narrow subproblem unless the user explicitly asks for that.",
+        "5. Default to direct organization rather than asking follow-up questions first.",
+        "6. Do not invent extra exclusions, limitations, or negative scope boundaries that the user did not say.",
         `User request: ${promptContent}${attachmentNote}`,
       ].join("\n")
     : [
         "你是圆桌讨论工作台里的主 AI。",
         treatAsSupplement
-          ? "用户这次是在补充上一版任务定义。你的任务是把新补充并入原任务，而不是把原任务改写成一个更窄、更偏的全新任务，除非用户明确要求换题。"
-          : "你的任务是把用户口语化需求整理成一份待确认的任务定义，而不是复述原话。",
-        "严格输出三行，每行只保留一句：",
+          ? "用户这次是在补充上一版任务理解。你的任务是把新补充并入原任务，而不是把原任务改写成一个更窄、更偏的全新任务，除非用户明确要求换题。"
+          : "你的任务是把用户口语化需求整理成一版可用于后续配人的任务理解稿，而不是复述原话。",
+        "严格按下面单段结构输出，不要寒暄，不要解释过程：",
         `${labels.goal}：...`,
-        `${labels.focus}：...`,
-        `${labels.output}：...`,
         "要求：",
         "1. 只用简体中文，简洁清楚。",
         "2. 去掉口语填充词和重复表达。",
-        "3. 不要寒暄，不要解释过程，不要输出任何英文句子，不要额外加第四行。",
-        "4. 如果这是对现有任务的补充，就保留原任务主轴，只补充缺失条件，不要擅自把范围缩成其中一个子问题。",
+        "3. 用一段开放式任务定义写清这次到底要探讨什么；必要上下文可以揉进去，但不要另起一段布置讨论重点。",
+        "4. 不要把讨论提前写成重点清单、任务布置、固定剧情、关键情节清单或过窄的小子题，除非用户明确要求这么做。",
+        "5. 如果这是对现有任务的补充，就保留原任务主轴，只补充缺失条件，不要擅自把范围缩成其中一个子问题。",
+        "6. 默认直接整理，不要先追问。信息不够时就基于当前内容给出最佳理解，但不要擅自添加用户没说过的排除项、限制项或否定边界。",
+        "7. 如果用户要的是探讨、分享、查经、小组交流、脑暴，就保持开放讨论口径，不要替用户提前收窄答案路径。",
         `用户需求：${promptContent}${attachmentNote}`,
       ].join("\n");
 
@@ -3197,7 +3373,7 @@ async function requestAiTaskSummary(content, attachments = [], options = {}) {
       },
       body: JSON.stringify({
         model: profile.modelId,
-        max_tokens: 220,
+        max_tokens: 520,
         messages: [{ role: "user", content: prompt }],
       }),
     });
@@ -3208,7 +3384,7 @@ async function requestAiTaskSummary(content, attachments = [], options = {}) {
         "content-type": "application/json",
         authorization: `Bearer ${profile.apiKey}`,
       },
-      body: JSON.stringify(buildOpenAiCompatibleRequestBody(profile, prompt, 220, {
+      body: JSON.stringify(buildOpenAiCompatibleRequestBody(profile, prompt, 520, {
         temperature: 0.2,
       })),
     });
@@ -3335,8 +3511,10 @@ function getRoundRoleLabel(assignment) {
   switch (assignment) {
     case "challenger":
       return langText("主讲", "Lead Speaker");
+    case "rebuttal":
+      return langText("辩驳者", "Rebuttal");
     case "neutral":
-      return langText("中立评议", "Neutral Reviewer");
+      return langText("中立", "Neutral");
     case "judge":
       return langText("裁判", "Judge");
     default:
@@ -3364,6 +3542,9 @@ function suggestSeatAssignment(role) {
   if (!currentAssignments.includes("neutral") && /(中立|平衡|长老|教师|历史|神学|审慎|辨识)/.test(text)) {
     return "neutral";
   }
+  if (!currentAssignments.includes("rebuttal") && /(反方|质询|辩驳|质疑|怀疑|压力测试|拆解|反对)/.test(text)) {
+    return "rebuttal";
+  }
   if (!currentAssignments.includes("challenger") && /(主讲|学者|讲解|解释|释经|程序员|法律|产品|运营)/.test(text)) {
     return "challenger";
   }
@@ -3378,7 +3559,7 @@ function ensureSeatAssignment(role) {
 }
 
 function roundRoleOptionsMarkup(selectedValue) {
-  return ["challenger", "participant", "neutral", "judge"]
+  return ["challenger", "participant", "neutral", "rebuttal", "judge"]
     .map((value) => `<option value="${value}" ${selectedValue === value ? "selected" : ""}>${getRoundRoleLabel(value)}</option>`)
     .join("");
 }
@@ -3422,6 +3603,7 @@ function ensureCoreAssignments() {
   };
 
   promote("challenger", (role) => /学者|主讲|释经|神学|法律|马丁路德|加尔文|奥古斯丁|马太亨利|司布真/.test(`${role.name}${role.seat}`));
+  promote("rebuttal", (role) => /反方|质询|辩驳|质疑|压力测试|拆解/.test(`${role.name}${role.seat}${role.description}`));
   promote("neutral", (role) => /长老|历史|教师|审慎|辨识|中立/.test(`${role.name}${role.seat}`));
   promote("judge", (role) => /裁判|裁决|中立裁判/.test(`${role.name}${role.seat}`));
 
@@ -3431,7 +3613,7 @@ function ensureCoreAssignments() {
 function ensureRoleDefaults(role) {
   return {
     ...role,
-    systemPrompt: role.systemPrompt || `你是${role.name}，你的席位定位是${role.seat}。请围绕“${role.description}”发言，保持${role.traits.temper}语气，优先使用${role.traits.method}的方法，并坚持${role.traits.stance}的立场。`,
+    systemPrompt: role.systemPrompt || `你是${role.name}，你长期最稳定的观察重心是${role.seat}。请围绕“${role.description}”发言，保持${role.traits.temper}语气，优先使用${role.traits.method}的方法，并坚持${role.traits.stance}的立场。`,
   };
 }
 
@@ -3567,7 +3749,7 @@ function renderSeatStack() {
 
   seatStack.innerHTML = selectedRoles
     .map((role) => {
-      const traits = buildRoleTraitsMarkup(role);
+      const traits = buildRoleTraitsMarkup(role, { compact: true });
       const assignment = ensureSeatAssignment(role);
       const currentProfile = getConfiguredProfileById(ensureSeatModelAssignment(role));
       const orderValue = state.discussionOrder[role.id] || 1;
@@ -3586,7 +3768,7 @@ function renderSeatStack() {
                 <h3 class="role-title">${escapeHtml(getDisplayRoleName(role))}</h3>
               </div>
             </div>
-            <p>${escapeHtml(role.description)}</p>
+            <p>${escapeHtml(getCompactRoleDescription(role))}</p>
             <label class="seat-assignment">
               <span>${escapeHtml(langText("本轮扮演", "Round Role"))}</span>
               <select class="seat-assignment-select" data-role-id="${role.id}">
@@ -3638,37 +3820,10 @@ function renderPeopleLibrary() {
   }
 
   peopleLibraryGrid.innerHTML = roles
-    .map((role) => {
-      const traits = buildRoleTraitsMarkup(role);
-      const sourceText = getRoleSourceText(role);
-      const sourceBadge = sourceText ? `<span class="card-source ${isFavoriteRole(role) ? "favorite" : ""}">${escapeHtml(sourceText)}</span>` : "";
-      const footerMarkup = canEditRole(role) || canDeleteRole(role)
-        ? `
-            <div class="card-actions-right">
-              ${canEditRole(role) ? `<button class="card-action" data-action="edit" type="button">${escapeHtml(langText("修改", "Edit"))}</button>` : ""}
-              ${canDeleteRole(role) ? `<button class="card-action" data-action="delete" type="button">${escapeHtml(langText("删除", "Delete"))}</button>` : ""}
-            </div>
-          `
-        : `<span class="role-lock-note">${escapeHtml(langText("预置人物，不可修改或删除", "Built-in persona cannot be edited or deleted"))}</span>`;
-      return `
-        <article class="library-card" data-role-id="${role.id}">
-          <div class="role-card-head">
-            <div class="seat-chip-row">
-              <span class="library-avatar" style="${avatarStyle(role)}">${escapeHtml(roleAvatar(role))}</span>
-              <div class="role-title-stack">
-                <h3 class="role-title">${escapeHtml(getDisplayRoleName(role))}</h3>
-              </div>
-            </div>
-            ${sourceBadge}
-          </div>
-          <p class="card-description">${escapeHtml(role.description)}</p>
-          <div class="mini-tags">${traits}</div>
-          <div class="role-card-footer">
-            ${footerMarkup}
-          </div>
-        </article>
-      `;
-    })
+    .map((role) => buildRoleLibraryCardMarkup(role, {
+      editable: canEditRole(role),
+      deletable: canDeleteRole(role),
+    }))
     .join("");
 }
 
@@ -3691,38 +3846,16 @@ function renderSeatPicker() {
 
   seatPickerGrid.innerHTML = roles
     .map((role) => {
-      const traits = buildRoleTraitsMarkup(role);
       const selected = state.selectedIds.has(role.id);
       const savedFavorite = role.source === "recommended"
         ? state.peopleRoles.some((item) => item.recommendedFrom === role.id && isFavoriteRole(item))
         : false;
-      const sourceText = getRoleSourceText(role);
-      const favoriteAction = role.source === "recommended"
-        ? `<button class="card-favorite ${savedFavorite ? "saved" : ""}" data-action="favorite" type="button" aria-label="${savedFavorite ? "取消收藏" : "收藏到人物库"}" title="${savedFavorite ? "取消收藏" : "收藏到人物库"}">★</button>`
-        : "";
-      const editAction = canEditRole(role) || role.source === "recommended"
-        ? '<button class="card-action" data-action="edit" type="button">编辑</button>'
-        : "";
-      const footerMarkup = favoriteAction || editAction
-        ? `<div class="card-actions-right">${editAction}${favoriteAction}</div>`
-        : `<span class="role-lock-note">${escapeHtml(sourceText || "预置人物")}</span>`;
-      return `
-        <article class="picker-card ${selected ? "selected" : ""}" data-role-id="${role.id}">
-          <div class="role-card-head">
-            <div class="seat-chip-row">
-              <span class="picker-avatar" style="${avatarStyle(role)}">${escapeHtml(roleAvatar(role))}</span>
-              <div class="role-title-stack">
-                <h3 class="role-title">${escapeHtml(getDisplayRoleName(role))}</h3>
-              </div>
-            </div>
-          </div>
-          <p class="card-description">${escapeHtml(role.description)}</p>
-          <div class="mini-tags">${traits}</div>
-          <div class="role-card-footer">
-            ${footerMarkup}
-          </div>
-        </article>
-      `;
+      return buildRoleLibraryCardMarkup(role, {
+        selected,
+        editable: canEditRole(role) || role.source === "recommended",
+        recommended: true,
+        savedFavorite,
+      });
     })
     .join("");
 }
@@ -3872,8 +4005,11 @@ async function setAppLanguage(nextLanguage) {
 function resetRoleEditor() {
   roleEditorContext = null;
   roleEditorId.value = "";
+  if (roleEditorAiRequirements) {
+    roleEditorAiRequirements.value = "";
+  }
   roleEditorName.value = "";
-  roleEditorSeat.value = "主解释者";
+  roleEditorSeat.value = "讨论参与者";
   roleEditorDescription.value = "";
   roleEditorPrompt.value = "";
   roleEditorStance.value = "支持原命题";
@@ -3881,6 +4017,10 @@ function resetRoleEditor() {
   roleEditorColor.value = "sky";
   syncRoleColorPicker("sky");
   roleEditorSourceLabel.value = "";
+  if (roleEditorAiFeedback) {
+    roleEditorAiFeedback.textContent = t("roleAiGenerateHint");
+    roleEditorAiFeedback.className = "drawer-feedback compact-feedback";
+  }
 }
 
 function toggleRoleEditor(visible) {
@@ -3892,8 +4032,7 @@ function fillRoleEditor(role) {
   const preparedRole = normalizeRecommendedRolePersona(role);
   roleEditorId.value = preparedRole.id;
   roleEditorName.value = preparedRole.name;
-  ensureSelectValue(roleEditorSeat, preparedRole.seat);
-  roleEditorSeat.value = preparedRole.seat;
+  roleEditorSeat.value = preparedRole.seat || "讨论参与者";
   roleEditorDescription.value = preparedRole.description;
   roleEditorPrompt.value = preparedRole.systemPrompt || "";
   ensureSelectValue(roleEditorStance, preparedRole.traits?.stance || "自定义");
@@ -4046,6 +4185,10 @@ function summaryLooksBiblical(summary) {
   return /圣经|经文|章节|属灵|解经|查经|讲章|福音|旧约|新约|创世记|出埃及记|利未记|民数记|申命记|约书亚记|士师记|路得记|撒母耳记|列王记|历代志|以斯拉记|尼希米记|以斯帖记|约伯记|诗篇|箴言|传道书|雅歌|以赛亚书|耶利米书|耶利米哀歌|以西结书|但以理书|何西阿书|约珥书|阿摩司书|俄巴底亚书|约拿书|弥迦书|那鸿书|哈巴谷书|西番雅书|哈该书|撒迦利亚书|玛拉基书|马太福音|马可福音|路加福音|约翰福音|使徒行传|罗马书|哥林多|加拉太书|以弗所书|腓立比书|歌罗西书|帖撒罗尼迦|提摩太|提多书|希伯来书|雅各书|彼得|约翰一书|犹大书|启示录/.test(summary);
 }
 
+function summaryLooksShortVideoTask(summary) {
+  return /短视频|抖音|视频|脚本|拍摄|镜头|剪辑|选题|内容策划|起号|投流|完播率|发布运营|账号运营|传播/.test(summary);
+}
+
 function makeRecommendedRole(roleId, createdAt, description) {
   const sourceRole = baseRoles.find((role) => role.id === roleId);
   if (!sourceRole) {
@@ -4134,6 +4277,71 @@ function buildFallbackRolePlanningBrief(summary) {
   ].join("\n");
 }
 
+function normalizeRolePlanningBucket(bucket, index) {
+  const fallbackId = `bucket-${index + 1}`;
+  return {
+    bucketId: String(bucket?.bucketId || fallbackId).trim() || fallbackId,
+    label: String(bucket?.label || bucket?.name || bucket?.title || `关键人物位${index + 1}`).trim(),
+    reason: String(bucket?.reason || bucket?.why || bucket?.need || "这个人物位会直接影响任务推进和判断质量。").trim(),
+    mustHave: bucket?.mustHave !== false,
+    minCount: Math.max(1, Number(bucket?.minCount) || 1),
+    allowDuplicate: bucket?.allowDuplicate !== false,
+    preferredSource: String(bucket?.preferredSource || "expert").trim() || "expert",
+  };
+}
+
+function buildRolePlanningBriefFromPayload(summary, payload, targetCount) {
+  const requiredBuckets = Array.isArray(payload?.requiredBuckets)
+    ? payload.requiredBuckets.map(normalizeRolePlanningBucket)
+    : [];
+  const optionalBuckets = Array.isArray(payload?.optionalBuckets)
+    ? payload.optionalBuckets.map((bucket, index) => normalizeRolePlanningBucket({ ...bucket, mustHave: false }, index))
+    : [];
+  const exemplarCandidates = Array.isArray(payload?.exemplarCandidates)
+    ? payload.exemplarCandidates
+        .map((item) => ({
+          bucketId: String(item?.bucketId || "").trim(),
+          name: String(item?.name || item?.label || "").trim(),
+          whyFit: String(item?.whyFit || item?.reason || "").trim(),
+          modernOverlay: String(item?.modernOverlay || item?.modernKnowledge || "").trim(),
+        }))
+        .filter((item) => item.name)
+    : [];
+
+  const planningSummary = String(payload?.planningSummary || payload?.summary || "").trim();
+  const maxExemplarCount = Math.max(1, Math.floor(targetCount * MAX_EXEMPLAR_ROLE_RATIO));
+
+  return [
+    `任务理解：${summary}`,
+    planningSummary ? `规划摘要：${planningSummary}` : "规划摘要：先按任务流程补齐关键人物位，再用少量高辨识度人物增强发散视角。",
+    requiredBuckets.length
+      ? `必须覆盖的人物位：\n${requiredBuckets.map((bucket, index) => `${index + 1}. ${bucket.label}：${bucket.reason}${bucket.allowDuplicate ? "；同类可重复" : "；同类尽量不重复"}`).join("\n")}`
+      : "必须覆盖的人物位：\n1. 现场或执行相关人物\n2. 专业判断人物\n3. 反常识或校正视角人物",
+    optionalBuckets.length
+      ? `可补强的人物位：\n${optionalBuckets.slice(0, 4).map((bucket, index) => `${index + 1}. ${bucket.label}：${bucket.reason}`).join("\n")}`
+      : "",
+    exemplarCandidates.length
+      ? `可借现实原型：\n${exemplarCandidates.slice(0, maxExemplarCount + 2).map((item, index) => `${index + 1}. ${item.name}：${item.whyFit || "贴合该人物位"}${item.modernOverlay ? `；现代覆盖层：${item.modernOverlay}` : ""}`).join("\n")}`
+      : "",
+    `硬约束：\n1. 输出总人数为 ${targetCount} 人。\n2. 每个必须人物位至少覆盖一次。\n3. 允许重点人物位重复，但不能挤掉关键缺口位。\n4. 高辨识度人物最多 ${maxExemplarCount} 个。\n5. 人物库已有同名人物禁止重复生成。\n6. name 和 seat 都必须说人话。\n7. 如果借用现实、历史或虚构人物，必须补上现代知识覆盖层。`,
+  ].filter(Boolean).join("\n\n");
+}
+
+function validateRolePlanningPayload(payload, targetCount) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("人物规划返回结果不是有效对象。");
+  }
+
+  const requiredBuckets = Array.isArray(payload.requiredBuckets) ? payload.requiredBuckets : [];
+  if (!requiredBuckets.length) {
+    throw new Error("人物规划没有给出必须覆盖的人物位。");
+  }
+
+  if (requiredBuckets.length > targetCount) {
+    throw new Error("人物规划给出的必须人物位数量超过本轮目标人数，无法实例化。",);
+  }
+}
+
 function getCompletedRoundCount(roundNotes = state.discussionRoundNotes) {
   return Array.isArray(roundNotes)
     ? roundNotes.filter((note) => typeof note?.round === "number").length
@@ -4180,8 +4388,11 @@ function getRoleGenerationResultText(meta = state.recommendedRoleGenerationMeta)
   }
 
   if (meta.source === "ai") {
+    if (meta.detail) {
+      return `人物已生成，当前调用模型为 ${meta.profileName || "当前主持AI"}。${meta.detail}`;
+    }
     return meta.planningFallback
-      ? `人物已生成，当前调用模型为 ${meta.profileName || "当前主持AI"}。但人物规划阶段曾失败，系统先用本地规划兜底后继续完成了 AI 生成。`
+      ? `人物已生成，当前调用模型为 ${meta.profileName || "当前主持AI"}。人物规划阶段曾超时，系统跳过该阶段后继续完成了 AI 生成。`
       : `人物已生成，当前调用模型为 ${meta.profileName || "当前主持AI"}。本轮人物来自真实 AI 生成。`;
   }
 
@@ -4198,14 +4409,59 @@ function getRoleGenerationResultText(meta = state.recommendedRoleGenerationMeta)
 
 async function requestRoleGenerationIntake(summary) {
   const profile = getPrimarySummaryProfile();
-  return {
+  const targetCount = getRequestedRecommendedRoleCount(summary);
+  const fallbackResponse = {
     status: "ready",
     questions: [],
     planningBrief: buildFallbackRolePlanningBrief(summary),
-    planningFallback: false,
+    planningFallback: true,
     fallbackReason: "",
     modelName: profile?.displayName || "",
   };
+
+  if (!profile) {
+    return fallbackResponse;
+  }
+
+  const prompt = [
+    "你现在不是直接生成人物，而是先为这次圆桌做人物规划。",
+    "你的任务是先把这件事从头到尾会牵涉的关键环节想清楚，再判断每个环节至少需要什么人来补位。",
+    "不要按行业模板列人，不要直接输出最终人物卡。你现在只规划人物位。",
+    "重点检查这些维度：现场执行者、第一接触者或使用者、专业判断者、证据或信息解释者、现实落地者、风险校正者、非常规但有价值的视角。",
+    "如果现实中有高辨识度人物、历史人物或著名虚构人物非常贴题，可以少量借用，但不能超过总人数四分之一，而且必须保留现代知识覆盖层。",
+    getPeoplePoolRoleNamesText() ? `当前人物池里已有这些名字，后续实例化时禁止重复生成：${getPeoplePoolRoleNamesText()}` : "",
+    `本轮目标人数：${targetCount}`,
+    "严格输出 JSON 对象，不要解释，不要 Markdown。",
+    "必须包含字段：planningSummary, requiredBuckets, optionalBuckets, exemplarCandidates, generationRules。",
+    "requiredBuckets 里的每个元素必须包含：bucketId, label, reason, mustHave, minCount, allowDuplicate, preferredSource。",
+    "optionalBuckets 和 exemplarCandidates 可以为空数组，但字段必须存在。",
+    "generationRules 里至少写：targetCount, maxExemplarCount, avoidDuplicateNames, requireHumanReadableNames, requireModernKnowledgeOverlay。",
+    "默认直接规划，不要先追问用户。只有在题目完全无法理解时，才允许你在 planningSummary 里说明当前理解仍有不确定性。",
+    `当前已确认的任务理解：\n${summary}`,
+  ].filter(Boolean).join("\n\n");
+
+  try {
+    const raw = await requestModelText(profile, prompt, 1800, null, ROLE_PLANNING_TIMEOUT_MS);
+    const jsonText = extractJsonObject(raw);
+    if (!jsonText) {
+      throw new Error("人物规划阶段没有返回可解析的 JSON 对象。");
+    }
+    const payload = JSON.parse(jsonText);
+    validateRolePlanningPayload(payload, targetCount);
+    return {
+      status: "ready",
+      questions: [],
+      planningBrief: buildRolePlanningBriefFromPayload(summary, payload, targetCount),
+      planningFallback: false,
+      fallbackReason: "",
+      modelName: profile?.displayName || "",
+    };
+  } catch (error) {
+    return {
+      ...fallbackResponse,
+      fallbackReason: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function appendRoleClarificationPrompt(questions) {
@@ -4235,7 +4491,7 @@ function appendRoleClarificationPrompt(questions) {
 
 function buildFallbackGeneratedRoleSystemPrompt({ name, seat, description, stance, method, temper }) {
   return [
-    `你现在扮演“${name}”。你的身份定位是：${seat}。`,
+    `你现在扮演“${name}”。你长期最稳定的观察重心是：${seat}。`,
     `人物背景：${description}`,
     `你的核心立场是：${stance}。你的主要方法是：${method}。你的说话气质应保持：${temper}。`,
     "发言时先像这个人物本人，再表达观点。不要把自己说成任务说明器，也不要一开口就复述“围绕某话题展开”。",
@@ -4256,7 +4512,7 @@ async function buildSharedResearchBrief(summary, moderatorProfile, orderedSpeake
     "输出至少覆盖：背景事实、当前约束、桌上最值得争的 2 到 4 个问题、哪些点现在还不能下死结论。",
     "控制在 220 到 420 字。直接输出正文，不要 Markdown 标题，不要列表编号。",
     `任务定义：${summary}`,
-    `本次席位：${orderedSpeakers.map((role) => `${role.name}（${role.seat}）`).join("，")}`,
+    `本次参与人物及其长期观察重心：${orderedSpeakers.map((role) => `${role.name}（${role.seat}）`).join("，")}`,
   ].join("\n\n");
 
   return requestModelText(moderatorProfile, prompt, 650, signal);
@@ -4358,7 +4614,7 @@ async function requestDynamicRolePrompts(summary, roles, profile) {
       "如果是真实或历史人物，就以其典型视角、能力圈和表达气质为参照，但不要伪造原话、著作、年份或史料。",
       "如果是虚构人物，就以大众熟知的角色设定、技能结构、行为方式和世界观为参照，但不要写成剧情介绍。",
       "如果是原型角色，如“特种部队生存教官”“原始部落长老”，就按这种身份在现实中应具备的知识、经验、判断习惯和语言风格来写。",
-      "每个 systemPrompt 至少要覆盖：身份定位、时代或职业背景、最优先关注什么、如何发言、不要越位做什么、遇到不确定信息如何处理。第一句先交代身份。",
+      "每个 systemPrompt 至少要覆盖：长期观察重心、时代或职业背景、最优先关注什么、如何发言、不要越位做什么、遇到不确定信息如何处理。第一句先交代身份。",
       "每个 systemPrompt 应该是给大模型看的角色扮演提示词，长度建议 180 到 320 字。",
       "绝对不要把它写成“仅用几个词回复”“确认执行”“立即转向下一任务”这种指令。那是错误格式。",
       "请直接返回 JSON 数组。每个元素只包含字段：name, systemPrompt。不要解释，不要 Markdown。",
@@ -4412,37 +4668,41 @@ async function enrichGeneratedRolePrompts(summary, roles, profile) {
   });
 }
 
-async function refreshRecommendedRolePrompts(summary = state.lastSummary) {
+async function refreshRecommendedRolePrompts(summary = state.lastSummary, options = {}) {
+  const { includeAllRecommended = false, onStart = null, onFinish = null } = options;
   const profile = getPrimarySummaryProfile();
   if (!profile) {
     return;
   }
 
-  const targetRoles = state.recommendedRoles.filter((role) => role.source === "recommended" && looksLikeInvalidDynamicRolePrompt(role.systemPrompt));
+  const targetRoles = state.recommendedRoles.filter((role) => role.source === "recommended" && (includeAllRecommended || role.promptEnrichmentPending || looksLikeInvalidDynamicRolePrompt(role.systemPrompt)));
   if (!targetRoles.length) {
     return;
   }
 
+  onStart?.(targetRoles.length);
   try {
     const enrichedRoles = await enrichGeneratedRolePrompts(summary || "当前话题", targetRoles, profile);
     const promptMap = new Map(enrichedRoles.map((role) => [role.name, role.systemPrompt]));
     state.recommendedRoles = state.recommendedRoles.map((role) => (
       promptMap.has(role.name)
-        ? { ...role, systemPrompt: promptMap.get(role.name) }
+        ? { ...role, systemPrompt: promptMap.get(role.name), promptEnrichmentPending: false }
         : role
     ));
     renderSeatPicker();
     renderSeatStack();
     void syncCurrentTopicSnapshot();
+    onFinish?.(true, targetRoles.length);
   } catch (error) {
     console.error(error);
+    onFinish?.(false, targetRoles.length);
   }
 }
 
 function normalizeGeneratedRole(generatedRole, index, createdAt) {
   const name = sanitizeGeneratedRoleName(generatedRole.name || generatedRole.title || `临时角色${index + 1}`);
   const seat = String(generatedRole.seat || generatedRole.role || "专题分析者").trim();
-  const description = String(generatedRole.background || generatedRole.bio || generatedRole.identity || generatedRole.description || generatedRole.focus || generatedRole.why || `${name} 的身份定位是 ${seat}，习惯从自己的专业训练与长期经验出发参与讨论。`).trim();
+  const description = String(generatedRole.background || generatedRole.bio || generatedRole.identity || generatedRole.description || generatedRole.focus || generatedRole.why || `${name} 长期从 ${seat} 这个观察重心出发参与讨论，习惯依靠自己的专业训练与长期经验做判断。`).trim();
   const method = String(generatedRole.method || generatedRole.style || generatedRole.approach || "针对性分析").trim();
   const stance = String(generatedRole.stance || generatedRole.position || "补充关键视角").trim();
   const temper = String(generatedRole.temper || generatedRole.tone || "冷静").trim();
@@ -4479,6 +4739,7 @@ async function requestGeneratedRecommendedRoles(summary, planningBrief = "") {
 
   const promptSections = [
     "你现在要为一个具体任务推荐一桌开会人物。",
+    "先严格满足人物规划里要求覆盖的人物位，再决定具体请谁上桌。",
     "请直接根据任务本身去想：这件事真正需要哪些人来一起讨论，才能既有启发，又能兼顾现实落地。",
     `输出刚好 ${targetCount} 个角色。专业不要重复，人物之间要互补。`,
     "优先让 AI 自己想清楚需要哪些视角，不要按固定行业模板硬凑。",
@@ -4492,7 +4753,7 @@ async function requestGeneratedRecommendedRoles(summary, planningBrief = "") {
     planningBrief ? `配人参考：\n${planningBrief}` : "",
     "seat 字段也写人话，简单概括这个人上桌主要负责看什么，不要再造抽象黑话。",
     "严格输出 JSON 数组，不要解释，不要 Markdown。",
-    "每个元素必须包含字段：name, seat, description, stance, method, temper, systemPrompt, roleType。可选字段：color, avatar。",
+    "每个元素必须包含字段：name, seat, description, stance, method, temper, systemPrompt, roleType。可选字段：color, avatar。这里的 seat 表示人物长期观察重心，不是外部的本轮扮演角色。",
     "roleType 只能填 exemplar 或 expert。exemplar 表示真实人物、历史人物或高辨识度代表角色；expert 表示现实专家或原型角色。",
     "description 要写这个人的身份背景和长期关注点，不要写成任务拆解句。",
     "systemPrompt 要能直接拿去扮演这个人，第一句先说清身份，再说他最关注什么、如何发言、不要越位做什么。",
@@ -4504,7 +4765,7 @@ async function requestGeneratedRecommendedRoles(summary, planningBrief = "") {
     const retryNote = attempt === 1 ? "" : "上一次输出没有通过解析。这一次请只返回合法 JSON 数组，首字符必须是 [，末字符必须是 ]，中间不要夹任何解释。";
     const prompt = [...promptSections, retryNote].filter(Boolean).join("\n\n");
     try {
-      const raw = await requestModelText(profile, prompt, 1800);
+      const raw = await requestModelText(profile, prompt, 1800, null, ROLE_GENERATION_TIMEOUT_MS);
       const jsonText = extractJsonArray(raw);
       if (!jsonText) {
         throw new Error("系统临时角色生成失败：模型没有返回可解析的 JSON 数组。");
@@ -4521,10 +4782,104 @@ async function requestGeneratedRecommendedRoles(summary, planningBrief = "") {
       return normalizeRecommendedRoleList(roles.map((role) => upgradeRecommendedRolePrompt(role)));
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
+      if (isModelTimeoutError(lastError)) {
+        break;
+      }
     }
   }
 
   throw lastError;
+}
+
+function buildSingleRoleGenerationProgress(slotIndex, targetCount, generatedCount) {
+  return langText(
+    `第 2 步：正在逐个生成人物身份 ${Math.min(slotIndex + 1, targetCount)}/${targetCount}，当前已生成 ${generatedCount} 个。`,
+    `Step 2: generating persona identities one by one ${Math.min(slotIndex + 1, targetCount)}/${targetCount}, ${generatedCount} ready.`
+  );
+}
+
+async function requestSingleRecommendedRole(summary, planningBrief, existingRoles, slotIndex, targetCount) {
+  const profile = getPrimarySummaryProfile();
+  if (!profile) {
+    throw new Error("还没有可用模型，无法生成系统临时角色。");
+  }
+
+  const existingNames = new Set([
+    ...getPeoplePoolRoleNamesText(200).split("、").map((item) => sanitizeGeneratedRoleName(item)).filter(Boolean),
+    ...existingRoles.map((role) => sanitizeGeneratedRoleName(role?.name || "")).filter(Boolean),
+  ]);
+
+  let lastError = new Error("单个人物生成失败：未知错误。");
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const retryNote = attempt === 1 ? "" : "上一次返回的人物重复、过空或不可解析。这一次请只返回一个新的、可直接上桌的人物 JSON 对象。";
+    const prompt = [
+      "你现在不是一次生成整桌，而是只为这次圆桌补出下一个最缺的人物。",
+      `当前总目标人数：${targetCount}。当前正在生成第 ${slotIndex + 1} 个。`,
+      planningBrief ? `配人参考：\n${planningBrief}` : "",
+      getRecommendedRoleGenerationGuidance(summary),
+      existingRoles.length
+        ? `桌上已经有这些人物，不要重复，也不要再换一种说法生成同类：\n${existingRoles.map((role, index) => `${index + 1}. ${role.name}｜${role.seat}｜${role.description}`).join("\n")}`
+        : "这是当前圆桌的第一个人物，请先给出最必要的起手人物。",
+      getPeoplePoolRoleNamesText() ? `人物库里已有这些名字，禁止重复同名：${getPeoplePoolRoleNamesText()}` : "",
+      "只需要返回 1 个 JSON 对象，不要解释，不要 Markdown。",
+      "必须字段：name, seat, description, stance, method, temper, roleType。可选字段：systemPrompt, color, avatar。这里的 seat 表示人物长期观察重心，不是外部的本轮扮演角色。",
+      "name 和 seat 必须是人话，不能是抽象黑话。",
+      "优先保证人物身份准确和互补。如果 systemPrompt 一时写不完整，可以留空，不要为了补 prompt 牺牲人物准确性。",
+      `本次话题：${summary}`,
+      retryNote,
+    ].filter(Boolean).join("\n\n");
+
+    try {
+      const raw = await requestModelText(profile, prompt, 900, null, ROLE_IDENTITY_TIMEOUT_MS);
+      const jsonText = extractJsonObject(raw);
+      if (!jsonText) {
+        throw new Error("单个人物生成没有返回可解析的 JSON 对象。");
+      }
+      const payload = JSON.parse(jsonText);
+      const role = normalizeGeneratedRole(payload, slotIndex, Date.now());
+      const normalizedName = sanitizeGeneratedRoleName(role.name);
+      if (!normalizedName) {
+        throw new Error("单个人物生成返回了空名称。");
+      }
+      if (existingNames.has(normalizedName)) {
+        throw new Error(`生成人物与已有人物重名：${role.name}`);
+      }
+      return upgradeRecommendedRolePrompt({ ...role, promptEnrichmentPending: true });
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (isModelTimeoutError(lastError)) {
+        break;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+async function requestGeneratedRecommendedRolesSequential(summary, planningBrief = "", callbacks = {}) {
+  const targetCount = getRequestedRecommendedRoleCount(summary);
+  const roles = [];
+  const failures = [];
+
+  callbacks.onStage?.("identity-start", { targetCount, generatedCount: 0, roles: [] });
+  for (let slotIndex = 0; slotIndex < targetCount; slotIndex += 1) {
+    callbacks.onStage?.("identity-progress", { slotIndex, targetCount, generatedCount: roles.length, roles: [...roles] });
+    try {
+      const nextRole = await requestSingleRecommendedRole(summary, planningBrief, roles, slotIndex, targetCount);
+      roles.push(nextRole);
+      callbacks.onRoleGenerated?.([...roles], { slotIndex, targetCount, role: nextRole });
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      failures.push({ slotIndex, error: failure.message });
+      callbacks.onRoleFailed?.(failure, { slotIndex, targetCount, generatedCount: roles.length, roles: [...roles] });
+    }
+  }
+
+  return {
+    targetCount,
+    roles: normalizeRecommendedRoleList(roles),
+    failures,
+  };
 }
 
 async function requestEmergencyRecommendedRoles(summary, planningBrief = "") {
@@ -4538,6 +4893,7 @@ async function requestEmergencyRecommendedRoles(summary, planningBrief = "") {
   const prompt = [
     "你现在要紧急生成一组临时角色，用于这次圆桌讨论。",
     "上一次严格生成失败了，所以这一次只要把人选配准，保持简单直接。",
+    "先满足人物规划里必须覆盖的人物位，再补可选人物。",
     "只选对任务真的有帮助的人，不要凑抽象标签，不要塞无关人物。",
     `总数仍然不少于 ${targetCount} 个，行业佼佼者人物最多只能占四分之一。`,
     "name 和 seat 都必须是用户一眼能看懂的人话名称，不要写成抽象岗位标签。",
@@ -4545,11 +4901,11 @@ async function requestEmergencyRecommendedRoles(summary, planningBrief = "") {
     planningBrief ? `配人参考：\n${planningBrief}` : "",
     `输出 ${targetCount} 个角色。`,
     "严格输出 JSON 数组，不要解释。",
-    "每个元素必须包含字段：name, seat, description, stance, method, temper, systemPrompt, roleType。",
+    "每个元素必须包含字段：name, seat, description, stance, method, temper, systemPrompt, roleType。这里的 seat 表示人物长期观察重心，不是外部的本轮扮演角色。",
     `本次话题：${summary}`,
   ].filter(Boolean).join("\n\n");
 
-  const raw = await requestModelText(profile, prompt, 1400);
+  const raw = await requestModelText(profile, prompt, 1400, null, ROLE_EMERGENCY_TIMEOUT_MS);
   const jsonText = extractJsonArray(raw);
   if (!jsonText) {
     throw new Error("紧急人物生成没有返回可解析的 JSON 数组。");
@@ -4943,6 +5299,140 @@ function createFallbackRecommendedRoles(summary, planningBrief = "") {
     ].filter(Boolean);
   }
 
+  if (summaryLooksShortVideoTask(summary)) {
+    const isPublicInterest = /公益|公益性|公益项目|公益传播/.test(summary);
+    return [
+      makeInlineRecommendedRole({
+        name: "短视频导演",
+        seat: "内容结构负责人",
+        description: `围绕“${shortSummary}”先判断视频主线、节奏、情绪曲线和信息组织方式，避免内容散掉。`,
+        stance: "强调成片表达",
+        method: "内容结构设计",
+        temper: "直接",
+        color: "teal",
+        systemPrompt: `你现在扮演一位短视频导演。面对“${shortSummary}”，优先判断内容主线、镜头节奏、信息密度和情绪推进，避免把视频做成口号堆砌。`,
+      }, 0, createdAt),
+      makeInlineRecommendedRole({
+        name: "抖音内容策划",
+        seat: "选题与开头钩子负责人",
+        description: `长期做抖音内容策划，面对“${shortSummary}”会先看选题角度、前三秒钩子和信息进入方式。`,
+        stance: "强调停留与完播",
+        method: "平台内容策划",
+        temper: "敏捷",
+        color: "coral",
+        systemPrompt: `你现在扮演一位抖音内容策划。面对“${shortSummary}”，优先判断用户为什么会点开、前三秒怎么留人、标题封面和内容切口怎样更适配抖音。`,
+      }, 1, createdAt),
+      makeInlineRecommendedRole({
+        name: isPublicInterest ? "公益项目负责人" : "一线业务负责人",
+        seat: isPublicInterest ? "真实议题把关者" : "业务真实需求把关者",
+        description: isPublicInterest
+          ? `长期在公益一线推进项目，面对“${shortSummary}”会先校正议题是否真实、表达是否尊重对象、信息有没有跑偏。`
+          : `长期在业务一线推进结果，面对“${shortSummary}”会先校正内容是否真的贴着现实需求。`,
+        stance: "强调真实场景",
+        method: "一线校正",
+        temper: "务实",
+        color: "emerald",
+        systemPrompt: isPublicInterest
+          ? `你现在扮演一位公益项目负责人。面对“${shortSummary}”，优先判断议题是否真实、表达是否尊重受助对象、内容有没有把公益变成自我感动。`
+          : `你现在扮演一位一线业务负责人。面对“${shortSummary}”，优先判断内容是否真的贴着现实场景、真实用户和一线执行。`,
+      }, 2, createdAt),
+      makeInlineRecommendedRole({
+        name: "短视频编剧",
+        seat: "脚本与口播设计者",
+        description: `长期把复杂信息改写成可拍、可讲、可转发的脚本，面对“${shortSummary}”会先拆脚本结构和台词密度。`,
+        stance: "强调信息可讲",
+        method: "脚本设计",
+        temper: "细致",
+        color: "violet",
+        systemPrompt: `你现在扮演一位短视频编剧。面对“${shortSummary}”，优先把信息改写成可拍摄、可口播、可剪辑的脚本结构，而不是停留在抽象建议。`,
+      }, 3, createdAt),
+      makeInlineRecommendedRole({
+        name: "摄影指导",
+        seat: "拍摄落地设计者",
+        description: `长期负责视频拍摄方案，面对“${shortSummary}”会先看景别、场景、设备和拍摄难度。`,
+        stance: "强调可拍性",
+        method: "镜头设计",
+        temper: "冷静",
+        color: "sky",
+        systemPrompt: `你现在扮演一位摄影指导。面对“${shortSummary}”，优先判断镜头怎么拍、场景怎么选、设备需求高不高，以及哪些画面最能把信息拍清楚。`,
+      }, 4, createdAt),
+      makeInlineRecommendedRole({
+        name: "剪辑师",
+        seat: "节奏与完播优化者",
+        description: `长期做短视频后期，面对“${shortSummary}”会先看节奏、信息密度、转场和完播体验。`,
+        stance: "强调节奏",
+        method: "剪辑优化",
+        temper: "利落",
+        color: "amber",
+        systemPrompt: `你现在扮演一位剪辑师。面对“${shortSummary}”，优先判断怎样用节奏、删减和信息排序保住完播，而不是把所有信息都硬塞进去。`,
+      }, 5, createdAt),
+      makeInlineRecommendedRole({
+        name: "抖音运营",
+        seat: "发布与互动负责人",
+        description: `长期负责抖音账号运营，面对“${shortSummary}”会先看发布时间、评论区互动、话题设置和账号节奏。`,
+        stance: "强调平台分发",
+        method: "账号运营",
+        temper: "直接",
+        color: "rose",
+        systemPrompt: `你现在扮演一位抖音运营。面对“${shortSummary}”，优先判断发布节奏、互动动作、话题设置和账号运营细节，不要只讲拍完之后自然会火。`,
+      }, 6, createdAt),
+      makeInlineRecommendedRole({
+        name: "平台机制研究员",
+        seat: "流量分发校正者",
+        description: `长期研究平台内容分发和账号表现，面对“${shortSummary}”会先看哪些动作会影响推荐、停留和转化。`,
+        stance: "强调机制",
+        method: "平台机制判断",
+        temper: "审慎",
+        color: "slate",
+        systemPrompt: `你现在扮演一位平台机制研究员。面对“${shortSummary}”，优先判断哪些因素会影响推荐分发、停留、完播和互动，不要迷信单一爆款技巧。`,
+      }, 7, createdAt),
+      makeInlineRecommendedRole({
+        name: "受众观察者",
+        seat: "目标用户反应校正者",
+        description: `长期观察短视频受众行为，面对“${shortSummary}”会先看目标观众会不会信、会不会停、会不会转发。`,
+        stance: "强调受众真实反应",
+        method: "行为观察",
+        temper: "耐心",
+        color: "sky",
+        systemPrompt: `你现在扮演一位受众观察者。面对“${shortSummary}”，优先判断目标用户会怎么看、在哪一秒划走、什么表达会引发反感或误解。`,
+      }, 8, createdAt),
+      makeInlineRecommendedRole({
+        name: isPublicInterest ? "公益传播顾问" : "传播文案策划",
+        seat: isPublicInterest ? "公益表达校正者" : "传播话术设计者",
+        description: isPublicInterest
+          ? `长期处理公益传播表达，面对“${shortSummary}”会先看公益价值怎么表达才不廉价、不消费对象，还能让人愿意传播。`
+          : `长期做传播话术与文案，面对“${shortSummary}”会先看怎样把信息说得更清楚、更愿意被转发。`,
+        stance: "强调表达质量",
+        method: "传播转译",
+        temper: "克制",
+        color: "violet",
+        systemPrompt: isPublicInterest
+          ? `你现在扮演一位公益传播顾问。面对“${shortSummary}”，优先判断怎样兼顾公益价值、传播效率和表达边界，避免廉价煽情与道德绑架。`
+          : `你现在扮演一位传播文案策划。面对“${shortSummary}”，优先判断怎样把核心信息讲清、讲顺、讲得愿意被传播。`,
+      }, 9, createdAt),
+      makeInlineRecommendedRole({
+        name: "资源合作负责人",
+        seat: "出镜与协作整合者",
+        description: `长期整合拍摄资源、场地、达人、合作方和执行排期，面对“${shortSummary}”会先看资源怎么拼起来。`,
+        stance: "强调协同",
+        method: "资源整合",
+        temper: "稳健",
+        color: "amber",
+        systemPrompt: `你现在扮演一位资源合作负责人。面对“${shortSummary}”，优先判断场地、出镜、合作方、排期和协作资源怎么整起来，避免方案停在纸上。`,
+      }, 10, createdAt),
+      makeInlineRecommendedRole({
+        name: "合规与风险顾问",
+        seat: "表达边界与舆情预警者",
+        description: `长期处理内容合规和舆情风险，面对“${shortSummary}”会先看表达边界、误导风险和舆论反噬点。`,
+        stance: "强调边界",
+        method: "风险校验",
+        temper: "审慎",
+        color: "rose",
+        systemPrompt: `你现在扮演一位合规与风险顾问。面对“${shortSummary}”，优先判断内容表达边界、平台风险、误导点和可能引发的舆情问题。`,
+      }, 11, createdAt),
+    ].filter(Boolean);
+  }
+
   return [
     makeInlineRecommendedRole({
       name: "一线实务负责人",
@@ -5300,13 +5790,7 @@ function toggleSeatSelection(roleId) {
 
 async function handleRoleEditorSave() {
   const name = roleEditorName.value.trim();
-  const seat = roleEditorSeat.value.trim();
   const description = roleEditorDescription.value.trim();
-  if (!name || !seat || !description) {
-    updateSeatFeedback(langText("人物名称、席位定位、人物说明都要填。", "Persona name, seat, and background are all required."), "pending");
-    return;
-  }
-
   const existing = roleEditorId.value ? getPeopleRoleById(roleEditorId.value) : null;
   const recommendedSource = roleEditorContext?.sourceCollection === "recommended"
     ? getRecommendedRoleById(roleEditorContext.roleId)
@@ -5314,6 +5798,11 @@ async function handleRoleEditorSave() {
   const savedFavorite = recommendedSource
     ? state.peopleRoles.find((item) => item.recommendedFrom === recommendedSource.id && isFavoriteRole(item))
     : null;
+  const seat = roleEditorSeat.value.trim() || existing?.seat || savedFavorite?.seat || recommendedSource?.seat || "讨论参与者";
+  if (!name || !description) {
+    updateSeatFeedback(langText("人物名称和人物说明都要填。", "Persona name and background are required."), "pending");
+    return;
+  }
   const baseRole = existing || savedFavorite || recommendedSource;
 
   const role = {
@@ -5353,6 +5842,99 @@ async function handleRoleEditorSave() {
   updateSeatFeedback(`已保存并关闭：${role.name}`, "success");
   void syncCurrentTopicSnapshot();
   closeRoleEditorWithReturn();
+}
+
+function applyAiDraftToRoleEditor(draft) {
+  const preparedRole = normalizeGeneratedRole({
+    ...draft,
+    roleType: draft?.roleType || "expert",
+    sourceLabel: draft?.sourceLabel || langText("AI 草稿", "AI Draft"),
+  }, 0, Date.now());
+
+  roleEditorId.value = "";
+  roleEditorName.value = preparedRole.name;
+  roleEditorSeat.value = preparedRole.seat || "讨论参与者";
+  roleEditorDescription.value = preparedRole.description;
+  roleEditorPrompt.value = preparedRole.systemPrompt || "";
+  ensureSelectValue(roleEditorStance, preparedRole.traits?.stance || "自定义");
+  ensureSelectValue(roleEditorTemper, preparedRole.traits?.temper || "自定义");
+  roleEditorStance.value = preparedRole.traits?.stance || "自定义";
+  roleEditorTemper.value = preparedRole.traits?.temper || "自定义";
+  roleEditorColor.value = roleColor(preparedRole);
+  syncRoleColorPicker(roleColor(preparedRole));
+  roleEditorSourceLabel.value = draft?.sourceLabel || langText("AI 草稿", "AI Draft");
+}
+
+async function requestAiRoleEditorDraft(requirements) {
+  const profile = getPrimarySummaryProfile();
+  if (!profile) {
+    throw new Error(langText("还没有可用模型，无法用 AI 生成人物草稿。", "No available model is configured for AI persona drafting."));
+  }
+
+  const prompt = [
+    "你现在在帮助用户为人物库生成一个人物草稿。",
+    "用户给你的可能只是一个职业、一个能力要求、一个人物倾向，或者几句简短描述。",
+    "你的任务是把它扩成一个适合圆桌讨论的人物，但不要写成抽象黑话。",
+    "如果用户只给了职业，比如护士、警察、地理学家、野外求生者，你就按这个身份在现实里会如何看问题来生成人物。",
+    "如果用户给的是要求，比如擅长地理判断、懂欧美审美、会开模具、懂解剖，你就把这个要求落成一个真实可辨的人物身份。",
+    "输出必须是 JSON 对象，不要解释，不要 Markdown。",
+    "字段必须包含：name, seat, description, stance, method, temper, systemPrompt, sourceLabel。可选字段：color。这里的 seat 表示人物长期观察重心，不是外部的本轮扮演角色。",
+    "规则：",
+    "1. name 和 seat 都必须人话化；seat 只写人物长期观察重心，不要写主讲、旁证、裁判这类外部扮演角色。",
+    "2. description 要写身份背景、长期经验和典型关注点。",
+    "3. systemPrompt 第一段先交代身份，再写这个人物最先看什么、最不同意什么、会提醒别人忽略什么。",
+    "4. 默认具备现代知识，不要写成古早背景设定。",
+    getPeoplePoolRoleNamesText() ? `当前人物池已有这些名字，尽量不要重复同名：${getPeoplePoolRoleNamesText()}` : "",
+    `用户要求：${requirements}`,
+  ].filter(Boolean).join("\n\n");
+
+  const raw = await requestModelText(profile, prompt, 1200);
+  const jsonText = extractJsonObject(raw);
+  if (!jsonText) {
+    throw new Error(langText("AI 没有返回可解析的人物草稿。", "AI did not return a parseable persona draft."));
+  }
+  const payload = JSON.parse(jsonText);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error(langText("AI 返回的人物草稿格式不正确。", "AI returned an invalid persona draft format."));
+  }
+  return payload;
+}
+
+async function handleGenerateRoleDraftWithAi() {
+  const requirements = roleEditorAiRequirements?.value.trim() || "";
+  if (!requirements) {
+    if (roleEditorAiFeedback) {
+      roleEditorAiFeedback.textContent = langText("先输入一个职业、能力或人物要求，再让 AI 生成。", "Enter a profession, capability, or persona requirement first.");
+      roleEditorAiFeedback.className = "drawer-feedback compact-feedback pending";
+    }
+    return;
+  }
+
+  if (generateRoleWithAiButton) {
+    generateRoleWithAiButton.disabled = true;
+  }
+  if (roleEditorAiFeedback) {
+    roleEditorAiFeedback.textContent = langText("AI 正在生成人物草稿，请稍等。", "AI is drafting the persona now. Please wait.");
+    roleEditorAiFeedback.className = "drawer-feedback compact-feedback pending";
+  }
+
+  try {
+    const draft = await requestAiRoleEditorDraft(requirements);
+    applyAiDraftToRoleEditor(draft);
+    if (roleEditorAiFeedback) {
+      roleEditorAiFeedback.textContent = langText("AI 已生成一版人物草稿，你可以继续手动修改后再保存。", "AI generated a persona draft. You can refine it manually before saving.");
+      roleEditorAiFeedback.className = "drawer-feedback compact-feedback success";
+    }
+  } catch (error) {
+    if (roleEditorAiFeedback) {
+      roleEditorAiFeedback.textContent = error instanceof Error ? error.message : String(error);
+      roleEditorAiFeedback.className = "drawer-feedback compact-feedback pending";
+    }
+  } finally {
+    if (generateRoleWithAiButton) {
+      generateRoleWithAiButton.disabled = false;
+    }
+  }
 }
 
 async function handleModelProfileSave(event) {
@@ -5558,6 +6140,7 @@ function appendUserMessage(content, attachments = []) {
 function appendAiSummary(content) {
   ensureActiveTopicSession();
   const summary = content.trim();
+  const displaySummary = formatTaskSummaryForDisplay(summary);
   state.lastSummary = summary;
   state.sharedResearchBrief = "";
   state.rolePlanningBrief = "";
@@ -5569,7 +6152,7 @@ function appendAiSummary(content) {
       speakerId: "system",
       label: "系",
       sublabel: langText("整理后的任务定义", "Refined Task Definition"),
-      body: `${t("summaryPromptTitle")} ${summary}`,
+      body: `${t("summaryPromptTitle")} ${displaySummary}`,
       avatarLabel: "系",
       avatarClass: "avatar-system",
       tone: "system",
@@ -5648,9 +6231,9 @@ async function finishSeatGeneration(options = {}) {
 
   state.pendingRoleClarification = [];
   state.taskSupplementMode = false;
-  const generatingDescription = langText(`正在根据当前任务生成人物，当前调用模型：${getPrimarySummaryProfileName()}，可能需要几分钟，请耐心等待。`, `Generating personas for the current task with ${getPrimarySummaryProfileName()}. This may take a few minutes, so please wait.`);
+  const generatingDescription = langText(`第 1 步：正在计算必要人物位。当前调用模型：${getPrimarySummaryProfileName()}。`, `Step 1: calculating the required persona slots with ${getPrimarySummaryProfileName()}.`);
   setStatusLoadingState(true);
-  setSpeakerCard(langText("正在生成人物", "Generating Personas"), langText("系统自动匹配中", "System matching in progress"), generatingDescription, "系");
+  setSpeakerCard(langText("生成人物中", "Generating Personas"), "", generatingDescription, "系");
   updateLiveStatus(generatingDescription, "pending");
   updateSeatFeedback(generatingDescription, "pending");
   if (roleIntake.planningFallback) {
@@ -5659,7 +6242,7 @@ async function finishSeatGeneration(options = {}) {
         speakerId: "system-role-planning-fallback",
         label: "系",
         sublabel: langText("人物规划已降级", "Persona Planning Fallback"),
-        body: langText(`主持模型 ${roleIntake.modelName || getPrimarySummaryProfileName()} 在“先判断是否要追问”这一步没有返回可用结果，系统已改用本地规划继续。${roleIntake.fallbackReason ? `失败原因：${roleIntake.fallbackReason}` : ""}`, `The host model ${roleIntake.modelName || getPrimarySummaryProfileName()} did not return a usable result during persona planning, so the system switched to a local planning fallback. ${roleIntake.fallbackReason ? `Reason: ${roleIntake.fallbackReason}` : ""}`),
+        body: langText(`主持模型 ${roleIntake.modelName || getPrimarySummaryProfileName()} 在人物规划阶段没有及时返回可用结果，系统已跳过这一步并继续尝试生成人物。${roleIntake.fallbackReason ? `失败原因：${roleIntake.fallbackReason}` : ""}`, `The host model ${roleIntake.modelName || getPrimarySummaryProfileName()} did not return a usable result in time during persona planning, so the app skipped that step and continued trying to generate personas. ${roleIntake.fallbackReason ? `Reason: ${roleIntake.fallbackReason}` : ""}`),
         avatarLabel: "系",
         avatarClass: "avatar-system",
         tone: "system",
@@ -5667,43 +6250,80 @@ async function finishSeatGeneration(options = {}) {
     );
   }
   try {
-    state.recommendedRoles = await requestGeneratedRecommendedRoles(currentSummary, state.rolePlanningBrief);
-    state.recommendedRoleGenerationMeta = createRoleGenerationMeta("ai", hostProfile, "", roleIntake.planningFallback);
-    updateSeatFeedback(langText(`系统已按本次话题临时生成 ${state.recommendedRoles.length} 个推荐角色。调用模型：${getPrimarySummaryProfileName()}。`, `${state.recommendedRoles.length} recommended personas have been generated for this topic with ${getPrimarySummaryProfileName()}.`), "success");
+    state.recommendedRoles = [];
+    renderSeatPicker();
+    renderSeatStack();
+    const generationResult = await requestGeneratedRecommendedRolesSequential(currentSummary, state.rolePlanningBrief, {
+      onStage: (stage, payload) => {
+        if (stage === "identity-start") {
+          const message = langText(`第 2 步：准备逐个生成人物身份，共 ${payload.targetCount} 个。`, `Step 2: preparing to generate ${payload.targetCount} persona identities one by one.`);
+          setSpeakerCard(langText("生成人物中", "Generating Personas"), "", message, "系");
+          updateLiveStatus(message, "pending");
+          updateSeatFeedback(message, "pending");
+          return;
+        }
+        if (stage === "identity-progress") {
+          const message = buildSingleRoleGenerationProgress(payload.slotIndex, payload.targetCount, payload.generatedCount);
+          setSpeakerCard(langText("生成人物中", "Generating Personas"), "", message, "系");
+          updateLiveStatus(message, "pending");
+          updateSeatFeedback(message, "pending");
+        }
+      },
+      onRoleGenerated: (roles, payload) => {
+        state.recommendedRoles = roles;
+        renderSeatPicker();
+        renderSeatStack();
+        const message = langText(`第 2 步：已生成第 ${payload.slotIndex + 1} 个，当前共 ${roles.length}/${payload.targetCount} 个。`, `Step 2: generated persona ${payload.slotIndex + 1}, ${roles.length}/${payload.targetCount} ready.`);
+        setSpeakerCard(langText("生成人物中", "Generating Personas"), "", message, "系");
+        updateLiveStatus(message, "pending");
+        updateSeatFeedback(message, "pending");
+      },
+      onRoleFailed: (error, payload) => {
+        const message = langText(`第 2 步：第 ${payload.slotIndex + 1} 个生成失败，系统会继续补后面的位。当前已生成 ${payload.generatedCount} 个。`, `Step 2: persona ${payload.slotIndex + 1} failed, continuing with the remaining slots. ${payload.generatedCount} ready so far.`);
+        setSpeakerCard(langText("生成人物中", "Generating Personas"), "", message, "系");
+        updateLiveStatus(message, "pending");
+        updateSeatFeedback(error.message, "pending");
+      },
+    });
+
+    state.recommendedRoles = generationResult.roles;
+    if (!state.recommendedRoles.length) {
+      throw new Error(generationResult.failures.map((item) => `第 ${item.slotIndex + 1} 个失败：${item.error}`).join("；") || "没有拿到任何可用人物结果。");
+    }
+    const generatedCountDetail = generationResult.roles.length === generationResult.targetCount
+      ? langText(`本轮共生成 ${generationResult.roles.length} 个针对性人物。`, `${generationResult.roles.length} targeted personas were generated.`)
+      : langText(`本轮先生成了 ${generationResult.roles.length}/${generationResult.targetCount} 个人物，其余位稍后可重试或从人物库补齐。`, `${generationResult.roles.length}/${generationResult.targetCount} personas were generated. The remaining slots can be retried later or filled from the library.`);
+    state.recommendedRoleGenerationMeta = createRoleGenerationMeta("ai", hostProfile, generatedCountDetail, roleIntake.planningFallback);
+    updateSeatFeedback(generatedCountDetail, generationResult.roles.length === generationResult.targetCount ? "success" : "pending");
   } catch (error) {
     console.error(error);
-    try {
-      state.recommendedRoles = await requestEmergencyRecommendedRoles(currentSummary, state.rolePlanningBrief);
-      state.recommendedRoleGenerationMeta = createRoleGenerationMeta("ai-emergency", hostProfile, error instanceof Error ? error.message : String(error), roleIntake.planningFallback);
-      appendMarkup(
-        createMessageMarkup({
-          speakerId: "system-role-generation-emergency",
-          label: "系",
-          sublabel: langText("人物生成已降级", "Persona Generation Degraded"),
-          body: langText(`标准人物生成失败，系统已改用 ${getPrimarySummaryProfileName()} 的宽松 AI 降级方案重配了一组人物。失败原因：${error instanceof Error ? error.message : String(error)}`, `The standard persona generation failed, so the system switched to a looser AI fallback with ${getPrimarySummaryProfileName()}. Reason: ${error instanceof Error ? error.message : String(error)}`),
-          avatarLabel: "系",
-          avatarClass: "avatar-system",
-          tone: "system",
-        })
-      );
-      updateSeatFeedback(langText("标准人物生成失败，系统已改用更宽松的 AI 方案重配了一组人物。", "The standard persona generation failed, so the system switched to a looser AI fallback and regenerated the roster."), "pending");
-    } catch (retryError) {
-      console.error(retryError);
-      state.recommendedRoles = createFallbackRecommendedRoles(currentSummary, state.rolePlanningBrief);
-      state.recommendedRoleGenerationMeta = createRoleGenerationMeta("local-fallback", hostProfile, retryError instanceof Error ? retryError.message : String(retryError), roleIntake.planningFallback);
-      appendMarkup(
-        createMessageMarkup({
-          speakerId: "system-role-generation-local-fallback",
-          label: "系",
-          sublabel: langText("人物生成失败，已切本地兜底", "Persona Generation Fell Back to Local Roster"),
-          body: langText(`主持模型 ${getPrimarySummaryProfileName()} 在人物生成阶段没有返回可用结果，所以你现在看到的是本地兜底人物池，不是正常 AI 生成人物。标准失败原因：${error instanceof Error ? error.message : String(error)}。降级失败原因：${retryError instanceof Error ? retryError.message : String(retryError)}。`, `The host model ${getPrimarySummaryProfileName()} did not produce a usable persona roster, so the current roster is a local fallback rather than a normal AI-generated roster. Standard failure: ${error instanceof Error ? error.message : String(error)}. Emergency failure: ${retryError instanceof Error ? retryError.message : String(retryError)}.`),
-          avatarLabel: "系",
-          avatarClass: "avatar-system",
-          tone: "system",
-        })
-      );
-      updateSeatFeedback(langText("AI 人物生成仍然失败，已切回最后的本地兜底人物池。你也可以继续调整或重试。", "AI persona generation still failed, so the system fell back to the final local backup roster. You can still adjust or retry."), "pending");
-    }
+    state.recommendedRoles = [];
+    state.recommendedRoleGenerationMeta = null;
+    state.selectedIds.clear();
+    state.seatAssignments = {};
+    state.discussionOrder = {};
+    state.seatModelAssignments = {};
+    state.generatingSeats = false;
+    state.seatsReady = false;
+    setStatusLoadingState(false);
+    renderSeatPicker();
+    renderSeatStack();
+    appendMarkup(
+      createMessageMarkup({
+        speakerId: "system-role-generation-failed",
+        label: "系",
+        sublabel: langText("人物生成失败", "Persona Generation Failed"),
+        body: langText(`主持模型 ${getPrimarySummaryProfileName()} 在逐个生成人物阶段没有及时返回可用结果。你可以直接重试，或调整模型配置后再生成。失败原因：${error instanceof Error ? error.message : String(error)}`, `The host model ${getPrimarySummaryProfileName()} did not return usable persona results in time during step-by-step persona generation. You can retry directly or adjust the model configuration and generate again. Reason: ${error instanceof Error ? error.message : String(error)}`),
+        avatarLabel: "系",
+        avatarClass: "avatar-system",
+        tone: "system",
+      })
+    );
+    setSpeakerCard(langText("人物生成失败", "Persona Generation Failed"), "", langText("这次没有拿到可用的 AI 人物结果。你可以直接重试，或先检查当前模型的响应稳定性。", "No usable AI persona roster was returned this time. You can retry directly or first check the current model's response stability."), "系");
+    updateLiveStatus(langText("本次没有拿到可用的 AI 人物结果，请重试或调整模型。", "No usable AI persona roster was returned. Retry or adjust the model configuration."), "pending");
+    updateSeatFeedback(langText("AI 人物生成失败，本次不再自动切本地兜底。请直接重试，或更换更稳定的模型。", "AI persona generation failed. The app will not auto-switch to a local fallback roster. Retry directly or switch to a more stable model."), "pending");
+    void syncCurrentTopicSnapshot();
+    return;
   }
   state.selectedIds.clear();
   state.seatAssignments = {};
@@ -5732,17 +6352,34 @@ async function finishSeatGeneration(options = {}) {
       speakerId: "system",
       label: "系",
       sublabel: langText("人物生成完成", "Persona Generation Complete"),
-      body: langText(`本次临时人物已经生成，并已先按当前讨论规模自动选入 ${state.selectedIds.size} 个席位。你现在可以直接开始讨论，也可以去选角器里从临时生成和人物库里继续替换、增删和微调。`, `The generated personas are ready, and ${state.selectedIds.size} seats have already been auto-filled for this round. You can start the discussion now, or keep swapping, removing, and tuning personas in the picker.`),
+      body: langText(`本次临时人物已经按“先人物身份、后提示词补强”的顺序生成，并已先按当前讨论规模自动选入 ${state.selectedIds.size} 个席位。你现在可以直接开始讨论，也可以去选角器里从临时生成和人物库里继续替换、增删和微调。`, `The generated personas were created in the order of identity first, prompt enrichment later, and ${state.selectedIds.size} seats have already been auto-filled for this round. You can start the discussion now, or keep swapping, removing, and tuning personas in the picker.`),
       avatarLabel: "系",
       avatarClass: "avatar-system",
       tone: "system",
     })
   );
   setSpeakerCard(langText("人物已生成", "Personas Ready"), langText("可开始配置席位", "Ready to configure seats"), langText("临时生成的人物和人物库现在都可以混合使用。", "Generated personas and library personas can now be mixed together."), "系");
-  updateLiveStatus(langText(`已临时生成 ${state.recommendedRoles.length} 个针对性角色，可继续挑选和调整。`, `${state.recommendedRoles.length} targeted personas are ready. You can keep selecting and adjusting them.`), "success");
+  updateLiveStatus(langText(`第 3 步：人物身份已生成，正在后台补全提示词。当前已就绪 ${state.recommendedRoles.length} 个角色。`, `Step 3: persona identities are ready and prompts are being enriched in the background. ${state.recommendedRoles.length} roles are ready.`), "success");
   if (!seatFeedback.textContent.includes("临时生成失败")) {
     updateSeatFeedback(getRoleGenerationResultText() || langText("人物已生成，可从临时生成和人物库里混合选席位", "Personas are ready. You can mix generated personas and library personas when assigning seats."), state.recommendedRoleGenerationMeta?.source === "local-fallback" ? "pending" : "success");
   }
+  void refreshRecommendedRolePrompts(currentSummary, {
+    includeAllRecommended: true,
+    onStart: () => {
+      const message = langText(`第 3 步：正在后台补全人物提示词，当前已生成 ${state.recommendedRoles.length} 个身份。`, `Step 3: enriching persona prompts in the background for ${state.recommendedRoles.length} generated identities.`);
+      updateLiveStatus(message, "pending");
+      updateSeatFeedback(message, "pending");
+    },
+    onFinish: (success, count) => {
+      if (success) {
+        updateLiveStatus(langText(`人物生成完成：${state.recommendedRoles.length} 个身份已生成，${count} 个提示词已补强。`, `Persona generation complete: ${state.recommendedRoles.length} identities ready and ${count} prompts enriched.`), "success");
+        updateSeatFeedback(langText(`已补全 ${count} 个人物的提示词，你现在可以直接开始讨论。`, `${count} persona prompts were enriched. You can start the discussion now.`), "success");
+      } else {
+        updateLiveStatus(langText(`人物身份已生成，但提示词补强失败。当前可先用基础提示词继续。`, `Persona identities are ready, but prompt enrichment failed. The roster can still continue with the base prompts.`), "pending");
+        updateSeatFeedback(langText(`提示词补强失败，当前会先使用基础提示词。你也可以直接开始讨论。`, `Prompt enrichment failed, so the roster will use the base prompts for now. You can still start the discussion.`), "pending");
+      }
+    },
+  });
   void syncCurrentTopicSnapshot();
 }
 
@@ -5804,10 +6441,10 @@ function startSeatGeneration(options = {}) {
   state.seatModelAssignments = {};
   setStatusLoadingState(true);
   renderSeatStack();
+  const generatingDescription = langText(`将按当前任务直接规划并生成人物。当前调用模型：${getPrimarySummaryProfileName()}。若主链路超时，系统会自动切到更快的降级方案。`, `The system is planning and generating personas directly from the current task with ${getPrimarySummaryProfileName()}. If the main path times out, it will automatically switch to a faster fallback.`);
   updateSeatFeedback(langText("正在生成人物，请稍候", "Generating personas, please wait."), "pending");
-  const intakeDescription = langText("系统会直接根据当前任务推荐一组人物，默认不再额外追问。", "The system will recommend a persona roster directly from the current task without extra clarification by default.");
-  updateLiveStatus(intakeDescription, "pending");
-  setSpeakerCard(langText("正在判断是否需要补充", "Checking for Clarification"), langText("系统自动匹配中", "System matching in progress"), intakeDescription, "系");
+  updateLiveStatus(generatingDescription, "pending");
+  setSpeakerCard(langText("生成人物中", "Generating Personas"), "", generatingDescription, "系");
   appendMarkup(
     createMessageMarkup({
       speakerId: "system",
@@ -5983,6 +6620,8 @@ function bindEvents() {
   cancelRoleEditor.addEventListener("click", () => {
     closeRoleEditorWithReturn();
   });
+
+  generateRoleWithAiButton?.addEventListener("click", handleGenerateRoleDraftWithAi);
 
   saveRoleEditorButton.addEventListener("click", handleRoleEditorSave);
 

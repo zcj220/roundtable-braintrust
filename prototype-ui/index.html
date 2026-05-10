@@ -50,26 +50,20 @@
       </div>
       <div class="role-editor hidden" id="role-editor">
         <input id="role-editor-id" type="hidden" />
+        <label class="role-ai-assist-block">
+          <span id="role-editor-ai-label">AI 辅助生成</span>
+          <textarea id="role-editor-ai-requirements" rows="2" placeholder="输入职业、能力或要求，比如：护士、野外求生者、擅长地理判断的人、懂欧美审美的工业设计师"></textarea>
+        </label>
+        <div class="header-actions role-ai-actions">
+          <p class="drawer-feedback compact-feedback" id="role-editor-ai-feedback">也可以先输入一个职业或要求，让 AI 帮你生成一版人物草稿，再继续修改。</p>
+          <button class="ghost-link" id="generate-role-with-ai" type="button">AI 生成草稿</button>
+        </div>
         <div class="form-grid two-col">
           <label>
             <span id="role-editor-name-label">人物名称</span>
             <input id="role-editor-name" type="text" placeholder="比如：文本原义派" />
           </label>
-          <label>
-            <span id="role-editor-seat-label">席位定位</span>
-            <select id="role-editor-seat">
-              <option value="主解释者">主解释者</option>
-              <option value="反方 / 质询者">反方 / 质询者</option>
-              <option value="综合裁判">综合裁判</option>
-              <option value="背景校正者">背景校正者</option>
-              <option value="应用落地者">应用落地者</option>
-              <option value="风险提醒者">风险提醒者</option>
-              <option value="表达转译者">表达转译者</option>
-              <option value="专业判断者">专业判断者</option>
-              <option value="规则边界者">规则边界者</option>
-              <option value="自定义">自定义</option>
-            </select>
-          </label>
+          <input id="role-editor-seat" type="hidden" value="讨论参与者" />
         </div>
         <label>
           <span id="role-editor-description-label">人物说明</span>
