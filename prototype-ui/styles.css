@@ -1293,14 +1293,14 @@ select.round-input option {
 
 .library-card h3 {
   margin-top: 2px;
-  font-size: 15px;
-  line-height: 1.28;
+  font-size: 14px;
+  line-height: 1.26;
 }
 
 .picker-card h3 {
   margin-top: 2px;
-  font-size: 15px;
-  line-height: 1.28;
+  font-size: 14px;
+  line-height: 1.26;
 }
 
 .library-card h3,
@@ -1309,7 +1309,9 @@ select.round-input option {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-  min-height: calc(1.28em * 2);
+  min-height: calc(1.26em * 2);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .seat-card h3 {
@@ -1328,14 +1330,15 @@ select.round-input option {
   min-width: 0;
   display: grid;
   align-content: start;
+  flex: 1 1 auto;
 }
 
 .library-card .role-title-stack {
-  min-height: calc(1.28em * 2);
+  min-height: calc(1.26em * 2);
 }
 
 .picker-card .role-title-stack {
-  min-height: calc(1.28em * 2);
+  min-height: calc(1.26em * 2);
 }
 
 .library-card .seat-role,
