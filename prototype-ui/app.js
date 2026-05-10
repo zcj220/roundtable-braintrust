@@ -966,6 +966,8 @@ let roleEditorContext = null;
 let modelProfileTemplateId = "";
 let modelProfileEditMode = false;
 let preferredReadAloudVoice = null;
+let readAloudQueue = [];
+let activeReadAloudUtterance = null;
 
 function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -2847,9 +2849,46 @@ function renderVoiceReadToggle() {
 }
 
 function stopReadAloudPlayback() {
+  readAloudQueue = [];
+  activeReadAloudUtterance = null;
   if (window.speechSynthesis) {
     window.speechSynthesis.cancel();
   }
+}
+
+function drainReadAloudQueue() {
+  if (!state.voiceReadEnabled || !window.speechSynthesis || activeReadAloudUtterance || !readAloudQueue.length) {
+    return;
+  }
+
+  const nextText = readAloudQueue.shift();
+  if (!nextText) {
+    return;
+  }
+
+  const utterance = new SpeechSynthesisUtterance(nextText);
+  utterance.lang = state.appLanguage === "en" ? "en-US" : "zh-CN";
+  utterance.rate = state.appLanguage === "en" ? 0.96 : 0.92;
+  utterance.pitch = 1;
+  const preferredVoice = getPreferredReadAloudVoice();
+  if (preferredVoice) {
+    utterance.voice = preferredVoice;
+    utterance.lang = preferredVoice.lang || utterance.lang;
+  }
+  utterance.onend = () => {
+    if (activeReadAloudUtterance === utterance) {
+      activeReadAloudUtterance = null;
+    }
+    drainReadAloudQueue();
+  };
+  utterance.onerror = () => {
+    if (activeReadAloudUtterance === utterance) {
+      activeReadAloudUtterance = null;
+    }
+    drainReadAloudQueue();
+  };
+  activeReadAloudUtterance = utterance;
+  window.speechSynthesis.speak(utterance);
 }
 
 function getPreferredReadAloudVoice() {
@@ -2894,17 +2933,8 @@ function readTextAloud(text, options = {}) {
     return;
   }
 
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(normalized);
-  utterance.lang = state.appLanguage === "en" ? "en-US" : "zh-CN";
-  utterance.rate = state.appLanguage === "en" ? 1 : 1.02;
-  utterance.pitch = 1;
-  const preferredVoice = getPreferredReadAloudVoice();
-  if (preferredVoice) {
-    utterance.voice = preferredVoice;
-    utterance.lang = preferredVoice.lang || utterance.lang;
-  }
-  window.speechSynthesis.speak(utterance);
+  readAloudQueue.push(normalized);
+  drainReadAloudQueue();
 }
 
 function maybeReadAppendedMessage(element) {
@@ -4998,18 +5028,18 @@ async function requestGeneratedRecommendedRoles(summary, planningBrief = "") {
 
   const promptSections = [
     "你现在要为一个具体任务推荐一桌开会人物。",
-    "先严格满足人物规划里要求覆盖的人物位，再决定具体请谁上桌。",
     "请直接根据任务本身去想：这件事真正需要哪些人来一起讨论，才能既有启发，又能兼顾现实落地。",
     `输出刚好 ${targetCount} 个角色。专业不要重复，人物之间要互补。`,
     "优先让 AI 自己想清楚需要哪些视角，不要按固定行业模板硬凑。",
     "name 必须写成人能一眼看懂的人话名称，优先用具体人物名、通俗职业名或广为人知的角色名。不要输出“风险边界者”“资源配置者”“长期主义判断者”这类抽象标签。",
-    "如果适合用真实人物、历史人物、小说人物或影视角色，可以少量混入；如果不适合，就直接用现实里的通俗职业身份。",
+    "如果用职业身份，尽量写得更具体更像真人会用的称呼，例如材料科学家、材料工程师、电池安全研究员、结构工艺工程师，而不是王工、张教授、李总这种过泛称呼。",
+    "如果现实里有非常贴题的知名人物、行业代表人物、历史人物、小说人物或影视角色，可以少量混入，但不是必须。",
     `真实人物或高辨识度代表人物最多只能占四分之一，按 ${targetCount} 人计算最多 ${Math.max(1, Math.floor(targetCount * MAX_EXEMPLAR_ROLE_RATIO))} 个。`,
     "不要把人物写成空泛职业堆砌，也不要用一个名字换几种说法来重复同类专家。",
     "对于贴近产品、设计、制造、市场这类任务，要优先想到真实会影响结果的人，而不是先想到抽象学者。",
+    "如果任务涉及材料、电池、化学、制造、工艺、结构等领域，可以自然混入少量现实中有名的人物或代表性专家，但整桌仍要以能真正讨论问题的人为主。",
     "例如如果任务是做欧美市场智能镜，像欧美工业设计专家、结构工艺工程师、成本与供应链专家、UI/UX 设计师、家居软装顾问、灯光设计师、跨境选品专家、量产工艺专家，这种就是合格的人话命名方式。",
     getPeoplePoolRoleNamesText() ? `当前人物池里已经有这些人物，禁止再生成同名人物：${getPeoplePoolRoleNamesText()}。` : "",
-    planningBrief ? `配人参考：\n${planningBrief}` : "",
     "seat 字段也写人话，简单概括这个人上桌主要负责看什么，不要再造抽象黑话。",
     "严格输出 JSON 数组，不要解释，不要 Markdown。",
     "每个元素必须包含字段：name, seat, description, stance, method, temper, systemPrompt, roleType, gender, age。可选字段：color, avatar。这里的 seat 表示人物长期观察重心，不是外部的本轮扮演角色。",
@@ -5076,7 +5106,6 @@ async function requestSingleRecommendedRole(summary, planningBrief, existingRole
     const prompt = [
       "你现在不是一次生成整桌，而是只为这次圆桌补出下一个最缺的人物。",
       `当前总目标人数：${targetCount}。当前正在生成第 ${slotIndex + 1} 个。`,
-      planningBrief ? `配人参考：\n${planningBrief}` : "",
       getRecommendedRoleGenerationGuidance(summary),
       existingRoles.length
         ? `桌上已经有这些人物，不要重复，也不要再换一种说法生成同类：\n${existingRoles.map((role, index) => `${index + 1}. ${role.name}｜${role.seat}｜${role.description}`).join("\n")}`
@@ -5084,7 +5113,8 @@ async function requestSingleRecommendedRole(summary, planningBrief, existingRole
       getPeoplePoolRoleNamesText() ? `人物库里已有这些名字，禁止重复同名：${getPeoplePoolRoleNamesText()}` : "",
       "只需要返回 1 个 JSON 对象，不要解释，不要 Markdown。",
       "必须字段：name, seat, description, stance, method, temper, roleType, gender, age。可选字段：systemPrompt, color, avatar。这里的 seat 表示人物长期观察重心，不是外部的本轮扮演角色。",
-      "name 和 seat 必须是人话，不能是抽象黑话。",
+      "name 和 seat 必须是人话，不能是抽象黑话。职业名尽量写成材料科学家、材料工程师、电池安全研究员这类更具体的称呼，不要只写王工、张教授、李总。",
+      "如果现实里有非常贴题的知名人物或代表专家，也可以少量直接用人名，但不是必须。",
       "gender 只填 male 或 female。age 直接写具体年龄，例如 16岁、29岁、44岁、63岁。",
       "如果是历史人物，优先写他最广为人知阶段的大致年龄；如果是虚构人物，写大众最熟悉设定里的年龄；如果是原型专家，请直接编一个合理年龄。",
       "优先保证人物身份准确和互补。如果 systemPrompt 一时写不完整，可以留空，不要为了补 prompt 牺牲人物准确性。",
@@ -5156,12 +5186,11 @@ async function requestEmergencyRecommendedRoles(summary, planningBrief = "") {
   const prompt = [
     "你现在要紧急生成一组临时角色，用于这次圆桌讨论。",
     "上一次严格生成失败了，所以这一次只要把人选配准，保持简单直接。",
-    "先满足人物规划里必须覆盖的人物位，再补可选人物。",
     "只选对任务真的有帮助的人，不要凑抽象标签，不要塞无关人物。",
     `总数仍然不少于 ${targetCount} 个，行业佼佼者人物最多只能占四分之一。`,
-    "name 和 seat 都必须是用户一眼能看懂的人话名称，不要写成抽象岗位标签。",
+    "name 和 seat 都必须是用户一眼能看懂的人话名称，不要写成抽象岗位标签。职业名尽量写成材料科学家、材料工程师、电池安全研究员这类更具体的称呼，不要只写王工、张教授、李总。",
+    "如果现实里有非常贴题的知名人物或代表专家，也可以少量直接用人名，但不是必须。",
     getPeoplePoolRoleNamesText() ? `当前人物池里已经有这些人物，禁止再生成同名人物：${getPeoplePoolRoleNamesText()}。` : "",
-    planningBrief ? `配人参考：\n${planningBrief}` : "",
     `输出 ${targetCount} 个角色。`,
     "严格输出 JSON 数组，不要解释。",
     "每个元素必须包含字段：name, seat, description, stance, method, temper, systemPrompt, roleType, gender, age。这里的 seat 表示人物长期观察重心，不是外部的本轮扮演角色。",
@@ -6481,61 +6510,31 @@ async function finishSeatGeneration(options = {}) {
   const { forceGeneration = false } = options;
   const currentSummary = state.lastSummary || "当前话题";
   const hostProfile = getPrimarySummaryProfile();
-  const roleIntake = await requestRoleGenerationIntake(currentSummary);
-  state.rolePlanningBrief = roleIntake.planningBrief || buildFallbackRolePlanningBrief(currentSummary);
+  state.rolePlanningBrief = "";
   state.recommendedRoleGenerationMeta = null;
-
-  if (!forceGeneration && roleIntake.status === "clarify" && roleIntake.questions.length) {
-    const clarifyDescription = langText("这些补充会直接影响系统该邀请谁上桌。", "These clarifications will directly affect which personas the system should invite to the table.");
-    state.generatingSeats = false;
-    state.seatsReady = false;
-    state.pendingRoleClarification = roleIntake.questions;
-    setStatusLoadingState(false);
-    renderSeatPicker();
-    renderSeatStack();
-    appendRoleClarificationPrompt(roleIntake.questions);
-    setSpeakerCard(langText("等待补充关键信息", "Waiting for Clarification"), langText("先补几个关键条件", "A few key details are needed first"), clarifyDescription, "系");
-    updateLiveStatus(clarifyDescription, "pending");
-    updateSeatFeedback(langText("系统先追问了几个关键点，补充后会更容易配准人选。", "The system asked a few key questions first so it can match personas more accurately."), "pending");
-    void syncCurrentTopicSnapshot();
-    return;
-  }
 
   state.pendingRoleClarification = [];
   state.taskSupplementMode = false;
-  const generatingDescription = langText(`第 1 步：正在计算必要人物位。当前调用模型：${getPrimarySummaryProfileName()}。`, `Step 1: calculating the required persona slots with ${getPrimarySummaryProfileName()}.`);
+  const generatingDescription = langText(`正在直接生成人物。当前调用模型：${getPrimarySummaryProfileName()}。`, `Generating personas directly with ${getPrimarySummaryProfileName()}.`);
   setStatusLoadingState(true);
   setSpeakerCard(langText("生成人物中", "Generating Personas"), "", generatingDescription, "系");
   updateLiveStatus(generatingDescription, "pending");
   updateSeatFeedback(generatingDescription, "pending");
-  if (roleIntake.planningFallback) {
-    appendMarkup(
-      createMessageMarkup({
-        speakerId: "system-role-planning-fallback",
-        label: "系",
-        sublabel: langText("人物规划已降级", "Persona Planning Fallback"),
-        body: langText(`主持模型 ${roleIntake.modelName || getPrimarySummaryProfileName()} 在人物规划阶段没有及时返回可用结果，系统已跳过这一步并继续尝试生成人物。${roleIntake.fallbackReason ? `失败原因：${roleIntake.fallbackReason}` : ""}`, `The host model ${roleIntake.modelName || getPrimarySummaryProfileName()} did not return a usable result in time during persona planning, so the app skipped that step and continued trying to generate personas. ${roleIntake.fallbackReason ? `Reason: ${roleIntake.fallbackReason}` : ""}`),
-        avatarLabel: "系",
-        avatarClass: "avatar-system",
-        tone: "system",
-      })
-    );
-  }
   try {
     state.recommendedRoles = [];
     renderSeatPicker();
     renderSeatStack();
-    const generationResult = await requestGeneratedRecommendedRolesSequential(currentSummary, state.rolePlanningBrief, {
+    const generationResult = await requestGeneratedRecommendedRolesSequential(currentSummary, "", {
       onStage: (stage, payload) => {
         if (stage === "identity-start") {
-          const message = langText(`第 2 步：准备逐个生成人物身份，共 ${payload.targetCount} 个。`, `Step 2: preparing to generate ${payload.targetCount} persona identities one by one.`);
+          const message = langText(`正在逐个生成人物，共 ${payload.targetCount} 个。`, `Generating ${payload.targetCount} personas one by one.`);
           setSpeakerCard(langText("生成人物中", "Generating Personas"), "", message, "系");
           updateLiveStatus(message, "pending");
           updateSeatFeedback(message, "pending");
           return;
         }
         if (stage === "identity-progress") {
-          const message = buildSingleRoleGenerationProgress(payload.slotIndex, payload.targetCount, payload.generatedCount);
+          const message = langText(`正在生成人物 ${Math.min(payload.slotIndex + 1, payload.targetCount)}/${payload.targetCount}，当前已生成 ${payload.generatedCount} 个。`, `Generating persona ${Math.min(payload.slotIndex + 1, payload.targetCount)}/${payload.targetCount}, ${payload.generatedCount} ready.`);
           setSpeakerCard(langText("生成人物中", "Generating Personas"), "", message, "系");
           updateLiveStatus(message, "pending");
           updateSeatFeedback(message, "pending");
@@ -6545,13 +6544,13 @@ async function finishSeatGeneration(options = {}) {
         state.recommendedRoles = roles;
         renderSeatPicker();
         renderSeatStack();
-        const message = langText(`第 2 步：已生成第 ${payload.slotIndex + 1} 个，当前共 ${roles.length}/${payload.targetCount} 个。`, `Step 2: generated persona ${payload.slotIndex + 1}, ${roles.length}/${payload.targetCount} ready.`);
+        const message = langText(`已生成第 ${payload.slotIndex + 1} 个，当前共 ${roles.length}/${payload.targetCount} 个。`, `Generated persona ${payload.slotIndex + 1}, ${roles.length}/${payload.targetCount} ready.`);
         setSpeakerCard(langText("生成人物中", "Generating Personas"), "", message, "系");
         updateLiveStatus(message, "pending");
         updateSeatFeedback(message, "pending");
       },
       onRoleFailed: (error, payload) => {
-        const message = langText(`第 2 步：第 ${payload.slotIndex + 1} 个生成失败，系统会继续补后面的位。当前已生成 ${payload.generatedCount} 个。`, `Step 2: persona ${payload.slotIndex + 1} failed, continuing with the remaining slots. ${payload.generatedCount} ready so far.`);
+        const message = langText(`第 ${payload.slotIndex + 1} 个生成失败，系统会继续补后面的位。当前已生成 ${payload.generatedCount} 个。`, `Persona ${payload.slotIndex + 1} failed, continuing with the remaining slots. ${payload.generatedCount} ready so far.`);
         setSpeakerCard(langText("生成人物中", "Generating Personas"), "", message, "系");
         updateLiveStatus(message, "pending");
         updateSeatFeedback(error.message, "pending");
@@ -6565,7 +6564,7 @@ async function finishSeatGeneration(options = {}) {
     const generatedCountDetail = generationResult.roles.length === generationResult.targetCount
       ? langText(`本轮共生成 ${generationResult.roles.length} 个针对性人物。`, `${generationResult.roles.length} targeted personas were generated.`)
       : langText(`本轮先生成了 ${generationResult.roles.length}/${generationResult.targetCount} 个人物，其余位稍后可重试或从人物库补齐。`, `${generationResult.roles.length}/${generationResult.targetCount} personas were generated. The remaining slots can be retried later or filled from the library.`);
-    state.recommendedRoleGenerationMeta = createRoleGenerationMeta("ai", hostProfile, generatedCountDetail, roleIntake.planningFallback);
+    state.recommendedRoleGenerationMeta = createRoleGenerationMeta("ai", hostProfile, generatedCountDetail, false);
     updateSeatFeedback(generatedCountDetail, generationResult.roles.length === generationResult.targetCount ? "success" : "pending");
   } catch (error) {
     console.error(error);
