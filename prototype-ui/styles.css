@@ -1264,23 +1264,23 @@ select.round-input option {
 
 .library-card {
   display: grid;
-  grid-template-rows: 44px auto auto auto;
+  grid-template-rows: 44px minmax(0, 1fr) auto auto;
   gap: 10px;
   min-height: 356px;
   height: auto;
   align-self: start;
-  align-content: start;
+  align-content: stretch;
   overflow: hidden;
 }
 
 .picker-card {
   display: grid;
-  grid-template-rows: 44px auto auto auto;
+  grid-template-rows: 44px minmax(0, 1fr) auto auto;
   gap: 10px;
   min-height: 356px;
   height: auto;
   align-self: start;
-  align-content: start;
+  align-content: stretch;
   overflow: hidden;
 }
 
@@ -1416,7 +1416,7 @@ select.round-input option {
 
 .role-card-footer {
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   margin-top: auto;
 }
@@ -1430,18 +1430,20 @@ select.round-input option {
   display: grid;
   grid-template-columns: 1fr;
   gap: 6px;
-  margin-top: 0;
+  margin-top: auto;
   align-content: start;
   min-height: calc(1.45em * 3 + 4px);
+  padding-top: 8px;
 }
 
 .picker-card .mini-tags {
   display: grid;
   grid-template-columns: 1fr;
   gap: 6px;
-  margin-top: 0;
+  margin-top: auto;
   align-content: start;
   min-height: calc(1.45em * 3);
+  padding-top: 8px;
 }
 
 .library-card .mini-tags span {
@@ -1474,6 +1476,7 @@ select.round-input option {
 .role-lock-note {
   font-size: 11px;
   color: var(--muted);
+  margin-right: auto;
 }
 
 .card-action[disabled] {
