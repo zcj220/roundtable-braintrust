@@ -1744,6 +1744,10 @@ select.round-input option {
   color: var(--muted);
 }
 
+.role-editor input#role-editor-age {
+  letter-spacing: 0.01em;
+}
+
 .settings-drawer-backdrop {
   position: fixed;
   inset: 0;

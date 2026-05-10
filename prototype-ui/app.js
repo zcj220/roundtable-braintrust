@@ -35,6 +35,146 @@ const modeHelpTextsEn = [
 
 const ROLE_COLORS = ["sky", "gold", "amber", "rose", "teal", "violet", "emerald", "coral", "slate"];
 
+const ROLE_VOICE_AGE_BUCKETS = {
+  child: { labelZh: "儿童", labelEn: "Child", sampleAges: [8, 10, 12] },
+  teen: { labelZh: "少年", labelEn: "Teen", sampleAges: [14, 16, 17] },
+  young: { labelZh: "青年", labelEn: "Young Adult", sampleAges: [22, 26, 32] },
+  middle: { labelZh: "中年", labelEn: "Middle Aged", sampleAges: [40, 45, 52] },
+  senior: { labelZh: "老年", labelEn: "Senior", sampleAges: [61, 68, 75] },
+};
+
+function getStableStringHash(value) {
+  return Array.from(String(value || "")).reduce((total, char) => ((total << 5) - total + char.charCodeAt(0)) | 0, 0);
+}
+
+function normalizeRoleGender(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  if (/^(male|man|m|男|男性)$/.test(normalized)) {
+    return "male";
+  }
+  if (/^(female|woman|f|女|女性)$/.test(normalized)) {
+    return "female";
+  }
+  if (/^(nonbinary|non-binary|nb|中性|非二元)$/.test(normalized)) {
+    return "nonbinary";
+  }
+  return "";
+}
+
+function normalizeRoleAge(value) {
+  return String(value || "").trim().replace(/\s+/g, "");
+}
+
+function detectVoiceAgeBucketFromText(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  const ageMatch = normalized.match(/(\d{1,2})\s*岁/);
+  if (ageMatch) {
+    const age = Number(ageMatch[1]);
+    if (age <= 12) {
+      return "child";
+    }
+    if (age <= 17) {
+      return "teen";
+    }
+    if (age <= 39) {
+      return "young";
+    }
+    if (age <= 59) {
+      return "middle";
+    }
+    return "senior";
+  }
+
+  if (/(儿童|小孩|孩子|孩童)/.test(normalized)) {
+    return "child";
+  }
+  if (/(少年|青少年|高中生|初中生|柯南)/.test(normalized)) {
+    return "teen";
+  }
+  if (/(青年|年轻|大学生|新锐|刚入行)/.test(normalized)) {
+    return "young";
+  }
+  if (/(中年|资深|负责人|工程师|经理|顾问|主理人|教授|医生|法医|牧师|创始人)/.test(normalized)) {
+    return "middle";
+  }
+  if (/(老年|老人|年迈|退休|长老|教父)/.test(normalized)) {
+    return "senior";
+  }
+  return "";
+}
+
+function getRoleVoiceAgeBucket(role) {
+  const explicitBucket = detectVoiceAgeBucketFromText(normalizeRoleAge(role?.age));
+  if (explicitBucket) {
+    return explicitBucket;
+  }
+  const fallbackText = `${role?.name || ""} ${role?.seat || ""} ${role?.description || ""}`;
+  return detectVoiceAgeBucketFromText(fallbackText) || "middle";
+}
+
+function buildAgeFromBucket(bucket, seedText) {
+  const bucketConfig = ROLE_VOICE_AGE_BUCKETS[bucket] || ROLE_VOICE_AGE_BUCKETS.middle;
+  const samples = bucketConfig.sampleAges;
+  const index = Math.abs(getStableStringHash(seedText || bucket)) % samples.length;
+  return `${samples[index]}岁`;
+}
+
+function inferRoleGender(role) {
+  const explicit = normalizeRoleGender(role?.gender || role?.sex || role?.genderLabel);
+  if (explicit) {
+    return explicit;
+  }
+  const text = `${role?.name || ""} ${role?.seat || ""} ${role?.description || ""}`;
+  if (/(女士|女性|女王|王后|母亲|妈妈|姐姐|妹妹|女孩|少女|赫敏|神奇女侠|花木兰|居里夫人)/.test(text)) {
+    return "female";
+  }
+  if (/(先生|男性|父亲|爸爸|哥哥|弟弟|男孩|柯南|奥古斯丁|加尔文|路德|司布真|卫斯理|乔纳森·艾夫|深泽直人|原研哉)/.test(text)) {
+    return "male";
+  }
+  return Math.abs(getStableStringHash(text)) % 2 === 0 ? "male" : "female";
+}
+
+function inferRoleAge(role) {
+  const explicit = normalizeRoleAge(role?.age || role?.ageLabel || role?.ageText || role?.ageRange);
+  if (explicit) {
+    return explicit;
+  }
+  const text = `${role?.name || ""} ${role?.seat || ""} ${role?.description || ""}`;
+  return buildAgeFromBucket(getRoleVoiceAgeBucket(role), text);
+}
+
+function getRoleGenderLabel(role) {
+  const normalized = normalizeRoleGender(role?.gender) || inferRoleGender(role);
+  if (normalized === "female") {
+    return langText("女", "Female");
+  }
+  if (normalized === "male") {
+    return langText("男", "Male");
+  }
+  if (normalized === "nonbinary") {
+    return langText("中性", "Non-binary");
+  }
+  return langText("未设定", "Unspecified");
+}
+
+function ensureRoleIdentityMeta(role) {
+  if (!role) {
+    return role;
+  }
+  return {
+    ...role,
+    gender: normalizeRoleGender(role?.gender) || inferRoleGender(role),
+    age: normalizeRoleAge(role?.age) || inferRoleAge(role),
+  };
+}
+
 function buildBaseRoleSystemPrompt({ name, seat, description, stance, method, temper }) {
   return [
     `你现在扮演一位${name}。你长期最稳定的观察重心是：${seat}。`,
@@ -383,6 +523,8 @@ function canDeleteRole(role) {
 function buildRoleTraitsMarkup(role, options = {}) {
   const { compact = false } = options;
   const traitPairs = [
+    [langText("性别", "Gender"), getRoleGenderLabel(role)],
+    [langText("年龄", "Age"), normalizeRoleAge(role?.age) || inferRoleAge(role)],
     [langText("立场", "Stance"), role.traits?.stance],
     [langText("专长", "Method"), role.traits?.method],
     [langText("性格", "Temper"), role.traits?.temper],
@@ -470,7 +612,7 @@ function buildRecommendedRoleIdentitySummary(role) {
 
 function normalizeRecommendedRolePersona(role) {
   if (!role || role.source !== "recommended") {
-    return role;
+    return ensureRoleIdentityMeta(role);
   }
 
   const description = looksLikeTaskDrivenRoleDescription(role.description)
@@ -479,7 +621,7 @@ function normalizeRecommendedRolePersona(role) {
   const nextRole = description === role.description ? role : { ...role, description };
 
   if (looksLikeInvalidDynamicRolePrompt(nextRole.systemPrompt) || description !== role.description) {
-    return {
+    return ensureRoleIdentityMeta({
       ...nextRole,
       systemPrompt: buildFallbackGeneratedRoleSystemPrompt({
         name: nextRole.name,
@@ -489,10 +631,10 @@ function normalizeRecommendedRolePersona(role) {
         method: nextRole.traits?.method || "针对性分析",
         temper: nextRole.traits?.temper || "冷静",
       }),
-    };
+    });
   }
 
-  return nextRole;
+  return ensureRoleIdentityMeta(nextRole);
 }
 
 function normalizeRecommendedRoleList(roles) {
@@ -726,6 +868,8 @@ const saveRoleEditorButton = document.getElementById("save-role-editor");
 const roleEditorId = document.getElementById("role-editor-id");
 const roleEditorName = document.getElementById("role-editor-name");
 const roleEditorSeat = document.getElementById("role-editor-seat");
+const roleEditorGender = document.getElementById("role-editor-gender");
+const roleEditorAge = document.getElementById("role-editor-age");
 const roleEditorDescription = document.getElementById("role-editor-description");
 const roleEditorPrompt = document.getElementById("role-editor-prompt");
 const roleEditorStance = document.getElementById("role-editor-stance");
@@ -2094,6 +2238,9 @@ const UI_TEXT = {
     peopleSearchPlaceholder: "搜索人物名、职业、标签、用途",
     roleNameLabel: "人物名称",
     roleNamePlaceholder: "比如：文本原义派",
+    roleGenderLabel: "性别",
+    roleAgeLabel: "年龄",
+    roleAgePlaceholder: "比如：45岁 / 16岁 / 68岁",
     roleDescriptionLabel: "人物说明",
     roleDescriptionPlaceholder: "写这个人物的身份背景、长期经验和典型关切",
     rolePromptLabel: "专有提示词",
@@ -2200,6 +2347,9 @@ const UI_TEXT = {
     peopleSearchPlaceholder: "Search names, roles, tags, or use cases",
     roleNameLabel: "Persona Name",
     roleNamePlaceholder: "For example: literal reading advocate",
+    roleGenderLabel: "Gender",
+    roleAgeLabel: "Age",
+    roleAgePlaceholder: "For example: 45 years old / 16 years old",
     roleDescriptionLabel: "Persona Background",
     roleDescriptionPlaceholder: "Describe this persona's background, long-term experience, and typical concerns",
     rolePromptLabel: "Persona Prompt",
@@ -2369,6 +2519,9 @@ function applyLanguageToStaticUi() {
   setElementPlaceholder("role-editor-ai-requirements", "roleAiAssistPlaceholder");
   setElementText("generate-role-with-ai", "roleAiGenerateButton");
   setElementPlaceholder("role-editor-name", "roleNamePlaceholder");
+  setElementText("role-editor-gender-label", "roleGenderLabel");
+  setElementText("role-editor-age-label", "roleAgeLabel");
+  setElementPlaceholder("role-editor-age", "roleAgePlaceholder");
   setElementText("role-editor-description-label", "roleDescriptionLabel");
   setElementPlaceholder("role-editor-description", "roleDescriptionPlaceholder");
   setElementText("role-editor-prompt-label", "rolePromptLabel");
@@ -3703,10 +3856,10 @@ function ensureCoreAssignments() {
 }
 
 function ensureRoleDefaults(role) {
-  return {
+  return ensureRoleIdentityMeta({
     ...role,
     systemPrompt: role.systemPrompt || `你是${role.name}，你长期最稳定的观察重心是${role.seat}。请围绕“${role.description}”发言，保持${role.traits.temper}语气，优先使用${role.traits.method}的方法，并坚持${role.traits.stance}的立场。`,
-  };
+  });
 }
 
 function normalizeProfile(profile) {
@@ -3802,7 +3955,7 @@ function filterRoles(list, query) {
     return list;
   }
 
-  return list.filter((role) => [role.name, role.seat, role.description, role.systemPrompt || "", role.sourceLabel || "", ...Object.values(role.traits)].join(" ").toLowerCase().includes(normalized));
+  return list.filter((role) => [role.name, role.seat, role.description, role.systemPrompt || "", role.sourceLabel || "", role.age || "", getRoleGenderLabel(role), ...Object.values(role.traits)].join(" ").toLowerCase().includes(normalized));
 }
 
 function renderPeopleSummary() {
@@ -4102,6 +4255,8 @@ function resetRoleEditor() {
   }
   roleEditorName.value = "";
   roleEditorSeat.value = "讨论参与者";
+  roleEditorGender.value = "female";
+  roleEditorAge.value = "45岁";
   roleEditorDescription.value = "";
   roleEditorPrompt.value = "";
   roleEditorStance.value = "支持原命题";
@@ -4125,6 +4280,8 @@ function fillRoleEditor(role) {
   roleEditorId.value = preparedRole.id;
   roleEditorName.value = preparedRole.name;
   roleEditorSeat.value = preparedRole.seat || "讨论参与者";
+  roleEditorGender.value = normalizeRoleGender(preparedRole.gender) || inferRoleGender(preparedRole);
+  roleEditorAge.value = normalizeRoleAge(preparedRole.age) || inferRoleAge(preparedRole);
   roleEditorDescription.value = preparedRole.description;
   roleEditorPrompt.value = preparedRole.systemPrompt || "";
   ensureSelectValue(roleEditorStance, preparedRole.traits?.stance || "自定义");
@@ -4822,6 +4979,8 @@ function normalizeGeneratedRole(generatedRole, index, createdAt) {
     },
     color,
     avatar,
+    gender: normalizeRoleGender(generatedRole.gender || generatedRole.sex || generatedRole.genderLabel || generatedRole.genderText),
+    age: normalizeRoleAge(generatedRole.age || generatedRole.ageText || generatedRole.ageLabel || generatedRole.ageRange),
     source: "recommended",
     sourceLabel: "临时生成",
     roleType: normalizeGeneratedRoleType(generatedRole.roleType || generatedRole.roleKind || generatedRole.personaType),
@@ -4853,8 +5012,10 @@ async function requestGeneratedRecommendedRoles(summary, planningBrief = "") {
     planningBrief ? `配人参考：\n${planningBrief}` : "",
     "seat 字段也写人话，简单概括这个人上桌主要负责看什么，不要再造抽象黑话。",
     "严格输出 JSON 数组，不要解释，不要 Markdown。",
-    "每个元素必须包含字段：name, seat, description, stance, method, temper, systemPrompt, roleType。可选字段：color, avatar。这里的 seat 表示人物长期观察重心，不是外部的本轮扮演角色。",
+    "每个元素必须包含字段：name, seat, description, stance, method, temper, systemPrompt, roleType, gender, age。可选字段：color, avatar。这里的 seat 表示人物长期观察重心，不是外部的本轮扮演角色。",
     "roleType 只能填 exemplar 或 expert。exemplar 表示真实人物、历史人物或高辨识度代表角色；expert 表示现实专家或原型角色。",
+    "gender 只填 male 或 female。age 直接写这个人物最贴切的年龄，比如 11岁、28岁、45岁、68岁。",
+    "如果是历史人物，优先写他最广为人知阶段的大致年龄；如果是虚构人物，优先写大众最熟悉设定里的年龄；如果是原型专家，请你直接编一个合理年龄。",
     "description 要写这个人的身份背景和长期关注点，不要写成任务拆解句。",
     "systemPrompt 要能直接拿去扮演这个人，第一句先说清身份，再说他最关注什么、如何发言、不要越位做什么。",
     `本次话题：${summary}`,
@@ -4922,8 +5083,10 @@ async function requestSingleRecommendedRole(summary, planningBrief, existingRole
         : "这是当前圆桌的第一个人物，请先给出最必要的起手人物。",
       getPeoplePoolRoleNamesText() ? `人物库里已有这些名字，禁止重复同名：${getPeoplePoolRoleNamesText()}` : "",
       "只需要返回 1 个 JSON 对象，不要解释，不要 Markdown。",
-      "必须字段：name, seat, description, stance, method, temper, roleType。可选字段：systemPrompt, color, avatar。这里的 seat 表示人物长期观察重心，不是外部的本轮扮演角色。",
+      "必须字段：name, seat, description, stance, method, temper, roleType, gender, age。可选字段：systemPrompt, color, avatar。这里的 seat 表示人物长期观察重心，不是外部的本轮扮演角色。",
       "name 和 seat 必须是人话，不能是抽象黑话。",
+      "gender 只填 male 或 female。age 直接写具体年龄，例如 16岁、29岁、44岁、63岁。",
+      "如果是历史人物，优先写他最广为人知阶段的大致年龄；如果是虚构人物，写大众最熟悉设定里的年龄；如果是原型专家，请直接编一个合理年龄。",
       "优先保证人物身份准确和互补。如果 systemPrompt 一时写不完整，可以留空，不要为了补 prompt 牺牲人物准确性。",
       `本次话题：${summary}`,
       retryNote,
@@ -5001,7 +5164,9 @@ async function requestEmergencyRecommendedRoles(summary, planningBrief = "") {
     planningBrief ? `配人参考：\n${planningBrief}` : "",
     `输出 ${targetCount} 个角色。`,
     "严格输出 JSON 数组，不要解释。",
-    "每个元素必须包含字段：name, seat, description, stance, method, temper, systemPrompt, roleType。这里的 seat 表示人物长期观察重心，不是外部的本轮扮演角色。",
+    "每个元素必须包含字段：name, seat, description, stance, method, temper, systemPrompt, roleType, gender, age。这里的 seat 表示人物长期观察重心，不是外部的本轮扮演角色。",
+    "gender 只填 male 或 female。age 直接写具体年龄，例如 15岁、27岁、46岁、71岁。",
+    "如果是历史人物，优先写他最广为人知阶段的大致年龄；如果是虚构人物，写大众最熟悉设定里的年龄；如果是原型专家，请直接编一个合理年龄。",
     `本次话题：${summary}`,
   ].filter(Boolean).join("\n\n");
 
@@ -5911,6 +6076,8 @@ async function handleRoleEditorSave() {
     id: existing?.id || savedFavorite?.id || `${recommendedSource ? "favorite" : "custom"}-${Date.now()}`,
     name,
     seat,
+    gender: normalizeRoleGender(roleEditorGender.value) || inferRoleGender(baseRole || { name, seat, description }),
+    age: normalizeRoleAge(roleEditorAge.value) || inferRoleAge(baseRole || { name, seat, description }),
     description,
     systemPrompt: roleEditorPrompt.value.trim() || buildFallbackGeneratedRoleSystemPrompt({
       name,
@@ -5955,6 +6122,8 @@ function applyAiDraftToRoleEditor(draft) {
   roleEditorId.value = "";
   roleEditorName.value = preparedRole.name;
   roleEditorSeat.value = preparedRole.seat || "讨论参与者";
+  roleEditorGender.value = normalizeRoleGender(preparedRole.gender) || inferRoleGender(preparedRole);
+  roleEditorAge.value = normalizeRoleAge(preparedRole.age) || inferRoleAge(preparedRole);
   roleEditorDescription.value = preparedRole.description;
   roleEditorPrompt.value = preparedRole.systemPrompt || "";
   ensureSelectValue(roleEditorStance, preparedRole.traits?.stance || "自定义");
@@ -5979,12 +6148,14 @@ async function requestAiRoleEditorDraft(requirements) {
     "如果用户只给了职业，比如护士、警察、地理学家、野外求生者，你就按这个身份在现实里会如何看问题来生成人物。",
     "如果用户给的是要求，比如擅长地理判断、懂欧美审美、会开模具、懂解剖，你就把这个要求落成一个真实可辨的人物身份。",
     "输出必须是 JSON 对象，不要解释，不要 Markdown。",
-    "字段必须包含：name, seat, description, stance, method, temper, systemPrompt, sourceLabel。可选字段：color。这里的 seat 表示人物长期观察重心，不是外部的本轮扮演角色。",
+    "字段必须包含：name, seat, description, stance, method, temper, systemPrompt, sourceLabel, gender, age。可选字段：color。这里的 seat 表示人物长期观察重心，不是外部的本轮扮演角色。",
     "规则：",
     "1. name 和 seat 都必须人话化；seat 只写人物长期观察重心，不要写主讲、旁证、裁判这类外部扮演角色。",
     "2. description 要写身份背景、长期经验和典型关注点。",
     "3. systemPrompt 第一段先交代身份，再写这个人物最先看什么、最不同意什么、会提醒别人忽略什么。",
-    "4. 默认具备现代知识，不要写成古早背景设定。",
+    "4. gender 只填 male 或 female。age 直接写具体年龄，例如 16岁、29岁、45岁、67岁。",
+    "5. 如果是历史人物，优先写他最广为人知阶段的大致年龄；如果是虚构人物，优先写大众最熟悉设定里的年龄；如果是原型专家，请直接编一个合理年龄。",
+    "6. 默认具备现代知识，不要写成古早背景设定。",
     getPeoplePoolRoleNamesText() ? `当前人物池已有这些名字，尽量不要重复同名：${getPeoplePoolRoleNamesText()}` : "",
     `用户要求：${requirements}`,
   ].filter(Boolean).join("\n\n");
