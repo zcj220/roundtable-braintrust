@@ -31,20 +31,20 @@
     <section class="workspace-modal panel" id="people-library-modal">
       <div class="modal-header">
         <div>
-          <p class="section-label">人物库</p>
-          <h2>管理你的人物配置库</h2>
+          <p class="section-label" id="people-library-section-label">人物库</p>
+          <h2 id="people-library-title">管理你的人物配置库</h2>
         </div>
         <div class="header-actions">
           <button class="ghost-link" id="open-role-editor" type="button">+ 新建人物</button>
-          <button class="ghost-link" id="close-people-library" type="button">关闭</button>
+          <button class="ghost-link" id="close-people-library" type="button">退出人物库</button>
         </div>
       </div>
       <div class="modal-toolbar">
         <div class="stats-strip" id="people-library-stats"></div>
         <div class="tab-row" id="people-filter-tabs">
-          <button class="tab-pill active" data-filter="all" type="button">全部</button>
-          <button class="tab-pill" data-filter="favorite" type="button">收藏</button>
-          <button class="tab-pill" data-filter="custom" type="button">自定义</button>
+          <button class="tab-pill active" id="people-filter-all" data-filter="all" type="button">全部</button>
+          <button class="tab-pill" id="people-filter-favorite" data-filter="favorite" type="button">收藏</button>
+          <button class="tab-pill" id="people-filter-custom" data-filter="custom" type="button">自定义</button>
         </div>
         <input id="people-search" class="search-input" type="text" placeholder="搜索人物名、职业、标签、用途" />
       </div>
@@ -52,11 +52,11 @@
         <input id="role-editor-id" type="hidden" />
         <div class="form-grid two-col">
           <label>
-            <span>人物名称</span>
+            <span id="role-editor-name-label">人物名称</span>
             <input id="role-editor-name" type="text" placeholder="比如：文本原义派" />
           </label>
           <label>
-            <span>席位定位</span>
+            <span id="role-editor-seat-label">席位定位</span>
             <select id="role-editor-seat">
               <option value="主解释者">主解释者</option>
               <option value="反方 / 质询者">反方 / 质询者</option>
@@ -72,16 +72,16 @@
           </label>
         </div>
         <label>
-          <span>人物说明</span>
+          <span id="role-editor-description-label">人物说明</span>
           <textarea id="role-editor-description" rows="2" placeholder="写这个人物的讨论风格、关注点和用途"></textarea>
         </label>
         <label>
-          <span>专有提示词</span>
+          <span id="role-editor-prompt-label">专有提示词</span>
           <textarea id="role-editor-prompt" rows="3" placeholder="写给 AI 的专属提示词，说明这个人物要如何观察、分析、发言和反驳"></textarea>
         </label>
         <div class="form-grid three-col">
           <label>
-            <span>立场</span>
+            <span id="role-editor-stance-label">立场</span>
             <select id="role-editor-stance">
               <option value="支持原命题">支持原命题</option>
               <option value="强力反驳">强力反驳</option>
@@ -94,7 +94,7 @@
             </select>
           </label>
           <label>
-            <span>角色颜色</span>
+            <span id="role-editor-color-label">角色颜色</span>
             <div class="color-dot-picker" id="role-editor-color-picker">
               <label class="color-dot-option sky"><input type="radio" name="role-color" value="sky" checked /><span></span></label>
               <label class="color-dot-option gold"><input type="radio" name="role-color" value="gold" /><span></span></label>
@@ -109,7 +109,7 @@
             <input id="role-editor-color" type="hidden" value="sky" />
           </label>
           <label>
-            <span>性格</span>
+            <span id="role-editor-temper-label">性格</span>
             <select id="role-editor-temper">
               <option value="稳健">稳健</option>
               <option value="温厚">温厚</option>
@@ -133,13 +133,13 @@
         </div>
         <div class="form-grid single-col">
           <label>
-            <span>来源标签</span>
+            <span id="role-editor-source-label-text">来源标签</span>
             <input id="role-editor-source-label" type="text" placeholder="比如：讲道常用 / 司法 / 医疗" />
           </label>
         </div>
         <div class="header-actions">
-          <button class="ghost-link" id="cancel-role-editor" type="button">取消</button>
-          <button class="action-primary compact-primary" id="save-role-editor" type="button">保存人物</button>
+          <button class="ghost-link" id="cancel-role-editor" type="button">取消并关闭</button>
+          <button class="action-primary compact-primary" id="save-role-editor" type="button">保存并关闭</button>
         </div>
       </div>
       <div class="card-grid people-grid" id="people-library-grid"></div>
@@ -149,8 +149,8 @@
     <section class="workspace-modal panel" id="seat-picker-modal">
       <div class="modal-header">
         <div>
-          <p class="section-label">席位配置</p>
-          <h2>为本轮讨论挑选参与者</h2>
+          <p class="section-label" id="seat-picker-section-label">席位配置</p>
+          <h2 id="seat-picker-title">为本轮讨论挑选参与者</h2>
         </div>
         <div class="header-actions">
           <span class="tiny-badge warm" id="seat-picker-count">已选 0 / 8</span>
@@ -161,8 +161,8 @@
       <div class="modal-toolbar">
         <p class="drawer-feedback" id="seat-picker-feedback">请先确认任务，系统会先生成推荐人物</p>
         <div class="tab-row" id="seat-source-tabs">
-          <button class="tab-pill active" data-source="recommended" type="button">系统临时生成</button>
-          <button class="tab-pill" data-source="library" type="button">人物库</button>
+          <button class="tab-pill active" id="seat-source-recommended" data-source="recommended" type="button">临时生成</button>
+          <button class="tab-pill" id="seat-source-library" data-source="library" type="button">人物库</button>
         </div>
         <input id="seat-picker-search" class="search-input" type="text" placeholder="搜索人物、职业、标签、说明" />
       </div>
@@ -170,84 +170,98 @@
     </section>
 
     <div class="settings-drawer-backdrop" id="settings-drawer-backdrop"></div>
+    <div class="modal-backdrop settings-modal-backdrop" id="model-profile-backdrop"></div>
+    <section class="settings-modal panel" id="model-profile-modal" aria-hidden="true">
+      <div class="modal-header compact-modal-header">
+        <div>
+          <p class="section-label" id="model-profile-section-label">模型接入</p>
+          <h2 id="model-profile-modal-title">新增模型配置</h2>
+        </div>
+        <button class="ghost-link" id="close-model-profile-modal" type="button">关闭</button>
+      </div>
+      <form class="settings-form" id="model-profile-form">
+        <input id="profile-id" type="hidden" />
+        <div class="settings-inline-tools">
+          <label class="settings-inline-field">
+            <span id="provider-template-label">模型厂商模板</span>
+            <select id="provider-template-select"></select>
+          </label>
+        </div>
+        <p class="field-note" id="profile-template-hint">内置模板只保留四类常用入口：硅基流动、火山方舟、OpenAI 官方、Claude 官方。其他淘宝中转大多走自定义接入 + OpenAI Compatible；如果对方要求额外签名、特殊 body 或自定义 header，这版前端还不够。</p>
+        <div class="form-grid two-col">
+          <label>
+            <span id="profile-display-name-label">自定义名称</span>
+            <input id="profile-display-name" type="text" placeholder="比如：主程序 / 系统 / 副手一" />
+          </label>
+          <label>
+            <span id="profile-provider-name-label">Provider 名称</span>
+            <input id="profile-provider-name" type="text" placeholder="比如：OpenRouter / 本地中转站" />
+          </label>
+        </div>
+        <div class="form-grid two-col">
+          <label>
+            <span id="profile-compatibility-label">兼容协议</span>
+            <select id="profile-compatibility">
+              <option value="openai">OpenAI Compatible</option>
+              <option value="anthropic">Anthropic Messages</option>
+            </select>
+          </label>
+          <label>
+            <span id="profile-model-id-label">模型 ID</span>
+            <input id="profile-model-id" type="text" placeholder="gpt-5.4 / deepseek-chat / glm-4.5" />
+          </label>
+        </div>
+        <div class="form-grid single-col">
+          <label>
+            <span id="profile-base-url-label">Base URL</span>
+            <input id="profile-base-url" type="text" placeholder="https://api.openai.com/v1" />
+          </label>
+        </div>
+        <div class="form-grid two-col">
+          <label>
+            <span id="profile-endpoint-path-label">接口路径</span>
+            <input id="profile-endpoint-path" type="text" placeholder="/chat/completions" />
+          </label>
+          <label>
+            <span id="profile-api-key-label">API Key</span>
+            <input id="profile-api-key" type="password" placeholder="sk-... 或中转 token" />
+          </label>
+        </div>
+        <p class="field-note" id="model-profile-note">这里用于选择厂商模板并填写接入参数。Base URL 通常由模板预填，不需要你自己猜。自定义接入目前适合 OpenAI Compatible 或 Anthropic Messages；如果卖家要求额外签名、特殊请求体或自定义请求头，这版前端还不够。点击保存后，这个配置才会进入已接入模型列表。系统内置模板不能删除，自定义配置可以删除。</p>
+        <div class="header-actions">
+          <span class="settings-status" id="profile-test-status">单模型测试请在已接入模型列表操作</span>
+          <button class="ghost-link" id="reset-model-profile" type="button">清空表单</button>
+          <button class="ghost-link" id="delete-model-profile" type="button">删除配置</button>
+          <button class="action-primary compact-primary" id="save-model-profile" type="submit">保存配置</button>
+        </div>
+      </form>
+    </section>
     <aside class="settings-drawer panel" id="settings-drawer">
       <div class="drawer-header">
         <div>
-          <p class="section-label">系统设置</p>
-          <h2>模型接入与运行配置</h2>
+          <p class="section-label" id="settings-section-label">系统设置</p>
+          <h2 id="settings-title">模型接入与运行配置</h2>
         </div>
         <button class="ghost-link" id="close-settings-drawer" type="button">关闭</button>
       </div>
       <div class="settings-group grow">
-        <p class="settings-label">模型接入</p>
-        <form class="settings-form" id="model-profile-form">
-          <input id="profile-id" type="hidden" />
-          <div class="settings-inline-tools">
-            <label class="settings-inline-field">
-              <span>模型厂商模板</span>
-              <select id="provider-template-select"></select>
-            </label>
-          </div>
-          <div class="form-grid two-col">
-            <label>
-              <span>自定义名称</span>
-              <input id="profile-display-name" type="text" placeholder="比如：主程序 / 系统 / 副手一" />
-            </label>
-            <label>
-              <span>Provider 名称</span>
-              <input id="profile-provider-name" type="text" placeholder="比如：OpenRouter / 本地中转站" />
-            </label>
-          </div>
-          <div class="form-grid two-col">
-            <label>
-              <span>兼容协议</span>
-              <select id="profile-compatibility">
-                <option value="openai">OpenAI Compatible</option>
-                <option value="anthropic">Anthropic Messages</option>
-                <option value="custom">Custom HTTP</option>
-              </select>
-            </label>
-            <label>
-              <span>模型 ID</span>
-              <input id="profile-model-id" type="text" placeholder="gpt-5.4 / deepseek-chat / glm-4.5" />
-            </label>
-          </div>
-          <div class="form-grid single-col">
-            <label>
-              <span>Base URL</span>
-              <input id="profile-base-url" type="text" placeholder="https://api.openai.com/v1" />
-            </label>
-          </div>
-          <div class="form-grid two-col">
-            <label>
-              <span>接口路径</span>
-              <input id="profile-endpoint-path" type="text" placeholder="/chat/completions" />
-            </label>
-            <label>
-              <span>API Key</span>
-              <input id="profile-api-key" type="password" placeholder="sk-... 或中转 token" />
-            </label>
-          </div>
-          <p class="field-note">上面用于选择厂商模板并填写接入参数。点击保存后，这个配置才会进入下面的已接入模型列表。系统内置模板不能删除，自定义配置可以删除。</p>
-          <div class="header-actions">
-            <span class="settings-status" id="profile-test-status">测试会发送一个字：1</span>
-            <button class="ghost-link" id="reset-model-profile" type="button">清空表单</button>
-            <button class="ghost-link" id="delete-model-profile" type="button">删除配置</button>
-            <button class="ghost-link" id="test-model-profile" type="button">测试连通</button>
-            <button class="action-primary compact-primary" id="save-model-profile" type="submit">保存配置</button>
-          </div>
-        </form>
         <div class="settings-subsection">
           <div class="side-title-row">
-            <h3>已接入模型列表</h3>
+            <h3 id="connected-model-list-title">已接入模型列表</h3>
+            <button class="action-primary compact-primary" id="open-model-profile-modal" type="button">新增模型</button>
           </div>
+          <p class="field-note" id="connected-model-list-note">这里直接展示已接入模型。新增、修改或切换模板时，点击右侧“配置模型”打开弹窗操作。</p>
           <div class="connected-model-list" id="connected-model-list"></div>
         </div>
         <div class="settings-subsection">
           <div class="side-title-row">
-            <h3>席位模型选择</h3>
+            <h3 id="host-model-title">主持 AI</h3>
           </div>
-          <p class="field-note">这里不再按“主AI / 反方 / 裁判”做全局映射。你在右侧配置好席位后，可以直接在每个席位卡里选择要使用的模型，界面会显示你自定义保存的模型名。</p>
+          <label class="settings-inline-field settings-inline-field-block">
+            <span id="host-model-select-label">谁来担任主持 AI</span>
+            <select id="host-model-select"></select>
+          </label>
+          <p class="field-note" id="host-model-note">这里只指定主持 AI 用哪个已接入模型。其他人物席位仍然在席位卡里各自选择模型，不在这里统一覆盖。</p>
         </div>
       </div>
     </aside>
@@ -276,11 +290,11 @@
 
         <section class="side-section compact">
           <div class="side-title-row">
-            <h2>人物库</h2>
+            <h2 id="sidebar-people-library-title">人物库</h2>
             <button class="ghost-link compact-link" id="open-people-library" type="button">查看</button>
           </div>
           <div class="people-config-card">
-            <p class="topic-tag">当前库</p>
+            <p class="topic-tag" id="people-library-current-tag">当前库</p>
             <h3 id="people-count">0 个人物原型</h3>
             <p id="people-summary">常用职业、收藏人物和自定义人物都会统一沉淀在这里。</p>
           </div>
@@ -290,11 +304,12 @@
       <main class="center-stage panel">
         <header class="stage-header compact-header">
           <div>
-            <p class="section-label">当前话题</p>
+            <p class="section-label" id="current-topic-label">当前话题</p>
             <h2 id="current-topic-title">罗马书这段经文，到底更侧重得救、成圣，还是两者并行？</h2>
           </div>
           <div class="header-pills compact-tools">
             <button class="tiny-badge button-badge" id="follow-toggle" type="button">跟随新消息</button>
+            <button class="tiny-badge button-badge" id="app-language-toggle" type="button">中文</button>
           </div>
         </header>
 
@@ -318,7 +333,7 @@
       <aside class="sidebar-right panel">
         <section class="side-section sticky-top">
           <div class="side-title-row">
-            <h2>讨论设置</h2>
+            <h2 id="discussion-settings-title">讨论设置</h2>
           </div>
 
           <div class="speaker-spotlight" id="speaker-spotlight">
@@ -331,25 +346,36 @@
           </div>
 
           <div class="compact-config-grid">
-            <button class="config-item compact-switch" id="cycle-mode" type="button">
-              <span>讨论目标</span>
+            <button class="config-item compact-switch" id="cycle-mode" type="button" aria-describedby="config-mode-tooltip">
+              <span id="cycle-mode-label">讨论目标</span>
               <strong id="config-mode">自由讨论</strong>
+              <span class="mode-hover-tooltip" id="config-mode-tooltip" role="tooltip" aria-hidden="true"></span>
             </button>
             <button class="config-item compact-switch" id="cycle-participation" type="button">
-              <span>用户参与</span>
+              <span id="cycle-participation-label">用户参与</span>
               <strong id="config-participation">每轮后表态</strong>
             </button>
-            <button class="config-item compact-switch" id="cycle-memory" type="button">
-              <span>记忆策略</span>
-              <strong id="config-memory">仅偏好记忆</strong>
+            <button class="config-item compact-switch" id="cycle-density" type="button">
+              <span id="cycle-density-label">回答力度</span>
+              <strong id="config-density">标准</strong>
             </button>
             <button class="config-item compact-switch" id="cycle-model" type="button">
-              <span>模型策略</span>
-              <strong id="config-model">系统分配</strong>
+              <span id="cycle-model-label">模型策略</span>
+              <strong id="config-model">系统支配</strong>
             </button>
             <label class="config-item compact-switch round-config" for="discussion-rounds-input">
-              <span>讨论轮次</span>
+              <span id="discussion-rounds-label">讨论轮次</span>
               <input id="discussion-rounds-input" class="round-input" type="number" min="1" max="9" step="1" value="1" />
+            </label>
+            <label class="config-item compact-switch round-config" for="discussion-size-select">
+              <span id="discussion-size-label">讨论规模</span>
+              <select id="discussion-size-select" class="round-input">
+                <option value="4">4 人</option>
+                <option value="5">5 人</option>
+                <option value="6" selected>6 人</option>
+                <option value="7">7 人</option>
+                <option value="8">8 人</option>
+              </select>
             </label>
           </div>
         </section>
@@ -357,11 +383,13 @@
         <section class="side-section">
           <div class="side-title-row">
             <h2>配置席位</h2>
-            <div class="inline-actions">
-              <button class="action-primary compact-primary" id="start-discussion" type="button">开始讨论</button>
-              <button class="action-secondary compact-primary" id="stop-discussion" type="button" disabled>结束讨论</button>
-              <button class="ghost-link add-seat-trigger" id="open-seat-picker" type="button">打开选角器</button>
-            </div>
+            <span class="tiny-badge" id="seat-config-progress">0/6</span>
+          </div>
+          <div class="inline-actions">
+            <button class="action-primary compact-primary" id="start-discussion" type="button">开始讨论</button>
+            <button class="action-secondary compact-primary" id="stop-discussion" type="button" disabled>结束讨论</button>
+            <button class="ghost-link compact-link" id="toggle-ai-role-recommendation" type="button">AI 推荐人物：开</button>
+            <button class="ghost-link add-seat-trigger" id="open-seat-picker" type="button">打开选角器</button>
           </div>
           <p class="seat-feedback seat-feedback-hidden" id="seat-feedback" aria-hidden="true">人物尚未生成</p>
           <div class="seat-stack" id="seat-stack"></div>
