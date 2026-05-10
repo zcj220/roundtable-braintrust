@@ -1035,7 +1035,7 @@ select.round-input option {
 .seat-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
+  gap: 8px;
   align-items: flex-start;
 }
 
@@ -1056,7 +1056,7 @@ select.round-input option {
 .picker-card-main {
   min-width: 0;
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .seat-traits,
@@ -1174,21 +1174,25 @@ select.round-input option {
 
 .seat-assignment {
   display: grid;
-  gap: 6px;
+  grid-template-columns: 74px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 10px;
   width: 100%;
 }
 
 .seat-assignment span {
   font-size: 11px;
   color: var(--muted);
-  text-align: right;
+  text-align: left;
+  white-space: nowrap;
 }
 
 .seat-assignment-select,
 .seat-order-select,
 .seat-model-select {
-  width: 100%;
-  padding: 8px 34px 8px 10px;
+  width: min(172px, 100%);
+  justify-self: end;
+  padding: 7px 34px 7px 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
   background:
@@ -1211,8 +1215,9 @@ select.round-input option {
 }
 
 .seat-assignment-static {
-  width: 100%;
-  padding: 8px 10px;
+  width: min(172px, 100%);
+  justify-self: end;
+  padding: 7px 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.04);
