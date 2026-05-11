@@ -153,6 +153,76 @@
       <div class="card-grid people-grid" id="people-library-grid"></div>
     </section>
 
+    <div class="modal-backdrop" id="roundtable-workbench-backdrop"></div>
+    <section class="workspace-modal panel" id="roundtable-workbench-modal">
+      <div class="modal-header">
+        <div>
+          <p class="section-label">圆桌台</p>
+          <h2>项目记忆、证据与共享 Agent</h2>
+        </div>
+        <div class="header-actions">
+          <button class="ghost-link" id="close-roundtable-workbench" type="button">关闭圆桌台</button>
+        </div>
+      </div>
+      <div class="roundtable-workbench-grid">
+        <div class="roundtable-workbench-column">
+          <article class="memory-card">
+            <div class="memory-card-head">
+              <p class="topic-tag">用户记忆</p>
+              <button class="ghost-link compact-link" id="refresh-user-memory" type="button">刷新</button>
+            </div>
+            <div class="memory-card-body" id="user-memory-panel"></div>
+          </article>
+
+          <article class="memory-card">
+            <div class="memory-card-head">
+              <p class="topic-tag">项目记忆</p>
+              <button class="ghost-link compact-link" id="refresh-project-memory" type="button">刷新</button>
+            </div>
+            <div class="memory-card-body" id="project-memory-panel"></div>
+          </article>
+
+          <article class="memory-card">
+            <div class="memory-card-head">
+              <p class="topic-tag">证据清单</p>
+            </div>
+            <div class="memory-card-body evidence-list" id="roundtable-evidence-list"></div>
+          </article>
+        </div>
+
+        <div class="roundtable-workbench-column">
+          <article class="memory-card">
+            <div class="memory-card-head">
+              <p class="topic-tag">证据详情</p>
+            </div>
+            <div class="memory-card-body evidence-detail" id="roundtable-evidence-detail"></div>
+          </article>
+
+          <article class="memory-card agent-workbench-card">
+            <div class="memory-card-head">
+              <p class="topic-tag">共享 Agent 工作台</p>
+            </div>
+            <div class="memory-card-body agent-workbench-body">
+              <label class="agent-field" for="shared-agent-query">
+                <span>研究问题</span>
+                <textarea id="shared-agent-query" rows="2" placeholder="默认会沿用当前任务定义，也可以手动补充具体搜索问题"></textarea>
+              </label>
+              <label class="agent-field" for="shared-agent-sources">
+                <span>补充网址</span>
+                <textarea id="shared-agent-sources" rows="2" placeholder="可粘贴网址，一行一个；共享 research agent 会尽量纳入这批来源"></textarea>
+              </label>
+              <div class="agent-actions-grid">
+                <button class="ghost-action" id="run-shared-research-agent" type="button">共享研究</button>
+                <button class="ghost-action" id="run-web-search-agent" type="button">网页搜索</button>
+                <button class="ghost-action" id="run-multimodal-agent" type="button">图片解析</button>
+              </div>
+              <p class="agent-status" id="shared-agent-status">等待执行共享 Agent</p>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
     <div class="modal-backdrop" id="seat-picker-backdrop"></div>
     <section class="workspace-modal panel" id="seat-picker-modal">
       <div class="modal-header">
@@ -216,7 +286,7 @@
           </label>
           <label>
             <span id="profile-model-id-label">模型 ID</span>
-            <input id="profile-model-id" type="text" placeholder="gpt-5.4 / deepseek-chat / glm-4.5" />
+            <input id="profile-model-id" type="text" placeholder="gpt-5.4 / deepseek-ai/DeepSeek-V3.2 / glm-4.5" />
           </label>
         </div>
         <div class="form-grid single-col">
@@ -271,6 +341,16 @@
           </label>
           <p class="field-note" id="host-model-note">这里只指定主持 AI 用哪个已接入模型。其他人物席位仍然在席位卡里各自选择模型，不在这里统一覆盖。</p>
         </div>
+        <div class="settings-subsection">
+          <div class="side-title-row">
+            <h3 id="multimodal-model-title">多模态 AI</h3>
+          </div>
+          <label class="settings-inline-field settings-inline-field-block">
+            <span id="multimodal-model-select-label">谁来负责图片解析</span>
+            <select id="multimodal-model-select"></select>
+          </label>
+          <p class="field-note" id="multimodal-model-note">如果主持模型本身支持视觉，可以跟随主持。若主持模型偏快但不支持图片，请在这里单独指定一个支持多模态的模型。</p>
+        </div>
       </div>
     </aside>
 
@@ -298,13 +378,11 @@
 
         <section class="side-section compact">
           <div class="side-title-row">
-            <h2 id="sidebar-people-library-title">人物库</h2>
-            <button class="ghost-link compact-link" id="open-people-library" type="button">查看</button>
+            <h2>工作台入口</h2>
           </div>
-          <div class="people-config-card">
-            <p class="topic-tag" id="people-library-current-tag">当前库</p>
-            <h3 id="people-count">0 个人物原型</h3>
-            <p id="people-summary">常用职业、收藏人物和自定义人物都会统一沉淀在这里。</p>
+          <div class="sidebar-shortcut-stack">
+            <button class="action-secondary sidebar-shortcut-button" id="open-people-library" type="button">打开人物库</button>
+            <button class="action-secondary sidebar-shortcut-button" id="open-roundtable-workbench" type="button">打开圆桌台</button>
           </div>
         </section>
       </aside>

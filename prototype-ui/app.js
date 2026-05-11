@@ -43,6 +43,85 @@ const ROLE_VOICE_AGE_BUCKETS = {
   senior: { labelZh: "老年", labelEn: "Senior", sampleAges: [61, 68, 75] },
 };
 
+const ROLE_VOICE_SAMPLE_FILES = [
+  "f_15-25_01.mp3",
+  "f_15-25_02.mp3",
+  "f_20-45_01.mp3",
+  "f_20-50_02.mp3",
+  "m_25-55_01.mp3",
+  "m_25-55_03.mp3",
+  "m_25-60 (1).mp3",
+  "m_25-60 (2).mp3",
+  "m_30-50_01.mp3",
+  "m_30-50_02.mp3",
+  "m_30-50_03.mp3",
+  "m_30-55_01.mp3",
+  "m_50-60_01.mp3",
+  "zhuchi.mp3",
+];
+
+const ROLE_VOICE_BUCKET_TARGET_AGES = {
+  child: 10,
+  teen: 16,
+  young: 28,
+  middle: 45,
+  senior: 68,
+};
+
+const HOST_VOICE_ROLE = {
+  id: "host-ai",
+  name: "主持AI",
+  gender: "female",
+  age: "35岁",
+  seat: "讨论主持者",
+  description: "负责开场、控制节奏、每轮小结、压缩上下文，并在最后整理给用户的结论稿。",
+  traits: { stance: "保持中立主持", method: "总结压缩", temper: "清晰" },
+};
+
+function parseRoleVoiceSampleFile(fileName) {
+  if (!fileName) {
+    return null;
+  }
+  if (/^zhuchi\.mp3$/i.test(fileName)) {
+    return {
+      id: "voice-host-zhuchi",
+      fileName,
+      filePath: `../assets/${fileName}`,
+      gender: "female",
+      minAge: 28,
+      maxAge: 42,
+      midAge: 35,
+      variant: "host",
+      isHost: true,
+    };
+  }
+
+  const match = fileName.match(/^([fm])_(\d+)-(\d+)(?:\s*\((\d+)\)|_(\d+))?\.mp3$/i);
+  if (!match) {
+    return null;
+  }
+
+  const genderCode = match[1].toLowerCase();
+  const minAge = Number(match[2]);
+  const maxAge = Number(match[3]);
+  const variant = match[4] || match[5] || "01";
+  return {
+    id: `voice-${genderCode}-${minAge}-${maxAge}-${variant}`,
+    fileName,
+    filePath: `../assets/${fileName}`,
+    gender: genderCode === "f" ? "female" : "male",
+    minAge,
+    maxAge,
+    midAge: Math.round((minAge + maxAge) / 2),
+    variant,
+    isHost: false,
+  };
+}
+
+const ROLE_VOICE_SAMPLES = ROLE_VOICE_SAMPLE_FILES.map(parseRoleVoiceSampleFile).filter(Boolean);
+const HOST_VOICE_SAMPLE = ROLE_VOICE_SAMPLES.find((sample) => sample.isHost) || null;
+const ROLE_VOICE_SAMPLE_MAP = new Map(ROLE_VOICE_SAMPLES.map((sample) => [sample.id, sample]));
+
 function getStableStringHash(value) {
   return Array.from(String(value || "")).reduce((total, char) => ((total << 5) - total + char.charCodeAt(0)) | 0, 0);
 }
@@ -66,6 +145,11 @@ function normalizeRoleGender(value) {
 
 function normalizeRoleAge(value) {
   return String(value || "").trim().replace(/\s+/g, "");
+}
+
+function extractNumericAge(value) {
+  const match = String(value || "").match(/(\d{1,2})/);
+  return match ? Number(match[1]) : null;
 }
 
 function detectVoiceAgeBucketFromText(text) {
@@ -124,6 +208,166 @@ function buildAgeFromBucket(bucket, seedText) {
   const samples = bucketConfig.sampleAges;
   const index = Math.abs(getStableStringHash(seedText || bucket)) % samples.length;
   return `${samples[index]}岁`;
+}
+
+function getApproximateRoleAge(role) {
+  const explicitAge = extractNumericAge(normalizeRoleAge(role?.age || role?.ageLabel || role?.ageText || role?.ageRange));
+  if (explicitAge) {
+    return explicitAge;
+  }
+  return ROLE_VOICE_BUCKET_TARGET_AGES[getRoleVoiceAgeBucket(role)] || ROLE_VOICE_BUCKET_TARGET_AGES.middle;
+}
+
+function getVoiceSampleById(sampleId) {
+  return ROLE_VOICE_SAMPLE_MAP.get(sampleId) || null;
+}
+
+function getVoiceSampleDistance(sample, age) {
+  if (!sample) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  if (age >= sample.minAge && age <= sample.maxAge) {
+    return 0;
+  }
+  if (age < sample.minAge) {
+    return sample.minAge - age;
+  }
+  return age - sample.maxAge;
+}
+
+function getVoiceSampleDisplayLabel(sample) {
+  if (!sample) {
+    return "";
+  }
+  if (sample.isHost) {
+    return langText("主持专属女声", "Dedicated host voice");
+  }
+  const genderLabel = sample.gender === "female" ? langText("女声", "Female") : langText("男声", "Male");
+  return `${genderLabel} ${sample.minAge}-${sample.maxAge} · ${sample.variant}`;
+}
+
+function getRoleVoiceCandidates(role, usedSampleIds = new Set()) {
+  const targetGender = normalizeRoleGender(role?.gender) || inferRoleGender(role);
+  const targetAge = getApproximateRoleAge(role);
+  const sameGender = ROLE_VOICE_SAMPLES.filter((sample) => !sample.isHost && sample.gender === targetGender);
+  const primaryPool = sameGender.length ? sameGender : ROLE_VOICE_SAMPLES.filter((sample) => !sample.isHost);
+  const compare = (left, right) => {
+    const distanceDiff = getVoiceSampleDistance(left, targetAge) - getVoiceSampleDistance(right, targetAge);
+    if (distanceDiff !== 0) {
+      return distanceDiff;
+    }
+    return left.fileName.localeCompare(right.fileName, "zh-CN");
+  };
+  const unused = primaryPool.filter((sample) => !usedSampleIds.has(sample.id)).sort(compare);
+  const used = primaryPool.filter((sample) => usedSampleIds.has(sample.id)).sort(compare);
+  return [...unused, ...used];
+}
+
+function voiceSampleMatchesRole(sample, role) {
+  if (!sample || sample.isHost) {
+    return false;
+  }
+  const targetGender = normalizeRoleGender(role?.gender) || inferRoleGender(role);
+  return sample.gender === targetGender;
+}
+
+function syncRoleVoiceAssignments() {
+  const nextAssignments = {};
+  const usedSampleIds = new Set();
+  if (HOST_VOICE_SAMPLE) {
+    nextAssignments[HOST_VOICE_ROLE.id] = HOST_VOICE_SAMPLE.id;
+    usedSampleIds.add(HOST_VOICE_SAMPLE.id);
+  }
+
+  const selectedRoles = getOrderedSelectedRoleIds().map((roleId) => getRoleById(roleId)).filter(Boolean);
+  selectedRoles.forEach((role) => {
+    const existing = getVoiceSampleById(state.voiceSampleAssignments?.[role.id]);
+    if (existing && voiceSampleMatchesRole(existing, role) && !usedSampleIds.has(existing.id)) {
+      nextAssignments[role.id] = existing.id;
+      usedSampleIds.add(existing.id);
+    }
+  });
+
+  selectedRoles.forEach((role) => {
+    if (nextAssignments[role.id]) {
+      return;
+    }
+    const sample = getRoleVoiceCandidates(role, usedSampleIds)[0] || null;
+    if (sample) {
+      nextAssignments[role.id] = sample.id;
+      usedSampleIds.add(sample.id);
+    }
+  });
+
+  state.voiceSampleAssignments = nextAssignments;
+  return nextAssignments;
+}
+
+function getAssignedVoiceSampleForRole(role) {
+  if (!role) {
+    return null;
+  }
+  if (!state.voiceSampleAssignments[role.id]) {
+    syncRoleVoiceAssignments();
+  }
+  return getVoiceSampleById(state.voiceSampleAssignments[role.id]) || null;
+}
+
+function getDiscussionSpeakerRoleById(speakerId) {
+  if (!speakerId) {
+    return null;
+  }
+  if (speakerId === HOST_VOICE_ROLE.id || speakerId === "system" || speakerId === "shared-research-agent") {
+    return HOST_VOICE_ROLE;
+  }
+  return getRoleById(speakerId) || null;
+}
+
+function buildReadAloudProfile(role) {
+  const sample = getAssignedVoiceSampleForRole(role);
+  const gender = sample?.gender || normalizeRoleGender(role?.gender) || inferRoleGender(role);
+  const bucket = role ? getRoleVoiceAgeBucket(role) : "middle";
+  let rate = state.appLanguage === "en" ? 0.96 : 0.92;
+  let pitch = gender === "male" ? 0.88 : 1.08;
+
+  if (bucket === "child") {
+    pitch += 0.12;
+    rate += 0.06;
+  } else if (bucket === "teen") {
+    pitch += 0.06;
+    rate += 0.03;
+  } else if (bucket === "senior") {
+    pitch -= 0.08;
+    rate -= 0.06;
+  } else if (bucket === "middle") {
+    rate -= 0.01;
+  }
+
+  return {
+    gender,
+    rate: Math.max(0.8, Math.min(1.08, rate)),
+    pitch: Math.max(0.72, Math.min(1.28, pitch)),
+  };
+}
+
+function playVoiceSampleForRole(role) {
+  const sample = getAssignedVoiceSampleForRole(role);
+  if (!sample) {
+    updateSeatFeedback(langText("当前没有可试听的声音样本。", "No voice sample is available for this persona."), "pending");
+    return;
+  }
+
+  if (activeVoiceSampleAudio) {
+    activeVoiceSampleAudio.pause();
+    activeVoiceSampleAudio.currentTime = 0;
+  }
+
+  activeVoiceSampleAudio = new Audio(sample.filePath);
+  activeVoiceSampleAudio.play().catch((error) => {
+    console.warn("voice sample playback failed", error);
+    updateSeatFeedback(langText("声音样本播放失败，请确认你是通过本地页面或静态服务器打开原型。", "Voice sample playback failed. Open the prototype from a local page or static server and try again."), "pending");
+  });
+  updateSeatFeedback(langText(`正在试听 ${role?.name || "该角色"} 的声音：${getVoiceSampleDisplayLabel(sample)}`, `Previewing ${role?.name || "this role"}: ${getVoiceSampleDisplayLabel(sample)}`), "success");
 }
 
 function inferRoleGender(role) {
@@ -400,6 +644,65 @@ function sanitizeGeneratedRoleName(rawName) {
   return stripped || normalized || "临时角色";
 }
 
+function looksLikePersonalRoleName(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return false;
+  }
+  if (/^[\u4e00-\u9fff]{2,4}$/u.test(normalized)) {
+    return true;
+  }
+  return /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}$/.test(normalized);
+}
+
+function looksLikeProfessionalRoleLabel(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return false;
+  }
+  return /(专家|工程师|研究员|顾问|设计师|经理|负责人|教师|医生|律师|警察|法医|程序员|学家|主持人|讲解者|研究者|诠释者|释经者|转译者|调查员|分析师|架构师|记者|编辑|检察官|审计师|咨询师|策划|采购|运营|产品经理|导演|教练|技师|科学家|长老|牧师|学者)$/u.test(normalized);
+}
+
+function convertSeatToRoleLabel(value) {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/[，。；、]/g, " ")
+    .split(/\s+/)[0]
+    .trim();
+  if (!normalized) {
+    return "专题分析专家";
+  }
+  if (looksLikeProfessionalRoleLabel(normalized)) {
+    return normalized;
+  }
+  if (/者$/u.test(normalized)) {
+    return normalized.replace(/者$/u, "专家");
+  }
+  if (normalized.length <= 12) {
+    return `${normalized}专家`;
+  }
+  return `${normalized.slice(0, 10)}专家`;
+}
+
+function getRecommendedRolePublicName(role) {
+  const roleType = normalizeGeneratedRoleType(role?.roleType || role?.roleKind || role?.personaType);
+  const rawName = sanitizeGeneratedRoleName(role?.name || role?.title || "");
+  const rawSeat = String(role?.seat || role?.role || "").trim();
+  if (roleType === "exemplar") {
+    return rawName || rawSeat || "临时人物";
+  }
+  if (looksLikeProfessionalRoleLabel(rawName)) {
+    return rawName;
+  }
+  if (rawSeat && looksLikeProfessionalRoleLabel(rawSeat)) {
+    return rawSeat;
+  }
+  if (looksLikePersonalRoleName(rawName)) {
+    return convertSeatToRoleLabel(rawSeat || rawName);
+  }
+  return convertSeatToRoleLabel(rawSeat || rawName);
+}
+
 function getRoleNameFingerprint(name) {
   return sanitizeGeneratedRoleName(name)
     .toLowerCase()
@@ -490,7 +793,7 @@ function validateGeneratedRoleCandidates(candidates, targetCount = MIN_RECOMMEND
 }
 
 function getDisplayRoleName(role) {
-  return role?.source === "recommended" ? sanitizeGeneratedRoleName(role.name) : role?.name || "";
+  return role?.source === "recommended" ? getRecommendedRolePublicName(role) : role?.name || "";
 }
 
 function getRoleCardTitle(role) {
@@ -615,10 +918,13 @@ function normalizeRecommendedRolePersona(role) {
     return ensureRoleIdentityMeta(role);
   }
 
+  const publicName = getRecommendedRolePublicName(role);
   const description = looksLikeTaskDrivenRoleDescription(role.description)
     ? buildRecommendedRoleIdentitySummary(role)
     : role.description;
-  const nextRole = description === role.description ? role : { ...role, description };
+  const nextRole = (description === role.description && publicName === role.name)
+    ? role
+    : { ...role, name: publicName, description };
 
   if (looksLikeInvalidDynamicRolePrompt(nextRole.systemPrompt) || description !== role.description) {
     return ensureRoleIdentityMeta({
@@ -673,7 +979,7 @@ const defaultProfiles = [
     compatibility: "openai",
     baseUrl: "https://api.siliconflow.cn/v1",
     endpointPath: "/chat/completions",
-    modelId: "deepseek-ai/DeepSeek-V3",
+    modelId: "deepseek-ai/DeepSeek-V3.2",
     apiKey: "",
     locked: true,
     configured: false,
@@ -804,6 +1110,54 @@ const visibleBuiltinTemplateOrder = new Map([
 
 const defaultProfileMap = new Map(defaultProfiles.map((profile) => [profile.id, profile]));
 
+const USER_MEMORY_KEY = "userMemory";
+const PROJECT_ARTIFACTS_KEY_PREFIX = "projectArtifacts:";
+const SHARED_AGENT_IDS = [
+  "user-memory-agent",
+  "project-memory-agent",
+  "shared-research-agent",
+  "web-search-agent",
+  "multimodal-evidence-agent",
+];
+
+function buildEmptyUserMemory() {
+  return {
+    version: 1,
+    lastUpdatedAt: 0,
+    preferredLanguage: "zh",
+    preferredModeIndex: 0,
+    preferredParticipationIndex: 0,
+    preferredDensityIndex: 1,
+    preferredDiscussionSize: 6,
+    preferredModelIndex: 0,
+    preferredHostProfileId: "",
+    pinnedRoleIds: [],
+    usage: {
+      discussionsStarted: 0,
+      attachmentsUploaded: 0,
+      researchRuns: 0,
+      multimodalRuns: 0,
+    },
+    selectedRoleCounts: {},
+    hostProfileCounts: {},
+  };
+}
+
+function buildEmptyProjectMemory() {
+  return {
+    version: 1,
+    topicId: "",
+    title: "",
+    taskSummary: "",
+    sharedFacts: "",
+    roundSummaries: [],
+    keyEvidence: [],
+    unresolvedQuestions: [],
+    agentNotes: [],
+    updatedAt: 0,
+  };
+}
+
 const state = {
   appLanguage: "zh",
   modeIndex: 0,
@@ -839,24 +1193,39 @@ const state = {
   peopleRoles: [],
   modelProfiles: [],
   recommendedRoles: [],
-  mappings: { main: "", challenger: "", judge: "" },
+  mappings: { main: "", challenger: "", judge: "", multimodal: "" },
   selectedIds: new Set(),
   seatAssignments: {},
   discussionOrder: {},
+  voiceSampleAssignments: {},
+  ttsVoiceAssignments: {},
   seatModelAssignments: {},
   topics: [],
   activeTopicId: "",
   pendingAttachments: [],
+  userMemory: buildEmptyUserMemory(),
+  projectMemory: buildEmptyProjectMemory(),
+  projectArtifacts: [],
+  sharedAgentQuery: "",
+  sharedAgentSources: "",
+  sharedAgentStatus: { text: "", tone: "" },
 };
 
 let pendingConfirmResolver = null;
 let pendingUserParticipationResolver = null;
 let pendingDiscussionContinuationResolver = null;
+let activeRoundtableEvidenceId = "";
 
 const peopleLibraryBackdrop = document.getElementById("people-library-backdrop");
 const peopleLibraryModal = document.getElementById("people-library-modal");
 const closePeopleLibrary = document.getElementById("close-people-library");
 const openPeopleLibraryButton = document.getElementById("open-people-library");
+const roundtableWorkbenchBackdrop = document.getElementById("roundtable-workbench-backdrop");
+const roundtableWorkbenchModal = document.getElementById("roundtable-workbench-modal");
+const closeRoundtableWorkbenchButton = document.getElementById("close-roundtable-workbench");
+const openRoundtableWorkbenchButton = document.getElementById("open-roundtable-workbench");
+const roundtableEvidenceList = document.getElementById("roundtable-evidence-list");
+const roundtableEvidenceDetail = document.getElementById("roundtable-evidence-detail");
 const peopleLibraryStats = document.getElementById("people-library-stats");
 const peopleFilterTabs = document.getElementById("people-filter-tabs");
 const peopleSearch = document.getElementById("people-search");
@@ -924,6 +1293,7 @@ const providerTemplateSelect = document.getElementById("provider-template-select
 const profileTemplateHint = document.getElementById("profile-template-hint");
 const connectedModelList = document.getElementById("connected-model-list");
 const hostModelSelect = document.getElementById("host-model-select");
+const multimodalModelSelect = document.getElementById("multimodal-model-select");
 
 const toggleTopicsButton = document.getElementById("toggle-topics");
 const topicList = document.getElementById("topic-list");
@@ -960,14 +1330,26 @@ const toggleVoiceReadButton = document.getElementById("toggle-voice-read");
 const seatFeedback = document.getElementById("seat-feedback");
 const seatStack = document.getElementById("seat-stack");
 const seatConfigProgress = document.getElementById("seat-config-progress");
+const refreshUserMemoryButton = document.getElementById("refresh-user-memory");
+const refreshProjectMemoryButton = document.getElementById("refresh-project-memory");
+const userMemoryPanel = document.getElementById("user-memory-panel");
+const projectMemoryPanel = document.getElementById("project-memory-panel");
+const sharedAgentQueryInput = document.getElementById("shared-agent-query");
+const sharedAgentSourcesInput = document.getElementById("shared-agent-sources");
+const runSharedResearchAgentButton = document.getElementById("run-shared-research-agent");
+const runWebSearchAgentButton = document.getElementById("run-web-search-agent");
+const runMultimodalAgentButton = document.getElementById("run-multimodal-agent");
+const sharedAgentStatus = document.getElementById("shared-agent-status");
 
 let dbPromise;
 let roleEditorContext = null;
 let modelProfileTemplateId = "";
 let modelProfileEditMode = false;
-let preferredReadAloudVoice = null;
+let preferredReadAloudVoices = new Map();
 let readAloudQueue = [];
 let activeReadAloudUtterance = null;
+let activeVoiceSampleAudio = null;
+let activeReadAloudElement = null;
 
 function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -1063,6 +1445,298 @@ async function clearDeletedBaseRole(roleId) {
   }
 }
 
+function normalizeUserMemory(memory) {
+  const base = buildEmptyUserMemory();
+  return {
+    ...base,
+    ...(memory || {}),
+    usage: {
+      ...base.usage,
+      ...(memory?.usage || {}),
+    },
+    selectedRoleCounts: { ...(memory?.selectedRoleCounts || {}) },
+    hostProfileCounts: { ...(memory?.hostProfileCounts || {}) },
+    pinnedRoleIds: Array.isArray(memory?.pinnedRoleIds) ? memory.pinnedRoleIds.filter(Boolean) : [],
+  };
+}
+
+function normalizeProjectMemory(memory) {
+  const base = buildEmptyProjectMemory();
+  return {
+    ...base,
+    ...(memory || {}),
+    roundSummaries: Array.isArray(memory?.roundSummaries) ? memory.roundSummaries.filter(Boolean) : [],
+    keyEvidence: Array.isArray(memory?.keyEvidence) ? memory.keyEvidence.filter(Boolean) : [],
+    unresolvedQuestions: Array.isArray(memory?.unresolvedQuestions) ? memory.unresolvedQuestions.filter(Boolean) : [],
+    agentNotes: Array.isArray(memory?.agentNotes) ? memory.agentNotes.filter(Boolean) : [],
+  };
+}
+
+function normalizeProjectArtifacts(records) {
+  return Array.isArray(records)
+    ? records.filter(Boolean).map((record) => ({
+        id: record.id || `artifact-${Date.now()}`,
+        topicId: record.topicId || state.activeTopicId || "",
+        name: record.name || "附件",
+        type: record.type || "application/octet-stream",
+        size: Number(record.size || 0),
+        kind: record.kind || (String(record.type || "").startsWith("image/") ? "image" : "file"),
+        dataUrl: record.dataUrl || "",
+        textPreview: record.textPreview || "",
+        createdAt: Number(record.createdAt || Date.now()),
+      }))
+    : [];
+}
+
+function getProjectArtifactsKey(topicId) {
+  return `${PROJECT_ARTIFACTS_KEY_PREFIX}${topicId}`;
+}
+
+async function loadProjectArtifacts(topicId) {
+  if (!topicId) {
+    return [];
+  }
+  return normalizeProjectArtifacts(await loadAppState(getProjectArtifactsKey(topicId), []));
+}
+
+async function saveProjectArtifacts(topicId, artifacts) {
+  if (!topicId) {
+    return;
+  }
+  await saveAppState(getProjectArtifactsKey(topicId), normalizeProjectArtifacts(artifacts));
+}
+
+async function deleteProjectArtifacts(topicId) {
+  if (!topicId) {
+    return;
+  }
+  await dbDelete(APP_STATE_STORE, getProjectArtifactsKey(topicId));
+}
+
+function summarizeText(value, maxLength = 180) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) {
+    return "";
+  }
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
+
+function uniqueStrings(items) {
+  return [...new Set((items || []).map((item) => String(item || "").trim()).filter(Boolean))];
+}
+
+function extractOpenQuestionsFromText(text) {
+  return String(text || "")
+    .split(/[\n。！？!?]/)
+    .map((item) => item.trim())
+    .filter((item) => item && (/[?？]/.test(item) || /待|尚未|不能|有待|仍需|还需|不确定/.test(item)))
+    .slice(0, 6);
+}
+
+function getTopCountEntries(record, limit = 4) {
+  return Object.entries(record || {})
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, limit);
+}
+
+function getReadableRoleNameById(roleId) {
+  return getRoleById(roleId)?.name || roleId;
+}
+
+function buildUserMemoryPrompt() {
+  const userMemory = normalizeUserMemory(state.userMemory);
+  const preferredRoles = getTopCountEntries(userMemory.selectedRoleCounts)
+    .map(([roleId]) => getReadableRoleNameById(roleId))
+    .filter(Boolean)
+    .join("、");
+  const hostProfile = getConfiguredProfileById(userMemory.preferredHostProfileId);
+  return [
+    hostProfile ? `用户常用主持模型：${hostProfile.displayName}` : "",
+    `用户常用讨论目标：${modeValues[userMemory.preferredModeIndex] || modeValues[0]}`,
+    `用户常用回答力度：${densityValues[userMemory.preferredDensityIndex] || densityValues[1]}`,
+    `用户常用讨论规模：${userMemory.preferredDiscussionSize} 人`,
+    preferredRoles ? `用户偏好的常用人物：${preferredRoles}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function buildProjectMemoryPrompt() {
+  const projectMemory = normalizeProjectMemory(state.projectMemory);
+  return [
+    projectMemory.taskSummary ? `项目记忆中的任务定义：${projectMemory.taskSummary}` : "",
+    projectMemory.sharedFacts ? `项目记忆中的共享事实：${projectMemory.sharedFacts}` : "",
+    projectMemory.roundSummaries.length ? `项目记忆中的轮次摘要：\n${projectMemory.roundSummaries.join("\n")}` : "",
+    projectMemory.unresolvedQuestions.length ? `项目记忆中的未决问题：${projectMemory.unresolvedQuestions.join("；")}` : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+function deriveProjectMemoryFromState() {
+  const artifactEvidence = state.projectArtifacts.map((artifact) => {
+    const typeLabel = artifact.kind === "image"
+      ? langText("图片", "Image")
+      : artifact.textPreview
+        ? langText("文本附件", "Text Attachment")
+        : langText("附件", "Attachment");
+    const detail = artifact.textPreview ? `：${summarizeText(artifact.textPreview, 72)}` : "";
+    return `${artifact.name}（${typeLabel}${detail}）`;
+  });
+
+  return normalizeProjectMemory({
+    ...state.projectMemory,
+    topicId: state.activeTopicId,
+    title: deriveTopicTitle(),
+    taskSummary: state.lastSummary,
+    sharedFacts: state.sharedResearchBrief,
+    roundSummaries: state.discussionRoundNotes.map((note) => `第 ${note.round} 轮：${summarizeText(note.moderatorSummary || "无", 120)}`),
+    keyEvidence: uniqueStrings([
+      ...artifactEvidence,
+      ...collectSharedResearchEvidenceEntries(),
+    ]).slice(0, 8),
+    unresolvedQuestions: uniqueStrings([
+      ...state.pendingRoleClarification,
+      ...extractOpenQuestionsFromText(state.sharedResearchBrief),
+      ...extractOpenQuestionsFromText(state.latestReportText),
+    ]).slice(0, 6),
+    updatedAt: Date.now(),
+  });
+}
+
+function collectSharedResearchEvidenceEntries() {
+  return String(state.sharedResearchBrief || "")
+    .split(/[\n；;]/)
+    .map((item) => summarizeText(item, 96))
+    .filter(Boolean)
+    .slice(0, 4);
+}
+
+function updateSharedAgentStatus(text, tone = "") {
+  state.sharedAgentStatus = { text, tone };
+  if (!sharedAgentStatus) {
+    return;
+  }
+  sharedAgentStatus.textContent = text;
+  sharedAgentStatus.className = `agent-status ${tone}`.trim();
+}
+
+async function persistUserMemory() {
+  state.userMemory = normalizeUserMemory(state.userMemory);
+  await saveAppState(USER_MEMORY_KEY, state.userMemory);
+}
+
+function syncUserMemoryFromState(reason = "passive", options = {}) {
+  const { attachmentCount = 0 } = options;
+  const userMemory = normalizeUserMemory(state.userMemory);
+  userMemory.lastUpdatedAt = Date.now();
+  userMemory.preferredLanguage = state.appLanguage;
+  userMemory.preferredModeIndex = state.modeIndex;
+  userMemory.preferredParticipationIndex = state.participationIndex;
+  userMemory.preferredDensityIndex = state.densityIndex;
+  userMemory.preferredDiscussionSize = state.discussionSize;
+  userMemory.preferredModelIndex = state.modelIndex;
+  userMemory.preferredHostProfileId = state.mappings.main || "";
+  userMemory.pinnedRoleIds = getOrderedSelectedRoleIds().slice(0, 6);
+
+  if (reason === "discussion-start") {
+    userMemory.usage.discussionsStarted += 1;
+    if (state.mappings.main) {
+      userMemory.hostProfileCounts[state.mappings.main] = (userMemory.hostProfileCounts[state.mappings.main] || 0) + 1;
+    }
+    getOrderedSelectedRoleIds().forEach((roleId) => {
+      userMemory.selectedRoleCounts[roleId] = (userMemory.selectedRoleCounts[roleId] || 0) + 1;
+    });
+  }
+
+  if (reason === "attachments") {
+    userMemory.usage.attachmentsUploaded += attachmentCount;
+  }
+
+  if (reason === "research") {
+    userMemory.usage.researchRuns += 1;
+  }
+
+  if (reason === "multimodal") {
+    userMemory.usage.multimodalRuns += 1;
+  }
+
+  state.userMemory = userMemory;
+}
+
+function appendProjectAgentNote(label, content) {
+  const projectMemory = deriveProjectMemoryFromState();
+  const note = `${label}：${summarizeText(content, 180)}`;
+  projectMemory.agentNotes = uniqueStrings([note, ...(state.projectMemory?.agentNotes || [])]).slice(0, 6);
+  state.projectMemory = projectMemory;
+}
+
+async function hydrateProjectScopedState(topicId = state.activeTopicId) {
+  state.projectArtifacts = await loadProjectArtifacts(topicId);
+  const activeTopic = state.topics.find((topic) => topic.id === topicId);
+  state.projectMemory = normalizeProjectMemory(activeTopic?.snapshot?.projectMemory || deriveProjectMemoryFromState());
+}
+
+function syncSharedAgentInputsFromState() {
+  if (sharedAgentQueryInput) {
+    sharedAgentQueryInput.value = state.sharedAgentQuery || "";
+  }
+  if (sharedAgentSourcesInput) {
+    sharedAgentSourcesInput.value = state.sharedAgentSources || "";
+  }
+}
+
+function parseSourceUrls(text) {
+  return uniqueStrings(String(text || "").split(/[\n\s]+/).filter((item) => /^https?:\/\//i.test(item)));
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("文件读取失败"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("文件读取失败"));
+    reader.readAsText(file);
+  });
+}
+
+async function serializeAttachment(file) {
+  const record = {
+    id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    topicId: state.activeTopicId,
+    name: file.name,
+    type: file.type || "application/octet-stream",
+    size: file.size || 0,
+    kind: file.type?.startsWith("image/") ? "image" : "file",
+    createdAt: Date.now(),
+    dataUrl: "",
+    textPreview: "",
+  };
+
+  if (file.type?.startsWith("image/")) {
+    record.dataUrl = await readFileAsDataUrl(file);
+  } else if (/^(text\/|application\/(json|xml))/i.test(file.type || "") || /\.(txt|md|json|csv)$/i.test(file.name || "")) {
+    record.textPreview = summarizeText(await readFileAsText(file), 1200);
+  }
+
+  return record;
+}
+
+async function storeAttachmentsForActiveTopic(attachments) {
+  ensureActiveTopicSession();
+  if (!attachments.length || !state.activeTopicId) {
+    return;
+  }
+  const serialized = await Promise.all(attachments.map((file) => serializeAttachment(file)));
+  state.projectArtifacts = normalizeProjectArtifacts([...state.projectArtifacts, ...serialized]);
+  await saveProjectArtifacts(state.activeTopicId, state.projectArtifacts);
+  state.projectMemory = deriveProjectMemoryFromState();
+}
+
 function hashString(value) {
   let hash = 0;
   for (let index = 0; index < value.length; index += 1) {
@@ -1129,13 +1803,18 @@ function setSpeakerCard(title, role, description, avatar = "系", avatarInlineSt
   speakerDescription.textContent = description;
 }
 
+function setSpeakerCardSpeaking(active) {
+  speakerAvatar.classList.toggle("is-speaking", !!active);
+  speakerName.classList.toggle("is-speaking", !!active);
+}
+
 function setStatusLoadingState(active) {
   liveStatusBanner.classList.toggle("loading-dots", !!active);
   speakerName.classList.toggle("loading-dots", !!active);
 }
 
 function setSpeakerCardForRole(role, status, description) {
-  setSpeakerCard(role.name, status, description, roleAvatar(role), avatarStyle(role));
+  setSpeakerCard(getDisplayRoleName(role), status, description, roleAvatar(role), avatarStyle(role));
 }
 
 function updateLiveStatus(message, tone = "") {
@@ -1723,9 +2402,13 @@ function buildDiscussionContext(summary, roundNotes, liveTurns) {
   const sharedResearch = state.sharedResearchBrief
     ? `共享事实包（所有角色共用同一份材料，不要假装各自另查到不同外部资料）：\n${state.sharedResearchBrief}`
     : "";
+  const userMemory = buildUserMemoryPrompt();
+  const projectMemory = buildProjectMemoryPrompt();
 
   return [
     `任务定义：${summary}`,
+    userMemory ? `用户记忆（长期偏好，可作为语气和组织方式参考）：\n${userMemory}` : "",
+    projectMemory ? `项目记忆（当前项目沉淀）：\n${projectMemory}` : "",
     sharedResearch,
     getDiscussionModeDirective(),
     finishedRounds,
@@ -1787,6 +2470,106 @@ function sanitizeDisplayedModelText(text) {
     .trim();
 }
 
+function profileSupportsVision(profile) {
+  if (!profile) {
+    return false;
+  }
+  if (profile.compatibility === "anthropic") {
+    return true;
+  }
+
+  const provider = String(profile.providerName || "").toLowerCase();
+  const modelId = String(profile.modelId || "").toLowerCase();
+  const baseUrl = String(profile.baseUrl || "").toLowerCase();
+
+  if (/(rerank|reranker|embedding|embed)/.test(modelId)) {
+    return false;
+  }
+
+  if (/gemini/.test(provider) || /generativelanguage|gemini/.test(baseUrl) || /gemini/.test(modelId)) {
+    return true;
+  }
+
+  return /(gpt-4o|gpt-4\.1|vision|vl|qvq|qwen2\.5-vl|internvl|minicpm-v|llava|claude-3|claude-sonnet-4)/.test(modelId);
+}
+
+async function probeVisionCapability(profile, timeoutMs = MODEL_TEST_TIMEOUT_MS) {
+  if (!profile || !profile.baseUrl || !profile.modelId) {
+    return { supported: false, status: "error", latencyMs: 0 };
+  }
+
+  const requestControl = createRequestSignal(null, timeoutMs);
+  const startedAt = performance.now();
+  try {
+    let response;
+    if (profile.compatibility === "anthropic") {
+      response = await fetch(joinUrl(profile.baseUrl, profile.endpointPath || "/messages"), {
+        method: "POST",
+        signal: requestControl.signal,
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": profile.apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: profile.modelId,
+          max_tokens: 48,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "text", text: "请只回复：图像可读" },
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: "image/png",
+                  data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn2eKQAAAAASUVORK5CYII=",
+                },
+              },
+            ],
+          }],
+        }),
+      });
+    } else {
+      response = await fetch(joinUrl(profile.baseUrl, profile.endpointPath || "/chat/completions"), {
+        method: "POST",
+        signal: requestControl.signal,
+        headers: {
+          "content-type": "application/json",
+          ...(profile.apiKey ? { authorization: `Bearer ${profile.apiKey}` } : {}),
+        },
+        body: JSON.stringify({
+          model: profile.modelId,
+          max_tokens: 48,
+          temperature: 0.2,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "text", text: "请只回复：图像可读" },
+              { type: "image_url", image_url: { url: "https://raw.githubusercontent.com/github/explore/main/topics/github/github.png" } },
+            ],
+          }],
+          ...(isQwenProfile(profile) ? { chat_template_kwargs: { enable_thinking: false } } : {}),
+        }),
+      });
+    }
+    requestControl.cleanup();
+    return {
+      supported: response.ok,
+      status: response.ok ? "success" : "error",
+      latencyMs: Math.max(1, Math.round(performance.now() - startedAt)),
+    };
+  } catch (error) {
+    requestControl.cleanup();
+    return {
+      supported: false,
+      status: "error",
+      latencyMs: requestControl.didTimeOut() ? timeoutMs : 0,
+      error,
+    };
+  }
+}
+
 function setDiscussionControlsState(running) {
   state.discussionRunning = running;
   startDiscussionButton.disabled = running;
@@ -1806,6 +2589,7 @@ function stopDiscussionFlow() {
   if (!state.discussionRunning) {
     return;
   }
+  stopReadAloudPlayback();
   state.discussionAbortRequested = true;
   if (pendingUserParticipationResolver) {
     pendingUserParticipationResolver({ aborted: true });
@@ -1877,8 +2661,11 @@ function buildCurrentTopicSnapshot() {
     lastSummary: state.lastSummary,
     sharedResearchBrief: state.sharedResearchBrief,
     rolePlanningBrief: state.rolePlanningBrief,
+    projectMemory: normalizeProjectMemory(state.projectMemory),
     pendingRoleClarification: [...state.pendingRoleClarification],
     taskSupplementMode: state.taskSupplementMode,
+    sharedAgentQuery: state.sharedAgentQuery,
+    sharedAgentSources: state.sharedAgentSources,
     latestReportText: state.latestReportText,
     latestReportFileName: state.latestReportFileName,
     discussionRoundNotes: state.discussionRoundNotes,
@@ -1889,6 +2676,8 @@ function buildCurrentTopicSnapshot() {
     selectedIds: [...state.selectedIds],
     seatAssignments: { ...state.seatAssignments },
     discussionOrder: { ...state.discussionOrder },
+    voiceSampleAssignments: { ...state.voiceSampleAssignments },
+    ttsVoiceAssignments: { ...state.ttsVoiceAssignments },
     seatModelAssignments: { ...state.seatModelAssignments },
     pendingAttachments: [],
     userInput: userInput.value,
@@ -1935,12 +2724,16 @@ async function syncCurrentTopicSnapshot() {
   if (!topic) {
     return;
   }
+  state.projectMemory = deriveProjectMemoryFromState();
+  syncUserMemoryFromState();
   topic.title = deriveTopicTitle();
   topic.summary = deriveTopicSummary();
   topic.updatedAt = Date.now();
   topic.snapshot = buildCurrentTopicSnapshot();
   updateCurrentTopicTitle(topic.title);
   await persistTopics();
+  await persistUserMemory();
+  renderMemoryAgentWorkspace();
   renderTopicList();
 }
 
@@ -1995,8 +2788,11 @@ function applyTopicSnapshot(snapshot) {
   state.lastSummary = snapshot.lastSummary || "";
   state.sharedResearchBrief = snapshot.sharedResearchBrief || "";
   state.rolePlanningBrief = snapshot.rolePlanningBrief || "";
+  state.projectMemory = normalizeProjectMemory(snapshot.projectMemory || buildEmptyProjectMemory());
   state.pendingRoleClarification = Array.isArray(snapshot.pendingRoleClarification) ? snapshot.pendingRoleClarification.filter(Boolean) : [];
   state.taskSupplementMode = !!snapshot.taskSupplementMode;
+  state.sharedAgentQuery = snapshot.sharedAgentQuery || "";
+  state.sharedAgentSources = snapshot.sharedAgentSources || "";
   state.latestReportText = snapshot.latestReportText || "";
   state.latestReportFileName = snapshot.latestReportFileName || "";
   state.discussionRoundNotes = Array.isArray(snapshot.discussionRoundNotes) ? snapshot.discussionRoundNotes : [];
@@ -2010,6 +2806,8 @@ function applyTopicSnapshot(snapshot) {
   state.selectedIds = new Set(snapshot.selectedIds || []);
   state.seatAssignments = snapshot.seatAssignments || {};
   state.discussionOrder = snapshot.discussionOrder || {};
+  state.voiceSampleAssignments = snapshot.voiceSampleAssignments || {};
+  state.ttsVoiceAssignments = snapshot.ttsVoiceAssignments || {};
   state.seatModelAssignments = snapshot.seatModelAssignments || {};
   sanitizeSeatModelAssignments();
   ensureCoreAssignments();
@@ -2042,6 +2840,7 @@ function applyTopicSnapshot(snapshot) {
   renderSeatPicker();
   renderSeatStack();
   renderAttachmentStrip();
+  renderMemoryAgentWorkspace();
   upgradeLegacyReportActions();
   autoResizeTextarea();
   scrollToLatest();
@@ -2059,6 +2858,8 @@ async function handleNewTopic() {
   state.topics = [nextTopic, ...state.topics.filter((topic) => topic.id !== nextTopic.id)];
   state.activeTopicId = nextTopic.id;
   seedConversation();
+  state.projectMemory = buildEmptyProjectMemory();
+  state.projectArtifacts = [];
   await syncCurrentTopicSnapshot();
 }
 
@@ -2077,7 +2878,9 @@ async function activateTopic(topicId) {
   }
   state.activeTopicId = topicId;
   applyTopicSnapshot(topic.snapshot);
+  await hydrateProjectScopedState(topicId);
   await persistTopics();
+  renderMemoryAgentWorkspace();
   renderTopicList();
 }
 
@@ -2096,6 +2899,7 @@ async function deleteTopic(topicId) {
     return;
   }
 
+  await deleteProjectArtifacts(topicId);
   state.topics = state.topics.filter((item) => item.id !== topicId);
 
   if (!state.topics.length) {
@@ -2269,7 +3073,7 @@ const UI_TEXT = {
     profileProviderNamePlaceholder: "比如：OpenRouter / 本地中转站",
     profileCompatibilityLabel: "兼容协议",
     profileModelIdLabel: "模型 ID",
-    profileModelIdPlaceholder: "gpt-5.4 / deepseek-chat / glm-4.5",
+    profileModelIdPlaceholder: "gpt-5.4 / deepseek-ai/DeepSeek-V3.2 / glm-4.5",
     profileBaseUrlLabel: "Base URL",
     profileBaseUrlPlaceholder: "https://api.openai.com/v1",
     profileEndpointPathLabel: "接口路径",
@@ -2288,8 +3092,14 @@ const UI_TEXT = {
     hostModelTitle: "主持 AI",
     hostModelSelectLabel: "谁来担任主持 AI",
     hostModelNote: "这里只指定主持 AI 用哪个已接入模型。建议优先选择测试延迟更低的模型做主持。其他人物席位仍然在席位卡里各自选择模型，不在这里统一覆盖。",
+    multimodalModelTitle: "多模态 AI",
+    multimodalModelSelectLabel: "谁来负责图片解析",
+    multimodalModelFollowHost: "跟随主持 AI",
+    multimodalModelNote: "如果主持模型本身支持视觉，可以跟随主持。若主持模型偏快但不支持图片，请在这里单独指定一个支持多模态的模型。",
+    multimodalAiTag: "多模态",
     peopleLibraryCurrentTag: "当前库",
-    peopleLibraryOpen: "查看",
+    peopleLibraryOpen: "打开人物库",
+    roundtableWorkbenchOpen: "打开圆桌台",
     discussionSettingsTitle: "讨论设置",
     cycleModeLabel: "讨论目标",
     cycleParticipationLabel: "用户参与",
@@ -2378,7 +3188,7 @@ const UI_TEXT = {
     profileProviderNamePlaceholder: "For example: OpenRouter / local relay",
     profileCompatibilityLabel: "Protocol",
     profileModelIdLabel: "Model ID",
-    profileModelIdPlaceholder: "gpt-5.4 / deepseek-chat / glm-4.5",
+    profileModelIdPlaceholder: "gpt-5.4 / deepseek-ai/DeepSeek-V3.2 / glm-4.5",
     profileBaseUrlLabel: "Base URL",
     profileBaseUrlPlaceholder: "https://api.openai.com/v1",
     profileEndpointPathLabel: "Endpoint Path",
@@ -2397,8 +3207,14 @@ const UI_TEXT = {
     hostModelTitle: "Host AI",
     hostModelSelectLabel: "Which model should act as the host AI",
     hostModelNote: "This only assigns the host AI. Prefer lower-latency tested models for the host when possible. Other personas still choose their own model from their seat cards and are not overridden globally.",
+    multimodalModelTitle: "Multimodal AI",
+    multimodalModelSelectLabel: "Which model should handle image analysis",
+    multimodalModelFollowHost: "Follow Host AI",
+    multimodalModelNote: "If the host model already supports vision, let multimodal follow the host. If you want a faster host that does not support images, assign a separate vision-capable model here.",
+    multimodalAiTag: "Multimodal",
     peopleLibraryCurrentTag: "Current Library",
-    peopleLibraryOpen: "Open",
+    peopleLibraryOpen: "Open Library",
+    roundtableWorkbenchOpen: "Open Roundtable",
     discussionSettingsTitle: "Discussion Settings",
     cycleModeLabel: "Goal",
     cycleParticipationLabel: "User Input",
@@ -2577,8 +3393,13 @@ function applyLanguageToStaticUi() {
   setElementText("host-model-title", "hostModelTitle");
   setElementText("host-model-select-label", "hostModelSelectLabel");
   setElementText("host-model-note", "hostModelNote");
+  setElementText("multimodal-model-title", "multimodalModelTitle");
+  setElementText("multimodal-model-select-label", "multimodalModelSelectLabel");
+  setElementText("multimodal-model-note", "multimodalModelNote");
   setElementText("sidebar-people-library-title", "peopleLibrarySectionLabel");
   setElementText("open-people-library", "peopleLibraryOpen");
+  setElementText("open-roundtable-workbench", "roundtableWorkbenchOpen");
+  setElementText("close-roundtable-workbench", "close");
   setElementText("people-library-current-tag", "peopleLibraryCurrentTag");
   setElementText("discussion-settings-title", "discussionSettingsTitle");
   setElementText("cycle-mode-label", "cycleModeLabel");
@@ -2823,6 +3644,21 @@ function getPrimarySummaryProfileName() {
   return getPrimarySummaryProfile()?.displayName || langText("未设置", "Not set");
 }
 
+function normalizeModelMappings(mappings = {}) {
+  return {
+    main: mappings.main || "",
+    challenger: mappings.challenger || "",
+    judge: mappings.judge || "",
+    multimodal: mappings.multimodal || "",
+  };
+}
+
+function getMultimodalProfile() {
+  const configuredProfiles = getConfiguredProfiles();
+  const mappedMultimodal = configuredProfiles.find((profile) => profile.id === state.mappings.multimodal);
+  return mappedMultimodal || getPrimarySummaryProfile();
+}
+
 function renderAiRoleRecommendationToggle() {
   if (!toggleAiRoleRecommendationButton) {
     return;
@@ -2851,9 +3687,35 @@ function renderVoiceReadToggle() {
 function stopReadAloudPlayback() {
   readAloudQueue = [];
   activeReadAloudUtterance = null;
+  if (activeReadAloudElement) {
+    activeReadAloudElement.classList.remove("chat-item-reading");
+    activeReadAloudElement = null;
+  }
+  if (activeVoiceSampleAudio) {
+    activeVoiceSampleAudio.pause();
+    activeVoiceSampleAudio.currentTime = 0;
+    activeVoiceSampleAudio = null;
+  }
   if (window.speechSynthesis) {
     window.speechSynthesis.cancel();
   }
+}
+
+function focusReadAloudMessage(element) {
+  if (activeReadAloudElement && activeReadAloudElement !== element) {
+    activeReadAloudElement.classList.remove("chat-item-reading");
+  }
+  if (!element) {
+    activeReadAloudElement = null;
+    setSpeakerCardSpeaking(false);
+    return;
+  }
+  activeReadAloudElement = element;
+  activeReadAloudElement.classList.add("chat-item-reading");
+  setSpeakerCardSpeaking(true);
+  requestAnimationFrame(() => {
+    activeReadAloudElement?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+  });
 }
 
 function drainReadAloudQueue() {
@@ -2861,16 +3723,21 @@ function drainReadAloudQueue() {
     return;
   }
 
-  const nextText = readAloudQueue.shift();
+  const nextEntry = readAloudQueue.shift();
+  const nextText = typeof nextEntry === "string" ? nextEntry : nextEntry?.text;
   if (!nextText) {
     return;
   }
 
+  focusReadAloudMessage(typeof nextEntry === "string" ? null : nextEntry?.element || null);
+
   const utterance = new SpeechSynthesisUtterance(nextText);
   utterance.lang = state.appLanguage === "en" ? "en-US" : "zh-CN";
-  utterance.rate = state.appLanguage === "en" ? 0.96 : 0.92;
-  utterance.pitch = 1;
-  const preferredVoice = getPreferredReadAloudVoice();
+  const speakerRole = typeof nextEntry === "string" ? null : nextEntry?.role || getDiscussionSpeakerRoleById(nextEntry?.speakerId);
+  const speechProfile = buildReadAloudProfile(speakerRole);
+  utterance.rate = speechProfile.rate;
+  utterance.pitch = speechProfile.pitch;
+  const preferredVoice = getPreferredReadAloudVoice({ ...speechProfile, role: speakerRole });
   if (preferredVoice) {
     utterance.voice = preferredVoice;
     utterance.lang = preferredVoice.lang || utterance.lang;
@@ -2879,11 +3746,17 @@ function drainReadAloudQueue() {
     if (activeReadAloudUtterance === utterance) {
       activeReadAloudUtterance = null;
     }
+    if (!readAloudQueue.length) {
+      focusReadAloudMessage(null);
+    }
     drainReadAloudQueue();
   };
   utterance.onerror = () => {
     if (activeReadAloudUtterance === utterance) {
       activeReadAloudUtterance = null;
+    }
+    if (!readAloudQueue.length) {
+      focusReadAloudMessage(null);
     }
     drainReadAloudQueue();
   };
@@ -2891,7 +3764,7 @@ function drainReadAloudQueue() {
   window.speechSynthesis.speak(utterance);
 }
 
-function getPreferredReadAloudVoice() {
+function getPreferredReadAloudVoice(options = {}) {
   if (!window.speechSynthesis) {
     return null;
   }
@@ -2901,18 +3774,100 @@ function getPreferredReadAloudVoice() {
     return null;
   }
 
-  if (preferredReadAloudVoice && voices.some((voice) => voice.voiceURI === preferredReadAloudVoice.voiceURI)) {
-    return preferredReadAloudVoice;
+  const langPrefix = state.appLanguage === "en" ? "en" : "zh";
+  const gender = options.gender === "male" ? "male" : "female";
+  const manualVoiceUri = options.role?.id ? state.ttsVoiceAssignments?.[options.role.id] || "" : "";
+  if (manualVoiceUri) {
+    const manuallyAssignedVoice = voices.find((voice) => voice.voiceURI === manualVoiceUri);
+    if (manuallyAssignedVoice) {
+      return manuallyAssignedVoice;
+    }
+  }
+  const cacheKey = `${langPrefix}:${gender}`;
+  const cachedVoice = preferredReadAloudVoices.get(cacheKey);
+  if (cachedVoice && voices.some((voice) => voice.voiceURI === cachedVoice.voiceURI)) {
+    return cachedVoice;
   }
 
-  const preferred = state.appLanguage === "en"
-    ? voices.find((voice) => /^en(-|_|$)/i.test(voice.lang) && /female|zira|aria|jenny|samantha/i.test(`${voice.name} ${voice.voiceURI}`))
-      || voices.find((voice) => /^en(-|_|$)/i.test(voice.lang))
-    : voices.find((voice) => /^zh(-|_|$)/i.test(voice.lang) && /xiaoxiao|xiaoyi|female|huihui/i.test(`${voice.name} ${voice.voiceURI}`))
-      || voices.find((voice) => /^zh(-|_|$)/i.test(voice.lang));
+  const zhFemalePattern = /xiaoxiao|xiaoyi|female|huihui|xiaomei|xiaomeng|xiaorui/i;
+  const zhMalePattern = /yunxi|yunyang|male|xiaobei|yunjian|xiaogang|xiaomo|yunhao/i;
+  const enFemalePattern = /female|zira|aria|jenny|samantha|ava|emma|sara/i;
+  const enMalePattern = /male|david|guy|mark|andrew|roger|tony|brian|christopher|daniel/i;
+  const malePattern = state.appLanguage === "en" ? enMalePattern : zhMalePattern;
+  const femalePattern = state.appLanguage === "en" ? enFemalePattern : zhFemalePattern;
+  const matchesLang = (voice) => new RegExp(`^${langPrefix}(-|_|$)`, "i").test(voice.lang || "");
+  const inferVoiceGender = (voice) => {
+    const fingerprint = `${voice.name} ${voice.voiceURI}`;
+    if (malePattern.test(fingerprint)) {
+      return "male";
+    }
+    if (femalePattern.test(fingerprint)) {
+      return "female";
+    }
+    return "";
+  };
+  const preferred = [...voices].sort((left, right) => {
+    const leftGender = inferVoiceGender(left);
+    const rightGender = inferVoiceGender(right);
+    const leftScore = (matchesLang(left) ? 4 : 0)
+      + (leftGender === gender ? 3 : 0)
+      + (!leftGender ? 1 : 0);
+    const rightScore = (matchesLang(right) ? 4 : 0)
+      + (rightGender === gender ? 3 : 0)
+      + (!rightGender ? 1 : 0);
+    return rightScore - leftScore;
+  })[0] || null;
 
-  preferredReadAloudVoice = preferred || voices[0] || null;
-  return preferredReadAloudVoice;
+  const result = preferred || voices[0] || null;
+  preferredReadAloudVoices.set(cacheKey, result);
+  return result;
+}
+
+function inferReadAloudVoiceGender(voice) {
+  if (!voice) {
+    return "";
+  }
+  const fingerprint = `${voice.name} ${voice.voiceURI}`;
+  if (/yunxi|yunyang|male|xiaobei|yunjian|xiaogang|xiaomo|yunhao|david|guy|mark|andrew|roger|tony|brian|christopher|daniel/i.test(fingerprint)) {
+    return "male";
+  }
+  if (/xiaoxiao|xiaoyi|female|huihui|xiaomei|xiaomeng|xiaorui|zira|aria|jenny|samantha|ava|emma|sara/i.test(fingerprint)) {
+    return "female";
+  }
+  return "";
+}
+
+function getAvailableReadAloudVoices() {
+  if (!window.speechSynthesis) {
+    return [];
+  }
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) {
+    return [];
+  }
+  const langPrefix = state.appLanguage === "en" ? "en" : "zh";
+  const matchesLang = voices.filter((voice) => new RegExp(`^${langPrefix}(-|_|$)`, "i").test(voice.lang || ""));
+  return matchesLang.length ? matchesLang : voices;
+}
+
+function getReadAloudVoiceLabel(voice) {
+  const inferredGender = inferReadAloudVoiceGender(voice);
+  const genderLabel = inferredGender === "male"
+    ? langText("男声", "Male")
+    : inferredGender === "female"
+      ? langText("女声", "Female")
+      : langText("未标注", "Unknown");
+  return `${voice.name} · ${genderLabel}`;
+}
+
+function buildSeatReadAloudVoiceOptionsMarkup(role) {
+  const voices = getAvailableReadAloudVoices();
+  const assignedVoiceUri = state.ttsVoiceAssignments?.[role.id] || "";
+  const autoLabel = `${langText("自动匹配", "Auto match")} · ${normalizeRoleGender(role?.gender) === "male" || inferRoleGender(role) === "male" ? langText("男声优先", "Prefer male") : langText("女声优先", "Prefer female")}`;
+  return [
+    `<option value="">${escapeHtml(autoLabel)}</option>`,
+    ...voices.map((voice) => `<option value="${escapeHtml(voice.voiceURI)}" ${assignedVoiceUri === voice.voiceURI ? "selected" : ""}>${escapeHtml(getReadAloudVoiceLabel(voice))}</option>`),
+  ].join("");
 }
 
 function sanitizeReadAloudText(text) {
@@ -2933,7 +3888,12 @@ function readTextAloud(text, options = {}) {
     return;
   }
 
-  readAloudQueue.push(normalized);
+  readAloudQueue.push({
+    text: normalized,
+    speakerId: options.speakerId || options.role?.id || "",
+    role: options.role || null,
+    element: options.element || null,
+  });
   drainReadAloudQueue();
 }
 
@@ -2945,7 +3905,11 @@ function maybeReadAppendedMessage(element) {
   if (!body) {
     return;
   }
-  readTextAloud(body);
+  readTextAloud(body, {
+    speakerId: element.dataset.speakerId || "",
+    role: getDiscussionSpeakerRoleById(element.dataset.speakerId || ""),
+    element,
+  });
 }
 
 function getMappedProfile(assignment) {
@@ -3601,6 +4565,7 @@ async function requestAiTaskSummary(content, attachments = [], options = {}) {
     clarificationQuestions,
   });
   const labels = getExpandedTaskSummaryLabels();
+  const userMemoryPrompt = buildUserMemoryPrompt();
   const prompt = state.appLanguage === "en"
     ? [
         "You are the primary AI in the Roundtable Braintrust workspace.",
@@ -3616,6 +4581,7 @@ async function requestAiTaskSummary(content, attachments = [], options = {}) {
         "4. Do not add a separate focus list, discussion agenda, plot outline, chapter checklist, or narrow subproblem unless the user explicitly asks for that.",
         "5. Default to direct organization rather than asking follow-up questions first.",
         "6. Do not invent extra exclusions, limitations, or negative scope boundaries that the user did not say.",
+        userMemoryPrompt ? `Long-term user preference memory:\n${userMemoryPrompt}` : "",
         `User request: ${promptContent}${attachmentNote}`,
       ].join("\n")
     : [
@@ -3633,6 +4599,7 @@ async function requestAiTaskSummary(content, attachments = [], options = {}) {
         "5. 如果这是对现有任务的补充，就保留原任务主轴，只补充缺失条件，不要擅自把范围缩成其中一个子问题。",
         "6. 默认直接整理，不要先追问。信息不够时就基于当前内容给出最佳理解，但不要擅自添加用户没说过的排除项、限制项或否定边界。",
         "7. 如果用户要的是探讨、分享、查经、小组交流、脑暴，就保持开放讨论口径，不要替用户提前收窄答案路径。",
+        userMemoryPrompt ? `用户记忆（长期偏好，只作为表达和组织参考，不要把它误当成当前任务事实）：\n${userMemoryPrompt}` : "",
         `用户需求：${promptContent}${attachmentNote}`,
       ].join("\n");
 
@@ -3697,6 +4664,7 @@ function createMessageMarkup({ speakerId, label, sublabel = "", body, avatarLabe
         <div class="chat-meta">
           <strong>${label}</strong>
           ${sublabel ? `<span>${sublabel}</span>` : ""}
+          <span class="speaking-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
         </div>
         <div class="chat-bubble">
           <p>${escapeHtml(body)}</p>
@@ -3711,7 +4679,7 @@ function createMessageMarkup({ speakerId, label, sublabel = "", body, avatarLabe
 function appendMarkup(markup) {
   discussionStream.insertAdjacentHTML("beforeend", markup);
   maybeReadAppendedMessage(discussionStream.lastElementChild);
-  if (state.autoFollow) {
+  if (state.autoFollow && !(state.voiceReadEnabled && (activeReadAloudUtterance || readAloudQueue.length))) {
     scrollToLatest();
   }
 }
@@ -3899,6 +4867,9 @@ function normalizeProfile(profile) {
       ...builtin,
       ...profile,
       lastTestLatencyMs: Number(profile.lastTestLatencyMs) > 0 ? Number(profile.lastTestLatencyMs) : 0,
+      lastVisionTestLatencyMs: Number(profile.lastVisionTestLatencyMs) > 0 ? Number(profile.lastVisionTestLatencyMs) : 0,
+      supportsVision: profile.supportsVision === true,
+      visionTestStatus: profile.visionTestStatus || "",
       compatibility: profile.compatibility === "anthropic" ? "anthropic" : builtin.compatibility || "openai",
       locked: true,
       configured: !!profile.configured,
@@ -3911,6 +4882,9 @@ function normalizeProfile(profile) {
     configured: profile.configured !== false,
     ...profile,
     lastTestLatencyMs: Number(profile.lastTestLatencyMs) > 0 ? Number(profile.lastTestLatencyMs) : 0,
+    lastVisionTestLatencyMs: Number(profile.lastVisionTestLatencyMs) > 0 ? Number(profile.lastVisionTestLatencyMs) : 0,
+    supportsVision: profile.supportsVision === true,
+    visionTestStatus: profile.visionTestStatus || "",
     compatibility: profile.compatibility === "anthropic" ? "anthropic" : "openai",
   };
 }
@@ -3938,6 +4912,24 @@ function formatProfileLatency(profile) {
   return latency < 1000
     ? langText(`延迟 ${latency}ms`, `Latency ${latency}ms`)
     : langText(`延迟 ${(latency / 1000).toFixed(2)}s`, `Latency ${(latency / 1000).toFixed(2)}s`);
+}
+
+function formatVisionCapabilityLabel(profile) {
+  if (profile?.supportsVision) {
+    const latency = Number(profile?.lastVisionTestLatencyMs || 0);
+    if (latency > 0) {
+      return langText(`多模态已验 ${latency}ms`, `Vision verified ${latency}ms`);
+    }
+    return langText("多模态已验证", "Vision verified");
+  }
+  if (profile?.visionTestStatus === "error") {
+    return langText("多模态不可用", "Vision unavailable");
+  }
+  return langText("多模态未验证", "Vision unverified");
+}
+
+function getVisionCapableProfiles() {
+  return sortConfiguredProfilesByLatency(getConfiguredProfiles().filter((profile) => profile.supportsVision));
 }
 
 function getSelectableBuiltinProfiles(currentTemplateId = modelProfileTemplateId || profileId.value || "") {
@@ -4018,14 +5010,18 @@ function filterRoles(list, query) {
 function renderPeopleSummary() {
   const favoriteCount = state.peopleRoles.filter(isFavoriteRole).length;
   const customCount = state.peopleRoles.filter((role) => role.source === "custom").length;
-  peopleCount.textContent = state.appLanguage === "en"
-    ? `${state.peopleRoles.length} ${t("peopleCountSuffix")}`
-    : `${state.peopleRoles.length}${t("peopleCountSuffix")}`;
-  peopleSummary.textContent = formatUiText(t("peopleSummaryTemplate"), {
-    base: state.peopleRoles.length - favoriteCount - customCount,
-    favorite: favoriteCount,
-    custom: customCount,
-  });
+  if (peopleCount) {
+    peopleCount.textContent = state.appLanguage === "en"
+      ? `${state.peopleRoles.length} ${t("peopleCountSuffix")}`
+      : `${state.peopleRoles.length}${t("peopleCountSuffix")}`;
+  }
+  if (peopleSummary) {
+    peopleSummary.textContent = formatUiText(t("peopleSummaryTemplate"), {
+      base: state.peopleRoles.length - favoriteCount - customCount,
+      favorite: favoriteCount,
+      custom: customCount,
+    });
+  }
   peopleLibraryStats.innerHTML = [
     `<span class="tiny-badge">${escapeHtml(formatUiText(t("totalBadge"), { count: state.peopleRoles.length }))}</span>`,
     `<span class="tiny-badge">${escapeHtml(formatUiText(t("favoriteBadge"), { count: favoriteCount }))}</span>`,
@@ -4036,6 +5032,8 @@ function renderPeopleSummary() {
 function renderSeatStack() {
   syncDiscussionOrder();
   const selectedRoles = getOrderedSelectedRoleIds().map((roleId) => normalizeRecommendedRolePersona(getRoleById(roleId))).filter(Boolean);
+  syncRoleVoiceAssignments();
+  const availableReadAloudVoices = getAvailableReadAloudVoices();
   const orderedDiscussantCount = selectedRoles.filter((role) => getRoleAssignment(role) !== "judge").length;
   seatPickerCount.textContent = langText(`已选 ${selectedRoles.length} / ${state.discussionSize}`, `Selected ${selectedRoles.length} / ${state.discussionSize}`);
   if (seatConfigProgress) {
@@ -4054,6 +5052,10 @@ function renderSeatStack() {
       const traits = buildRoleTraitsMarkup(role, { compact: true });
       const assignment = ensureSeatAssignment(role);
       const currentProfile = getConfiguredProfileById(ensureSeatModelAssignment(role));
+      const voiceSample = getAssignedVoiceSampleForRole(role);
+      const readAloudVoiceMarkup = availableReadAloudVoices.length
+        ? `<label class="seat-assignment"><span>${escapeHtml(langText("朗读音色", "Read-aloud Voice"))}</span><select class="seat-readaloud-voice-select" data-role-id="${role.id}">${buildSeatReadAloudVoiceOptionsMarkup(role)}</select></label>`
+        : `<label class="seat-assignment"><span>${escapeHtml(langText("朗读音色", "Read-aloud Voice"))}</span><div class="seat-assignment-static">${escapeHtml(langText("当前浏览器无可用语音", "No browser voice available"))}</div></label>`;
       const orderValue = state.discussionOrder[role.id] || 1;
       const orderOptions = Array.from({ length: Math.max(1, orderedDiscussantCount) })
         .map((_, index) => `<option value="${index + 1}" ${orderValue === index + 1 ? "selected" : ""}>${escapeHtml(langText(`顺序 ${index + 1}`, `Order ${index + 1}`))}</option>`)
@@ -4084,10 +5086,13 @@ function renderSeatStack() {
                 ${buildSeatModelOptionsMarkup(role)}
               </select>
             </label>
+            ${readAloudVoiceMarkup}
             <div class="seat-traits">${traits}</div>
+            ${voiceSample ? `<div class="seat-voice-line"><span>${escapeHtml(langText("声音样本", "Voice Sample"))}</span><strong>${escapeHtml(getVoiceSampleDisplayLabel(voiceSample))}</strong></div>` : ""}
           </div>
           <div class="seat-actions">
             <div class="seat-action-row">
+              ${voiceSample ? `<button class="card-action seat-voice-preview" data-role-id="${role.id}" type="button">${escapeHtml(langText("试听声音", "Preview Voice"))}</button>` : ""}
               ${canEditRole(role) || role.source === "recommended" ? `<button class="icon-button compact seat-edit seat-edit-icon" data-role-id="${role.id}" type="button" aria-label="${escapeHtml(langText("编辑人物", "Edit persona"))}" title="${escapeHtml(langText("编辑人物", "Edit persona"))}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15.2 4.8a2.6 2.6 0 0 1 3.7 3.7L9.3 18.1 5 19l.9-4.3 9.3-9.9Zm-8 10.7-.3 1.5 1.5-.3 8.8-9.3-1.2-1.2-8.8 9.3Z" fill="currentColor"></path></svg></button>` : ""}
               <button class="icon-button compact danger seat-delete" data-role-id="${role.id}" type="button" aria-label="${escapeHtml(langText("移出本轮", "Remove from this round"))}" title="${escapeHtml(langText("移出本轮", "Remove from this round"))}">
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -4175,24 +5180,164 @@ function renderAttachmentStrip() {
     .join("");
 }
 
+function renderMemoryChipList(items) {
+  if (!items.length) {
+    return `<p class="memory-summary-line">${escapeHtml(langText("当前还没有可展示的记录。", "No memory entries yet."))}</p>`;
+  }
+  return `<div class="memory-summary-list">${items.map((item) => `<span class="memory-summary-chip">${escapeHtml(item)}</span>`).join("")}</div>`;
+}
+
+function renderMemoryAgentWorkspace() {
+  if (!userMemoryPanel || !projectMemoryPanel) {
+    return;
+  }
+
+  const userMemory = normalizeUserMemory(state.userMemory);
+  const topRoles = getTopCountEntries(userMemory.selectedRoleCounts, 4)
+    .map(([roleId, count]) => `${getReadableRoleNameById(roleId)} × ${count}`)
+    .filter(Boolean);
+  const topHosts = getTopCountEntries(userMemory.hostProfileCounts, 2)
+    .map(([profileId, count]) => `${getConfiguredProfileById(profileId)?.displayName || profileId} × ${count}`)
+    .filter(Boolean);
+
+  userMemoryPanel.innerHTML = [
+    `<p class="memory-summary-line">${escapeHtml(langText(`偏好：${modeValues[userMemory.preferredModeIndex] || modeValues[0]} / ${densityValues[userMemory.preferredDensityIndex] || densityValues[1]} / ${userMemory.preferredDiscussionSize} 人`, `Preferences: ${modeValuesEn[userMemory.preferredModeIndex] || modeValuesEn[0]} / ${densityValuesEn[userMemory.preferredDensityIndex] || densityValuesEn[1]} / ${userMemory.preferredDiscussionSize} seats`))}</p>`,
+    `<p class="memory-summary-line">${escapeHtml(langText(`累计：已开始 ${userMemory.usage.discussionsStarted} 次讨论，上传 ${userMemory.usage.attachmentsUploaded} 个附件`, `Usage: ${userMemory.usage.discussionsStarted} discussions, ${userMemory.usage.attachmentsUploaded} attachments`))}</p>`,
+    topHosts.length ? renderMemoryChipList(topHosts) : "",
+    topRoles.length ? renderMemoryChipList(topRoles) : "",
+  ].filter(Boolean).join("");
+
+  const projectMemory = normalizeProjectMemory(state.projectMemory);
+  projectMemoryPanel.innerHTML = [
+    `<p class="memory-summary-line">${escapeHtml(projectMemory.taskSummary ? summarizeText(projectMemory.taskSummary, 120) : langText("当前项目还没有确认后的任务定义。", "This project does not have a confirmed task summary yet."))}</p>`,
+    projectMemory.sharedFacts ? `<p class="memory-summary-line">${escapeHtml(langText(`共享事实：${summarizeText(projectMemory.sharedFacts, 140)}`, `Shared brief: ${summarizeText(projectMemory.sharedFacts, 140)}`))}</p>` : "",
+    projectMemory.unresolvedQuestions.length ? renderMemoryChipList(projectMemory.unresolvedQuestions.slice(0, 4)) : "",
+    projectMemory.keyEvidence.length ? renderMemoryChipList(projectMemory.keyEvidence.slice(0, 4)) : "",
+  ].filter(Boolean).join("");
+
+  syncSharedAgentInputsFromState();
+  updateSharedAgentStatus(state.sharedAgentStatus.text || langText("等待执行共享 Agent", "Waiting for shared agents"), state.sharedAgentStatus.tone || "");
+  renderRoundtableEvidenceWorkspace();
+}
+
+function getRoundtableEvidenceEntries() {
+  const artifactEntries = state.projectArtifacts.map((artifact) => ({
+    id: `artifact:${artifact.id}`,
+    label: artifact.name || langText("附件", "Attachment"),
+    kind: artifact.kind === "image"
+      ? langText("图片证据", "Image Evidence")
+      : artifact.textPreview
+        ? langText("文本证据", "Text Evidence")
+        : langText("附件", "Attachment"),
+    summary: artifact.textPreview
+      ? summarizeText(artifact.textPreview, 88)
+      : artifact.kind === "image"
+        ? langText("已上传图片，可在右侧查看详情。", "Image uploaded. View details on the right.")
+        : langText("当前附件没有可直接展开的文本内容。", "This attachment has no inline text preview."),
+    createdAt: artifact.createdAt || 0,
+    detail: artifact.textPreview || "",
+    imageUrl: artifact.kind === "image" ? artifact.dataUrl || "" : "",
+    meta: [artifact.type || "", artifact.size ? `${Math.max(1, Math.round(artifact.size / 1024))} KB` : ""].filter(Boolean),
+  }));
+
+  const sharedEvidenceEntries = collectSharedResearchEvidenceEntries().map((entry, index) => ({
+    id: `shared:${index}`,
+    label: langText(`共享证据 ${index + 1}`, `Shared Evidence ${index + 1}`),
+    kind: langText("文本证据", "Text Evidence"),
+    summary: summarizeText(entry, 88),
+    createdAt: state.projectMemory?.updatedAt || 0,
+    detail: entry,
+    imageUrl: "",
+    meta: [langText("来自共享研究", "From shared research")],
+  }));
+
+  return [...artifactEntries, ...sharedEvidenceEntries].sort((left, right) => (right.createdAt || 0) - (left.createdAt || 0));
+}
+
+function renderRoundtableEvidenceWorkspace() {
+  if (!roundtableEvidenceList || !roundtableEvidenceDetail) {
+    return;
+  }
+
+  const evidenceEntries = getRoundtableEvidenceEntries();
+  if (!evidenceEntries.length) {
+    activeRoundtableEvidenceId = "";
+    roundtableEvidenceList.innerHTML = `<div class="empty-panel">${escapeHtml(langText("圆桌台里还没有证据。上传附件、执行网页搜索或图片解析后，会在这里出现。", "No evidence yet. Upload files or run the research tools to populate this area."))}</div>`;
+    roundtableEvidenceDetail.innerHTML = `<div class="evidence-detail-empty">${escapeHtml(langText("选中一条证据后，这里会显示完整内容。", "Select one evidence item to inspect the full detail."))}</div>`;
+    return;
+  }
+
+  if (!evidenceEntries.some((entry) => entry.id === activeRoundtableEvidenceId)) {
+    activeRoundtableEvidenceId = evidenceEntries[0].id;
+  }
+
+  const activeEntry = evidenceEntries.find((entry) => entry.id === activeRoundtableEvidenceId) || evidenceEntries[0];
+
+  roundtableEvidenceList.innerHTML = evidenceEntries
+    .map((entry) => `
+      <button class="evidence-card ${entry.id === activeEntry.id ? "active" : ""}" data-evidence-id="${entry.id}" type="button">
+        <div class="evidence-card-head">
+          <strong>${escapeHtml(entry.label)}</strong>
+          <span class="profile-tag">${escapeHtml(entry.kind)}</span>
+        </div>
+        <p>${escapeHtml(entry.summary)}</p>
+        ${entry.meta.length ? `<div class="evidence-meta">${entry.meta.map((item) => `<span class="tiny-badge">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+      </button>
+    `)
+    .join("");
+
+  roundtableEvidenceDetail.innerHTML = `
+    <div class="evidence-detail-panel">
+      <div class="evidence-card-head">
+        <strong>${escapeHtml(activeEntry.label)}</strong>
+        <span class="profile-tag">${escapeHtml(activeEntry.kind)}</span>
+      </div>
+      ${activeEntry.meta.length ? `<div class="evidence-meta">${activeEntry.meta.map((item) => `<span class="tiny-badge">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+      ${activeEntry.imageUrl ? `<img src="${activeEntry.imageUrl}" alt="${escapeHtml(activeEntry.label)}" />` : ""}
+      <div class="evidence-detail-copy">${escapeHtml(activeEntry.detail || activeEntry.summary || langText("当前没有更多内容可展示。", "No additional content is available."))}</div>
+    </div>
+  `;
+}
+
 function renderModelMappings() {
   sanitizeSeatModelAssignments();
   const configuredProfiles = sortConfiguredProfilesByLatency(getConfiguredProfiles());
+  const visionProfiles = getVisionCapableProfiles();
   if (!hostModelSelect) {
     return;
   }
   if (!configuredProfiles.length) {
     state.mappings.main = "";
+    state.mappings.multimodal = "";
     hostModelSelect.innerHTML = `<option value="">${escapeHtml(t("noAvailableModels"))}</option>`;
+    if (multimodalModelSelect) {
+      multimodalModelSelect.innerHTML = `<option value="">${escapeHtml(langText("没有可用的多模态模型", "No multimodal models available"))}</option>`;
+      multimodalModelSelect.disabled = true;
+    }
     hostModelSelect.disabled = true;
     return;
   }
   if (!configuredProfiles.some((profile) => profile.id === state.mappings.main)) {
     state.mappings.main = configuredProfiles[0].id;
   }
+  if (!visionProfiles.some((profile) => profile.id === state.mappings.multimodal)) {
+    state.mappings.multimodal = "";
+  }
   hostModelSelect.innerHTML = configuredProfiles
     .map((profile) => `<option value="${profile.id}" ${profile.id === state.mappings.main ? "selected" : ""}>${escapeHtml(profile.displayName)} · ${escapeHtml(formatProfileLatency(profile))}</option>`)
     .join("");
+  if (multimodalModelSelect) {
+    if (visionProfiles.length) {
+      multimodalModelSelect.innerHTML = [
+        `<option value="">${escapeHtml(t("multimodalModelFollowHost"))}</option>`,
+        ...visionProfiles.map((profile) => `<option value="${profile.id}" ${profile.id === state.mappings.multimodal ? "selected" : ""}>${escapeHtml(profile.displayName)} · ${escapeHtml(formatVisionCapabilityLabel(profile))}</option>`),
+      ].join("");
+      multimodalModelSelect.disabled = state.discussionRunning;
+    } else {
+      multimodalModelSelect.innerHTML = `<option value="">${escapeHtml(langText("没有已验证通过的多模态模型", "No verified multimodal models"))}</option>`;
+      multimodalModelSelect.disabled = true;
+    }
+  }
   hostModelSelect.disabled = state.discussionRunning;
 }
 
@@ -4213,6 +5358,7 @@ function renderConnectedModelList() {
               <span class="model-health-dot ${getProfileHealth(profile)}"></span>
               <span class="connected-model-name">${escapeHtml(profile.displayName)}</span>
               ${isHost ? `<span class="profile-tag active">${escapeHtml(t("hostAiTag"))}</span>` : ""}
+              ${profile.supportsVision ? `<span class="profile-tag">${escapeHtml(langText("多模态", "Multimodal"))}</span>` : ""}
             </strong>
           </div>
           <div class="connected-model-actions">
@@ -4255,6 +5401,17 @@ function closePeopleLibraryModal() {
   peopleLibraryBackdrop.classList.remove("open");
   peopleLibraryModal.classList.remove("open");
   toggleRoleEditor(false);
+}
+
+function openRoundtableWorkbench() {
+  roundtableWorkbenchBackdrop?.classList.add("open");
+  roundtableWorkbenchModal?.classList.add("open");
+  renderMemoryAgentWorkspace();
+}
+
+function closeRoundtableWorkbench() {
+  roundtableWorkbenchBackdrop?.classList.remove("open");
+  roundtableWorkbenchModal?.classList.remove("open");
 }
 
 function openSeatPicker() {
@@ -4821,6 +5978,10 @@ function buildFallbackGeneratedRoleSystemPrompt({ name, seat, description, stanc
 }
 
 async function buildSharedResearchBrief(summary, moderatorProfile, orderedSpeakers, signal) {
+  return buildSharedResearchBriefFromSources(summary, moderatorProfile, orderedSpeakers, "", signal);
+}
+
+async function buildSharedResearchBriefFromSources(summary, moderatorProfile, orderedSpeakers, sourceDigest = "", signal) {
   const prompt = [
     "你现在是这张圆桌唯一的共享 research agent。",
     "你的职责不是替任何一个席位发言，而是先为整张桌子整理一份所有角色共用的事实包。",
@@ -4830,9 +5991,267 @@ async function buildSharedResearchBrief(summary, moderatorProfile, orderedSpeake
     "控制在 220 到 420 字。直接输出正文，不要 Markdown 标题，不要列表编号。",
     `任务定义：${summary}`,
     `本次参与人物及其长期观察重心：${orderedSpeakers.map((role) => `${role.name}（${role.seat}）`).join("，")}`,
+    sourceDigest ? `补充来源材料（请优先消化这批材料，再提炼成共享事实包）：\n${sourceDigest}` : "",
   ].join("\n\n");
 
   return requestModelText(moderatorProfile, prompt, 650, signal);
+}
+
+async function requestMultimodalModelText(profile, prompt, artifacts, maxTokens = 900, signal, timeoutMs = MODEL_REQUEST_TIMEOUT_MS) {
+  const usableArtifacts = artifacts.filter((artifact) => artifact?.dataUrl && artifact.kind === "image");
+  if (!usableArtifacts.length) {
+    throw new Error("当前没有可供多模态解析的图片附件。");
+  }
+  if (!profileSupportsVision(profile)) {
+    throw new Error(`${profile.displayName} 当前配置的模型 ${profile.modelId} 不支持图片解析。请切换到支持视觉输入的模型，例如 Qwen2.5-VL、Gemini、Claude 或 GPT-4o。`);
+  }
+
+  const requestControl = createRequestSignal(signal, timeoutMs);
+  let response;
+  try {
+    if (profile.compatibility === "anthropic") {
+      response = await fetch(joinUrl(profile.baseUrl, profile.endpointPath || "/messages"), {
+        method: "POST",
+        signal: requestControl.signal,
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": profile.apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: profile.modelId,
+          max_tokens: maxTokens,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              ...usableArtifacts.map((artifact) => ({
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: artifact.type || "image/png",
+                  data: String(artifact.dataUrl).split(",")[1] || "",
+                },
+              })),
+            ],
+          }],
+        }),
+      });
+    } else {
+      response = await fetch(joinUrl(profile.baseUrl, profile.endpointPath || "/chat/completions"), {
+        method: "POST",
+        signal: requestControl.signal,
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${profile.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: profile.modelId,
+          max_tokens: maxTokens,
+          temperature: 0.2,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              ...usableArtifacts.map((artifact) => ({
+                type: "image_url",
+                image_url: { url: artifact.dataUrl },
+              })),
+            ],
+          }],
+        }),
+      });
+    }
+  } catch (error) {
+    requestControl.cleanup();
+    if (requestControl.didTimeOut()) {
+      throw new Error(`${profile.displayName} 的多模态解析超时。`);
+    }
+    throw error;
+  }
+  requestControl.cleanup();
+
+  if (!response.ok) {
+    throw new Error(formatHttpFailureMessage(profile, response, "多模态解析失败"));
+  }
+  const payload = await response.json();
+  const text = extractTextFromModelResponse(payload, profile.compatibility);
+  if (!text) {
+    throw new Error(`${profile.displayName} 返回了空的多模态解析结果`);
+  }
+  return sanitizeDisplayedModelText(text);
+}
+
+async function fetchDuckDuckGoSearchDigest(query) {
+  const response = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&no_html=1&skip_disambig=1`);
+  if (!response.ok) {
+    throw new Error(`DuckDuckGo 搜索失败：${response.status}`);
+  }
+  const payload = await response.json();
+  const items = [];
+  if (payload.AbstractText) {
+    items.push({
+      title: payload.Heading || query,
+      snippet: payload.AbstractText,
+      url: payload.AbstractURL || "",
+    });
+  }
+  const queue = Array.isArray(payload.RelatedTopics) ? [...payload.RelatedTopics] : [];
+  while (queue.length && items.length < 4) {
+    const next = queue.shift();
+    if (!next) {
+      continue;
+    }
+    if (Array.isArray(next.Topics)) {
+      queue.push(...next.Topics);
+      continue;
+    }
+    if (next.Text) {
+      items.push({
+        title: next.FirstURL || query,
+        snippet: next.Text,
+        url: next.FirstURL || "",
+      });
+    }
+  }
+  return items;
+}
+
+async function fetchWikipediaSearchDigest(query) {
+  const response = await fetch(`https://zh.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=3&namespace=0&format=json&origin=*`);
+  if (!response.ok) {
+    throw new Error(`Wikipedia 搜索失败：${response.status}`);
+  }
+  const payload = await response.json();
+  const titles = Array.isArray(payload?.[1]) ? payload[1] : [];
+  const descriptions = Array.isArray(payload?.[2]) ? payload[2] : [];
+  const urls = Array.isArray(payload?.[3]) ? payload[3] : [];
+  return titles.map((title, index) => ({
+    title,
+    snippet: descriptions[index] || title,
+    url: urls[index] || "",
+  })).filter((item) => item.snippet).slice(0, 3);
+}
+
+async function fetchUrlDigest(url) {
+  const normalized = String(url || "").trim();
+  if (!normalized) {
+    return null;
+  }
+  const mirrorUrl = `https://r.jina.ai/http/${normalized.replace(/^https?:\/\//i, "")}`;
+  const response = await fetch(mirrorUrl);
+  if (!response.ok) {
+    throw new Error(`网页抓取失败：${normalized}`);
+  }
+  const text = await response.text();
+  return {
+    title: normalized,
+    snippet: summarizeText(text, 500),
+    url: normalized,
+  };
+}
+
+function formatResearchSourceDigest(query, collectedResults, sourceUrls) {
+  return [
+    `研究问题：${query}`,
+    sourceUrls.length ? `用户补充网址：${sourceUrls.join("，")}` : "",
+    ...collectedResults.map((item, index) => `${index + 1}. ${item.title}${item.url ? `\n来源：${item.url}` : ""}\n摘要：${item.snippet}`),
+  ].filter(Boolean).join("\n\n");
+}
+
+async function runWebSearchAgent() {
+  const query = String(state.sharedAgentQuery || state.lastSummary || "").trim();
+  if (!query) {
+    throw new Error("还没有可用的研究问题。先确认任务，或在研究问题里手动填写。 ");
+  }
+  const sourceUrls = parseSourceUrls(state.sharedAgentSources);
+  const results = [];
+  const [duckResult, wikiResult] = await Promise.allSettled([
+    fetchDuckDuckGoSearchDigest(query),
+    fetchWikipediaSearchDigest(query),
+  ]);
+  if (duckResult.status === "fulfilled") {
+    results.push(...duckResult.value);
+  }
+  if (wikiResult.status === "fulfilled") {
+    results.push(...wikiResult.value);
+  }
+  for (const url of sourceUrls.slice(0, 2)) {
+    try {
+      const digest = await fetchUrlDigest(url);
+      if (digest) {
+        results.push(digest);
+      }
+    } catch (error) {
+      console.warn("fetchUrlDigest failed", error);
+    }
+  }
+  return formatResearchSourceDigest(query, results.slice(0, 6), sourceUrls);
+}
+
+async function executeSharedResearchAgent(options = {}) {
+  const { includeWebSearch = false } = options;
+  const moderatorProfile = getPrimarySummaryProfile();
+  if (!moderatorProfile) {
+    throw new Error("还没有可用的主持模型，无法执行共享 research agent。先配置主持 AI。 ");
+  }
+  const query = String(state.sharedAgentQuery || state.lastSummary || "").trim();
+  const orderedSpeakers = getOrderedSelectedRoleIds().map((roleId) => getRoleById(roleId)).filter(Boolean);
+  const sourceDigest = includeWebSearch ? await runWebSearchAgent() : "";
+  const brief = await buildSharedResearchBriefFromSources(query || state.lastSummary, moderatorProfile, orderedSpeakers, sourceDigest);
+  state.sharedResearchBrief = brief;
+  appendProjectAgentNote(includeWebSearch ? "网页搜索 Agent" : "共享 research agent", brief);
+  appendMarkup(
+    createMessageMarkup({
+      speakerId: includeWebSearch ? "web-search-agent" : "shared-research-agent",
+      label: includeWebSearch ? "网" : "研",
+      sublabel: includeWebSearch ? langText("网页搜索与共享事实", "Web Search + Shared Brief") : langText("共享事实包", "Shared Brief"),
+      body: brief,
+      avatarLabel: includeWebSearch ? "网" : "研",
+      avatarClass: "avatar-system",
+      tone: "system",
+    })
+  );
+  syncUserMemoryFromState(includeWebSearch ? "research" : "passive");
+  await persistUserMemory();
+  await syncCurrentTopicSnapshot();
+}
+
+async function executeMultimodalEvidenceAgent() {
+  const multimodalProfile = getMultimodalProfile();
+  if (!multimodalProfile) {
+    throw new Error("还没有可用的多模态模型，无法执行图片解析。先配置主持 AI，或单独指定多模态模型。 ");
+  }
+  const imageArtifacts = state.projectArtifacts.filter((artifact) => artifact.kind === "image" && artifact.dataUrl).slice(-3);
+  if (!imageArtifacts.length) {
+    throw new Error("当前项目里还没有可解析的图片附件。请先上传图片。 ");
+  }
+  const prompt = [
+    "你现在是这张圆桌的共享多模态证据 agent。",
+    "你的任务不是替任何一个角色站队，而是先把图片里的可确认信息整理成所有席位共用的证据摘要。",
+    "请优先输出：图片里能确认的事实、图片支持了什么判断、图片还不能证明什么、哪些地方仍需结合外部资料核实。",
+    "不要编造 OCR 结果，不要把看不清的地方说成已经确认。",
+    `任务定义：${state.lastSummary || "当前项目"}`,
+    `当前执行模型：${multimodalProfile.displayName}`,
+    state.sharedResearchBrief ? `当前共享事实包：${state.sharedResearchBrief}` : "",
+  ].filter(Boolean).join("\n\n");
+  const result = await requestMultimodalModelText(multimodalProfile, prompt, imageArtifacts, 900);
+  state.sharedResearchBrief = [state.sharedResearchBrief, `图片证据补充：${result}`].filter(Boolean).join("\n\n");
+  appendProjectAgentNote("多模态证据 Agent", result);
+  appendMarkup(
+    createMessageMarkup({
+      speakerId: "multimodal-evidence-agent",
+      label: "图",
+      sublabel: langText("图片证据解析", "Image Evidence Analysis"),
+      body: result,
+      avatarLabel: "图",
+      avatarClass: "avatar-system",
+      tone: "system",
+    })
+  );
+  syncUserMemoryFromState("multimodal");
+  await persistUserMemory();
+  await syncCurrentTopicSnapshot();
 }
 
 function shouldEnhanceGeneratedPrompt(promptText) {
@@ -5017,8 +6436,13 @@ async function refreshRecommendedRolePrompts(summary = state.lastSummary, option
 }
 
 function normalizeGeneratedRole(generatedRole, index, createdAt) {
-  const name = sanitizeGeneratedRoleName(generatedRole.name || generatedRole.title || `临时角色${index + 1}`);
+  const roleType = normalizeGeneratedRoleType(generatedRole.roleType || generatedRole.roleKind || generatedRole.personaType);
   const seat = String(generatedRole.seat || generatedRole.role || "专题分析者").trim();
+  const name = getRecommendedRolePublicName({
+    name: sanitizeGeneratedRoleName(generatedRole.name || generatedRole.title || `临时角色${index + 1}`),
+    seat,
+    roleType,
+  });
   const description = String(generatedRole.background || generatedRole.bio || generatedRole.identity || generatedRole.description || generatedRole.focus || generatedRole.why || `${name} 长期从 ${seat} 这个观察重心出发参与讨论，习惯依靠自己的专业训练与长期经验做判断。`).trim();
   const method = String(generatedRole.method || generatedRole.style || generatedRole.approach || "针对性分析").trim();
   const stance = String(generatedRole.stance || generatedRole.position || "补充关键视角").trim();
@@ -5043,7 +6467,7 @@ function normalizeGeneratedRole(generatedRole, index, createdAt) {
     age: normalizeRoleAge(generatedRole.age || generatedRole.ageText || generatedRole.ageLabel || generatedRole.ageRange),
     source: "recommended",
     sourceLabel: "临时生成",
-    roleType: normalizeGeneratedRoleType(generatedRole.roleType || generatedRole.roleKind || generatedRole.personaType),
+    roleType,
     systemPrompt: prompt,
   });
 }
@@ -5061,8 +6485,9 @@ async function requestGeneratedRecommendedRoles(summary, planningBrief = "") {
     "请直接根据任务本身去想：这件事真正需要哪些人来一起讨论，才能既有启发，又能兼顾现实落地。",
     `输出刚好 ${targetCount} 个角色。专业不要重复，人物之间要互补。`,
     "优先让 AI 自己想清楚需要哪些视角，不要按固定行业模板硬凑。",
-    "name 必须写成人能一眼看懂的人话名称，优先用具体人物名、通俗职业名或广为人知的角色名。不要输出“风险边界者”“资源配置者”“长期主义判断者”这类抽象标签。",
-    "如果用职业身份，尽量写得更具体更像真人会用的称呼，例如材料科学家、材料工程师、电池安全研究员、结构工艺工程师，而不是王工、张教授、李总这种过泛称呼。",
+    "name 必须写成人能一眼看懂的人话名称。只有 roleType=exemplar 时才允许直接用名人、历史人物、影视人物或高辨识度角色的人名。",
+    "只要 roleType=expert，就不要用真实姓名或普通人名，统一改用职业或职责称呼，例如公安痕迹鉴定专家、犯罪现场调查专家、电池安全研究员、结构工艺工程师。",
+    "不要输出王工、张教授、李总、陈雪梅、周文渊这种名字式称呼，也不要输出“风险边界者”“资源配置者”“长期主义判断者”这类抽象标签。",
     "如果现实里有非常贴题的知名人物、行业代表人物、历史人物、小说人物或影视角色，可以少量混入，但不是必须。",
     `真实人物或高辨识度代表人物最多只能占四分之一，按 ${targetCount} 人计算最多 ${Math.max(1, Math.floor(targetCount * MAX_EXEMPLAR_ROLE_RATIO))} 个。`,
     "不要把人物写成空泛职业堆砌，也不要用一个名字换几种说法来重复同类专家。",
@@ -5143,8 +6568,8 @@ async function requestSingleRecommendedRole(summary, planningBrief, existingRole
       getPeoplePoolRoleNamesText() ? `人物库里已有这些名字，禁止重复同名：${getPeoplePoolRoleNamesText()}` : "",
       "只需要返回 1 个 JSON 对象，不要解释，不要 Markdown。",
       "必须字段：name, seat, description, stance, method, temper, roleType, gender, age。可选字段：systemPrompt, color, avatar。这里的 seat 表示人物长期观察重心，不是外部的本轮扮演角色。",
-      "name 和 seat 必须是人话，不能是抽象黑话。职业名尽量写成材料科学家、材料工程师、电池安全研究员这类更具体的称呼，不要只写王工、张教授、李总。",
-      "如果现实里有非常贴题的知名人物或代表专家，也可以少量直接用人名，但不是必须。",
+      "name 和 seat 必须是人话，不能是抽象黑话。roleType=expert 时 name 只能写职业或职责称呼，例如材料科学家、材料工程师、电池安全研究员，不要写王工、张教授、李总，也不要写普通人名。",
+      "只有 roleType=exemplar 时才允许直接用知名人物的人名。",
       "gender 只填 male 或 female。age 直接写具体年龄，例如 16岁、29岁、44岁、63岁。",
       "如果是历史人物，优先写他最广为人知阶段的大致年龄；如果是虚构人物，写大众最熟悉设定里的年龄；如果是原型专家，请直接编一个合理年龄。",
       "优先保证人物身份准确和互补。如果 systemPrompt 一时写不完整，可以留空，不要为了补 prompt 牺牲人物准确性。",
@@ -5915,6 +7340,7 @@ async function seedDatabase() {
       main: defaultProfiles[0].id,
       challenger: defaultProfiles[1].id,
       judge: defaultProfiles[0].id,
+      multimodal: "",
     });
   }
 }
@@ -5924,17 +7350,20 @@ async function hydrateState() {
   state.modelProfiles = (await dbGetAll(PROFILE_STORE)).map(normalizeProfile);
   state.appLanguage = await loadAppState("appLanguage", "zh");
   state.voiceReadEnabled = await loadAppState("voiceReadEnabled", false);
-  state.mappings = await loadAppState("modelMappings", {
+  state.userMemory = normalizeUserMemory(await loadAppState(USER_MEMORY_KEY, buildEmptyUserMemory()));
+  state.mappings = normalizeModelMappings(await loadAppState("modelMappings", {
     main: defaultProfiles[0].id,
     challenger: defaultProfiles[1].id,
     judge: defaultProfiles[0].id,
-  });
+    multimodal: "",
+  }));
   state.topics = await loadAppState("topicSessions", []);
   state.activeTopicId = await loadAppState("activeTopicId", "");
   if (!state.topics.length) {
     state.topics = [];
     state.activeTopicId = "";
   }
+  await hydrateProjectScopedState(state.activeTopicId);
 }
 
 async function saveRole(role) {
@@ -6026,6 +7455,9 @@ async function deleteModelProfile(profileIdValue) {
   }
   if (state.mappings.judge === profileIdValue) {
     state.mappings.judge = "";
+  }
+  if (state.mappings.multimodal === profileIdValue) {
+    state.mappings.multimodal = "";
   }
   Object.keys(state.seatModelAssignments).forEach((roleId) => {
     if (state.seatModelAssignments[roleId] === profileIdValue) {
@@ -6362,23 +7794,24 @@ async function testProfileConnectivity() {
       });
     }
     const latencyMs = Math.max(1, Math.round(performance.now() - startedAt));
+    const visionProbe = response.ok ? await probeVisionCapability(profile) : { supported: false, status: "error", latencyMs: 0 };
 
     if (!response.ok) {
       if (existing) {
-        await saveModelProfile({ ...existing, ...profile, lastTestStatus: "error", lastTestLatencyMs: latencyMs });
+        await saveModelProfile({ ...existing, ...profile, lastTestStatus: "error", lastTestLatencyMs: latencyMs, supportsVision: false, visionTestStatus: "error", lastVisionTestLatencyMs: 0 });
       }
       setProfileTestStatus(`测试失败 ${response.status}`, "error");
       return;
     }
 
     if (existing) {
-      await saveModelProfile({ ...existing, ...profile, lastTestStatus: "success", lastTestLatencyMs: latencyMs });
+      await saveModelProfile({ ...existing, ...profile, lastTestStatus: "success", lastTestLatencyMs: latencyMs, supportsVision: visionProbe.supported, visionTestStatus: visionProbe.status, lastVisionTestLatencyMs: visionProbe.latencyMs });
     }
-    setProfileTestStatus(langText(`测试通过 · ${formatProfileLatency({ lastTestLatencyMs: latencyMs })}`, `Test passed · ${formatProfileLatency({ lastTestLatencyMs: latencyMs })}`), "success");
+    setProfileTestStatus(langText(`测试通过 · ${formatProfileLatency({ lastTestLatencyMs: latencyMs })} · ${formatVisionCapabilityLabel(visionProbe)}`, `Test passed · ${formatProfileLatency({ lastTestLatencyMs: latencyMs })} · ${formatVisionCapabilityLabel(visionProbe)}`), "success");
   } catch (error) {
     console.error(error);
     if (existing) {
-      await saveModelProfile({ ...existing, ...profile, lastTestStatus: "error" });
+      await saveModelProfile({ ...existing, ...profile, lastTestStatus: "error", supportsVision: false, visionTestStatus: "error", lastVisionTestLatencyMs: 0 });
     }
     setProfileTestStatus(error?.name === "AbortError" ? "测试超时，模型接通了但长时间没有返回" : "测试失败，可能被 CORS 或网络拦截", "error");
   }
@@ -6428,15 +7861,16 @@ async function testStoredProfileConnectivity(profileIdValue) {
     }
     const latencyMs = Math.max(1, Math.round(performance.now() - startedAt));
     requestControl.cleanup();
+    const visionProbe = response.ok ? await probeVisionCapability(profile) : { supported: false, status: "error", latencyMs: 0 };
 
     const nextStatus = response.ok ? "success" : "error";
-    await saveModelProfile({ ...existing, lastTestStatus: nextStatus, lastTestLatencyMs: latencyMs });
-    updateSeatFeedback(response.ok ? `${profile.displayName} 测试通过，${formatProfileLatency({ lastTestLatencyMs: latencyMs })}` : formatHttpFailureMessage(profile, response, "测试失败"), response.ok ? "success" : "pending");
+    await saveModelProfile({ ...existing, lastTestStatus: nextStatus, lastTestLatencyMs: latencyMs, supportsVision: visionProbe.supported, visionTestStatus: visionProbe.status, lastVisionTestLatencyMs: visionProbe.latencyMs });
+    updateSeatFeedback(response.ok ? `${profile.displayName} 测试通过，${formatProfileLatency({ lastTestLatencyMs: latencyMs })} / ${formatVisionCapabilityLabel(visionProbe)}` : formatHttpFailureMessage(profile, response, "测试失败"), response.ok ? "success" : "pending");
     if (profileId.value === profile.id) {
-      setProfileTestStatus(response.ok ? langText(`测试通过 · ${formatProfileLatency({ lastTestLatencyMs: latencyMs })}`, `Test passed · ${formatProfileLatency({ lastTestLatencyMs: latencyMs })}`) : formatHttpFailureMessage(profile, response, "测试失败"), response.ok ? "success" : "error");
+      setProfileTestStatus(response.ok ? langText(`测试通过 · ${formatProfileLatency({ lastTestLatencyMs: latencyMs })} · ${formatVisionCapabilityLabel(visionProbe)}`, `Test passed · ${formatProfileLatency({ lastTestLatencyMs: latencyMs })} · ${formatVisionCapabilityLabel(visionProbe)}`) : formatHttpFailureMessage(profile, response, "测试失败"), response.ok ? "success" : "error");
     }
   } catch (error) {
-    await saveModelProfile({ ...existing, lastTestStatus: "error", lastTestLatencyMs: 0 });
+    await saveModelProfile({ ...existing, lastTestStatus: "error", lastTestLatencyMs: 0, supportsVision: false, visionTestStatus: "error", lastVisionTestLatencyMs: 0 });
     const timeoutMessage = error?.name === "AbortError" ? `测试超时：${profile.displayName}` : `测试失败：${profile.displayName}`;
     updateSeatFeedback(timeoutMessage, "pending");
     if (profileId.value === profile.id) {
@@ -6477,6 +7911,7 @@ function appendAiSummary(content) {
   const summary = content.trim();
   const displaySummary = formatTaskSummaryForDisplay(summary);
   state.lastSummary = summary;
+  state.sharedAgentQuery = summary;
   state.sharedResearchBrief = "";
   state.rolePlanningBrief = "";
   state.pendingRoleClarification = [];
@@ -6779,6 +8214,10 @@ function seedConversation() {
   state.lastSummary = "";
   state.sharedResearchBrief = "";
   state.rolePlanningBrief = "";
+  state.projectMemory = buildEmptyProjectMemory();
+  state.projectArtifacts = [];
+  state.sharedAgentQuery = "";
+  state.sharedAgentSources = "";
   state.pendingRoleClarification = [];
   state.taskSupplementMode = false;
   state.latestReportText = "";
@@ -6796,6 +8235,7 @@ function seedConversation() {
   renderSeatStack();
   renderSeatPicker();
   renderAttachmentStrip();
+  renderMemoryAgentWorkspace();
   userInput.value = "";
   updateCurrentTopicTitle(t("currentTaskEmpty"));
   autoResizeTextarea();
@@ -6836,6 +8276,20 @@ function bindEvents() {
   openPeopleLibraryButton.addEventListener("click", () => {
     renderPeopleLibrary();
     openPeopleLibrary();
+  });
+
+  openRoundtableWorkbenchButton?.addEventListener("click", () => {
+    openRoundtableWorkbench();
+  });
+  closeRoundtableWorkbenchButton?.addEventListener("click", closeRoundtableWorkbench);
+  roundtableWorkbenchBackdrop?.addEventListener("click", closeRoundtableWorkbench);
+  roundtableEvidenceList?.addEventListener("click", (event) => {
+    const trigger = event.target.closest("[data-evidence-id]");
+    if (!trigger) {
+      return;
+    }
+    activeRoundtableEvidenceId = trigger.dataset.evidenceId || "";
+    renderRoundtableEvidenceWorkspace();
   });
 
   closePeopleLibrary.addEventListener("click", () => {
@@ -7023,6 +8477,11 @@ function bindEvents() {
   });
 
   seatStack.addEventListener("click", (event) => {
+    const previewButton = event.target.closest(".seat-voice-preview");
+    if (previewButton) {
+      playVoiceSampleForRole(getRoleById(previewButton.dataset.roleId));
+      return;
+    }
     const editButton = event.target.closest(".seat-edit");
     if (editButton) {
       const role = getRoleById(editButton.dataset.roleId);
@@ -7053,6 +8512,26 @@ function bindEvents() {
       state.seatModelAssignments[modelSelect.dataset.roleId] = modelSelect.value;
       renderSeatStack();
       updateSeatFeedback(langText(`已为 ${getRoleById(modelSelect.dataset.roleId)?.name || "人物"} 切换模型：${getConfiguredProfileById(modelSelect.value)?.displayName || "未设置"}`, `Switched model for ${getRoleById(modelSelect.dataset.roleId)?.name || "persona"}: ${getConfiguredProfileById(modelSelect.value)?.displayName || "Not set"}`), "success");
+      void syncCurrentTopicSnapshot();
+      return;
+    }
+
+    const readAloudVoiceSelect = event.target.closest(".seat-readaloud-voice-select");
+    if (readAloudVoiceSelect) {
+      const role = getRoleById(readAloudVoiceSelect.dataset.roleId);
+      if (readAloudVoiceSelect.value) {
+        state.ttsVoiceAssignments[readAloudVoiceSelect.dataset.roleId] = readAloudVoiceSelect.value;
+      } else {
+        delete state.ttsVoiceAssignments[readAloudVoiceSelect.dataset.roleId];
+      }
+      preferredReadAloudVoices.clear();
+      renderSeatStack();
+      updateSeatFeedback(
+        readAloudVoiceSelect.value
+          ? langText(`已为 ${getDisplayRoleName(role) || "人物"} 指定朗读音色`, `Assigned a read-aloud voice to ${getDisplayRoleName(role) || "persona"}`)
+          : langText(`已恢复 ${getDisplayRoleName(role) || "人物"} 的自动音色匹配`, `Restored automatic voice matching for ${getDisplayRoleName(role) || "persona"}`),
+        "success"
+      );
       void syncCurrentTopicSnapshot();
       return;
     }
@@ -7146,8 +8625,11 @@ function bindEvents() {
   attachmentInput.addEventListener("change", () => {
     const files = Array.from(attachmentInput.files || []);
     state.pendingAttachments = state.pendingAttachments.concat(files);
+    syncUserMemoryFromState("attachments", { attachmentCount: files.length });
+    void persistUserMemory();
     attachmentInput.value = "";
     renderAttachmentStrip();
+    renderMemoryAgentWorkspace();
   });
 
   composerAttachments.addEventListener("click", (event) => {
@@ -7159,6 +8641,62 @@ function bindEvents() {
   });
 
   userInput.addEventListener("input", autoResizeTextarea);
+  sharedAgentQueryInput?.addEventListener("input", () => {
+    state.sharedAgentQuery = sharedAgentQueryInput.value;
+    renderMemoryAgentWorkspace();
+  });
+  sharedAgentSourcesInput?.addEventListener("input", () => {
+    state.sharedAgentSources = sharedAgentSourcesInput.value;
+    renderMemoryAgentWorkspace();
+  });
+
+  refreshUserMemoryButton?.addEventListener("click", async () => {
+    syncUserMemoryFromState();
+    await persistUserMemory();
+    updateSharedAgentStatus(langText("已刷新用户记忆。", "User memory refreshed."), "success");
+    renderMemoryAgentWorkspace();
+  });
+
+  refreshProjectMemoryButton?.addEventListener("click", async () => {
+    state.projectMemory = deriveProjectMemoryFromState();
+    appendProjectAgentNote(langText("项目记忆 Agent", "Project Memory Agent"), state.projectMemory.taskSummary || langText("已刷新当前项目记忆。", "Project memory refreshed."));
+    await syncCurrentTopicSnapshot();
+    updateSharedAgentStatus(langText("已刷新项目记忆。", "Project memory refreshed."), "success");
+    renderMemoryAgentWorkspace();
+  });
+
+  runSharedResearchAgentButton?.addEventListener("click", async () => {
+    updateSharedAgentStatus(langText("共享 research agent 正在整理事实包...", "Shared research agent is building the brief..."), "pending");
+    try {
+      await executeSharedResearchAgent();
+      updateSharedAgentStatus(langText("共享事实包已更新，并已注入本项目。", "Shared brief updated and injected into this project."), "success");
+      renderMemoryAgentWorkspace();
+    } catch (error) {
+      updateSharedAgentStatus(error instanceof Error ? error.message : String(error), "error");
+    }
+  });
+
+  runWebSearchAgentButton?.addEventListener("click", async () => {
+    updateSharedAgentStatus(langText("网页搜索 Agent 正在整理公开网页结果...", "Web search agent is collecting public results..."), "pending");
+    try {
+      await executeSharedResearchAgent({ includeWebSearch: true });
+      updateSharedAgentStatus(langText("网页搜索结果已并入共享事实包。", "Web search results were merged into the shared brief."), "success");
+      renderMemoryAgentWorkspace();
+    } catch (error) {
+      updateSharedAgentStatus(error instanceof Error ? error.message : String(error), "error");
+    }
+  });
+
+  runMultimodalAgentButton?.addEventListener("click", async () => {
+    updateSharedAgentStatus(langText("多模态证据 Agent 正在解析图片...", "Multimodal evidence agent is analyzing images..."), "pending");
+    try {
+      await executeMultimodalEvidenceAgent();
+      updateSharedAgentStatus(langText("图片解析已完成，并已补入共享事实包。", "Image analysis completed and was appended to the shared brief."), "success");
+      renderMemoryAgentWorkspace();
+    } catch (error) {
+      updateSharedAgentStatus(error instanceof Error ? error.message : String(error), "error");
+    }
+  });
 
   followToggle.addEventListener("click", () => {
     if (state.autoFollow) {
@@ -7211,8 +8749,11 @@ function bindEvents() {
     }
     const attachments = [...state.pendingAttachments];
     appendUserMessage(content || "我上传了附件，请结合附件继续整理。", state.pendingAttachments);
+    await storeAttachmentsForActiveTopic(attachments);
     state.pendingAttachments = [];
     renderAttachmentStrip();
+    state.projectMemory = deriveProjectMemoryFromState();
+    renderMemoryAgentWorkspace();
     userInput.value = "";
     autoResizeTextarea();
 
@@ -7394,6 +8935,22 @@ function bindEvents() {
     renderModelMappings();
     updateSeatFeedback(langText(`已切换主持AI：${getConfiguredProfileById(hostModelSelect.value)?.displayName || "未设置"}`, `Host AI changed to: ${getConfiguredProfileById(hostModelSelect.value)?.displayName || "Not set"}`), "success");
   });
+  multimodalModelSelect?.addEventListener("change", async () => {
+    if (state.discussionRunning) {
+      return;
+    }
+    state.mappings.multimodal = multimodalModelSelect.value;
+    await saveAppState("modelMappings", state.mappings);
+    renderConnectedModelList();
+    renderModelMappings();
+    const nextProfile = getMultimodalProfile();
+    updateSeatFeedback(
+      state.mappings.multimodal
+        ? langText(`已切换多模态模型：${nextProfile?.displayName || "未设置"}`, `Multimodal model changed to: ${nextProfile?.displayName || "Not set"}`)
+        : langText(`多模态模型已改为跟随主持 AI：${nextProfile?.displayName || "未设置"}`, `Multimodal model now follows Host AI: ${nextProfile?.displayName || "Not set"}`),
+      "success"
+    );
+  });
   discussionRoundsInput.addEventListener("change", () => {
     const nextValue = Math.min(9, Math.max(1, Number(discussionRoundsInput.value || 1)));
     state.discussionRounds = nextValue;
@@ -7405,6 +8962,9 @@ function bindEvents() {
     void syncCurrentTopicSnapshot();
   });
   startDiscussionButton.addEventListener("click", () => {
+    syncUserMemoryFromState("discussion-start");
+    void persistUserMemory();
+    renderMemoryAgentWorkspace();
     runDiscussionFlow();
   });
   stopDiscussionButton.addEventListener("click", () => {
@@ -7415,6 +8975,18 @@ function bindEvents() {
 async function init() {
   await seedDatabase();
   await hydrateState();
+  if (window.speechSynthesis) {
+    const handleVoicesChanged = () => {
+      preferredReadAloudVoices.clear();
+      renderSeatStack();
+    };
+    if (typeof window.speechSynthesis.addEventListener === "function") {
+      window.speechSynthesis.addEventListener("voiceschanged", handleVoicesChanged);
+    } else {
+      window.speechSynthesis.onvoiceschanged = handleVoicesChanged;
+    }
+    window.speechSynthesis.getVoices();
+  }
   document.body.classList.remove("theme-light");
   applyLanguageToStaticUi();
   updateCompactSummary();
@@ -7427,9 +8999,12 @@ async function init() {
   renderModelMappings();
   renderProviderTemplateSelect();
   renderAttachmentStrip();
+  renderMemoryAgentWorkspace();
   const activeTopic = state.topics.find((topic) => topic.id === state.activeTopicId);
   if (activeTopic?.snapshot?.topicConfirmed) {
     applyTopicSnapshot(activeTopic.snapshot);
+    await hydrateProjectScopedState(activeTopic.id);
+    renderMemoryAgentWorkspace();
   } else {
     seedConversation();
   }
