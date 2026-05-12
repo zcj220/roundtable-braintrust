@@ -1,0 +1,7 @@
+node_modules/
+test-results/
+desktop-exe/
+dist/
+build/
+*.exe
+*.zip

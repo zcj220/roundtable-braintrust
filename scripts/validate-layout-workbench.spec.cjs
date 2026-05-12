@@ -45,12 +45,18 @@ test('left shortcuts and roundtable workbench render correctly', async ({ page }
 
   await page.reload({ waitUntil: 'domcontentloaded' });
 
-  await expect(page.locator('#open-people-library')).toContainText('打开人物库');
-  await expect(page.locator('#open-roundtable-workbench')).toContainText('打开圆桌台');
+  await expect(page.locator('#open-people-library')).toContainText('人物库');
+  await expect(page.locator('#open-roundtable-workbench')).toContainText('圆桌台');
 
   await page.click('#open-roundtable-workbench');
   await expect(page.locator('#roundtable-workbench-modal')).toHaveClass(/open/);
-  await expect(page.locator('#roundtable-evidence-detail')).toContainText('选中一条证据后');
+  await expect(page.locator('#roundtable-evidence-detail')).toContainText('右侧会在你点开左边条目后显示详情');
+  await expect(page.locator('#roundtable-workbench-modal')).toContainText('证据链');
+  await expect(page.locator('#roundtable-workbench-modal')).toContainText('详情');
+  await expect(page.locator('#roundtable-workbench-modal')).toContainText('搜索网页');
+  await expect(page.locator('#roundtable-workbench-modal')).toContainText('图片解析');
+  await expect(page.locator('#roundtable-workbench-modal')).not.toContainText('共享 Agent 工作台');
+  await expect(page.locator('#roundtable-evidence-filter')).toBeVisible();
   await page.click('#close-roundtable-workbench');
 
   await page.click('#open-settings-drawer');

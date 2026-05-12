@@ -158,33 +158,30 @@
       <div class="modal-header">
         <div>
           <p class="section-label">圆桌台</p>
-          <h2>项目记忆、证据与共享 Agent</h2>
+          <h2>证据链</h2>
         </div>
-        <div class="header-actions">
-          <button class="ghost-link" id="close-roundtable-workbench" type="button">关闭圆桌台</button>
+        <div class="header-actions roundtable-toolbar-actions">
+          <button class="ghost-link" id="run-web-search-agent" type="button">搜索网页</button>
+          <button class="ghost-link" id="run-multimodal-agent" type="button">图片解析</button>
+          <button class="ghost-link" id="close-roundtable-workbench" type="button">关闭</button>
         </div>
       </div>
       <div class="roundtable-workbench-grid">
         <div class="roundtable-workbench-column">
           <article class="memory-card">
-            <div class="memory-card-head">
-              <p class="topic-tag">用户记忆</p>
-              <button class="ghost-link compact-link" id="refresh-user-memory" type="button">刷新</button>
-            </div>
-            <div class="memory-card-body" id="user-memory-panel"></div>
-          </article>
-
-          <article class="memory-card">
-            <div class="memory-card-head">
-              <p class="topic-tag">项目记忆</p>
-              <button class="ghost-link compact-link" id="refresh-project-memory" type="button">刷新</button>
-            </div>
-            <div class="memory-card-body" id="project-memory-panel"></div>
-          </article>
-
-          <article class="memory-card">
-            <div class="memory-card-head">
-              <p class="topic-tag">证据清单</p>
+            <div class="memory-card-head roundtable-list-head">
+              <p class="topic-tag">证据链</p>
+              <label class="roundtable-filter-field" for="roundtable-evidence-filter">
+                <span>筛选</span>
+                <select id="roundtable-evidence-filter">
+                  <option value="all">全部</option>
+                  <option value="web">网页</option>
+                  <option value="image">图片</option>
+                  <option value="video">视频</option>
+                  <option value="file">文件</option>
+                  <option value="text">文本</option>
+                </select>
+              </label>
             </div>
             <div class="memory-card-body evidence-list" id="roundtable-evidence-list"></div>
           </article>
@@ -193,34 +190,22 @@
         <div class="roundtable-workbench-column">
           <article class="memory-card">
             <div class="memory-card-head">
-              <p class="topic-tag">证据详情</p>
+              <p class="topic-tag">详情</p>
             </div>
             <div class="memory-card-body evidence-detail" id="roundtable-evidence-detail"></div>
           </article>
-
-          <article class="memory-card agent-workbench-card">
-            <div class="memory-card-head">
-              <p class="topic-tag">共享 Agent 工作台</p>
-            </div>
-            <div class="memory-card-body agent-workbench-body">
-              <label class="agent-field" for="shared-agent-query">
-                <span>研究问题</span>
-                <textarea id="shared-agent-query" rows="2" placeholder="默认会沿用当前任务定义，也可以手动补充具体搜索问题"></textarea>
-              </label>
-              <label class="agent-field" for="shared-agent-sources">
-                <span>补充网址</span>
-                <textarea id="shared-agent-sources" rows="2" placeholder="可粘贴网址，一行一个；共享 research agent 会尽量纳入这批来源"></textarea>
-              </label>
-              <div class="agent-actions-grid">
-                <button class="ghost-action" id="run-shared-research-agent" type="button">共享研究</button>
-                <button class="ghost-action" id="run-web-search-agent" type="button">网页搜索</button>
-                <button class="ghost-action" id="run-multimodal-agent" type="button">图片解析</button>
-              </div>
-              <p class="agent-status" id="shared-agent-status">等待执行共享 Agent</p>
-            </div>
-          </article>
         </div>
       </div>
+      <div class="hidden" aria-hidden="true">
+        <div id="user-memory-panel"></div>
+        <div id="project-memory-panel"></div>
+        <textarea id="shared-agent-query"></textarea>
+        <textarea id="shared-agent-sources"></textarea>
+        <button id="refresh-user-memory" type="button"></button>
+        <button id="refresh-project-memory" type="button"></button>
+        <button id="run-shared-research-agent" type="button"></button>
+        <p id="shared-agent-status"></p>
+        </div>
     </section>
 
     <div class="modal-backdrop" id="seat-picker-backdrop"></div>
@@ -378,11 +363,11 @@
 
         <section class="side-section compact">
           <div class="side-title-row">
-            <h2>工作台入口</h2>
+            <h2>快捷入口</h2>
           </div>
           <div class="sidebar-shortcut-stack">
-            <button class="action-secondary sidebar-shortcut-button" id="open-people-library" type="button">打开人物库</button>
-            <button class="action-secondary sidebar-shortcut-button" id="open-roundtable-workbench" type="button">打开圆桌台</button>
+            <button class="action-secondary sidebar-shortcut-button" id="open-people-library" type="button">人物库</button>
+            <button class="action-secondary sidebar-shortcut-button" id="open-roundtable-workbench" type="button">圆桌台</button>
           </div>
         </section>
       </aside>
@@ -444,10 +429,6 @@
             <button class="config-item compact-switch" id="cycle-density" type="button">
               <span id="cycle-density-label">回答力度</span>
               <strong id="config-density">标准</strong>
-            </button>
-            <button class="config-item compact-switch" id="cycle-model" type="button">
-              <span id="cycle-model-label">模型策略</span>
-              <strong id="config-model">系统支配</strong>
             </button>
             <label class="config-item compact-switch round-config" for="discussion-rounds-input">
               <span id="discussion-rounds-label">讨论轮次</span>

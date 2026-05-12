@@ -1,0 +1,10 @@
+{
+  "name": "roundtable-braintrust",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "powershell -ExecutionPolicy Bypass -File ./scripts/package-static.ps1",
+    "build:exe": "powershell -ExecutionPolicy Bypass -File ./scripts/build-exe.ps1",
+    "preview:dist": "d:/Projects/roundtable-braintrust/.venv/Scripts/python.exe -m http.server 4175 -d dist"
+  }
+}

@@ -5,9 +5,9 @@ const PROFILE_STORE = "modelProfiles";
 const APP_STATE_STORE = "appState";
 const MODEL_REQUEST_TIMEOUT_MS = 70000;
 const ROLE_PLANNING_TIMEOUT_MS = 35000;
-const ROLE_GENERATION_TIMEOUT_MS = 55000;
-const ROLE_EMERGENCY_TIMEOUT_MS = 40000;
-const ROLE_IDENTITY_TIMEOUT_MS = 22000;
+const ROLE_GENERATION_TIMEOUT_MS = 120000;
+const ROLE_EMERGENCY_TIMEOUT_MS = 120000;
+const ROLE_IDENTITY_TIMEOUT_MS = 45000;
 const MODEL_TEST_TIMEOUT_MS = 18000;
 const MIN_RECOMMENDED_ROLE_COUNT = 8;
 const MAX_EXEMPLAR_ROLE_RATIO = 0.25;
@@ -15,7 +15,7 @@ const MAX_EXEMPLAR_ROLE_RATIO = 0.25;
 const modeValues = ["自由讨论", "立场内求最强答案", "客观求真", "灵感探索"];
 const participationValues = ["每轮后表态", "全程旁观"];
 const densityValues = ["简洁", "标准", "深入"];
-const modelValues = ["系统支配", "用户支配"];
+const modelValues = ["系统切换", "手动切换"];
 const modeHelpTexts = [
   "把一个复杂问题拆成几个角度分别讲。可以分子问题、分层次、分时间或分利益相关方展开，先讲开再由主持收回来。",
   "先把支持与反对两边最强的版本都讲完整。反对方负责提前打出最难的质疑，支持方负责把这些质疑正面回应并补强防守。",
@@ -25,7 +25,7 @@ const modeHelpTexts = [
 const modeValuesEn = ["Open", "Strongest Case", "Truth-Seeking", "Ideas"];
 const participationValuesEn = ["Per-Round", "Observe"];
 const densityValuesEn = ["Concise", "Standard", "Deep"];
-const modelValuesEn = ["System-led", "User-led"];
+const modelValuesEn = ["System Switching", "Manual Switching"];
 const modeHelpTextsEn = [
   "Break a complex issue into a few angles and let the table open them up before the host pulls the threads back together.",
   "Present the strongest version of both support and opposition. Critics should surface the hardest objections early, and supporters should answer them directly.",
@@ -357,17 +357,38 @@ function playVoiceSampleForRole(role) {
     return;
   }
 
+  if (activeVoiceSampleRoleId === role?.id && activeVoiceSampleAudio) {
+    stopVoiceSamplePlayback();
+    updateSeatFeedback(langText(`已停止 ${role?.name || "该角色"} 的声音样本。`, `Stopped ${role?.name || "this role"} voice sample.`), "");
+    return;
+  }
+
+  stopVoiceSamplePlayback({ rerender: false });
+  activeVoiceSampleAudio = new Audio(sample.filePath);
+  activeVoiceSampleRoleId = role?.id || "";
+  activeVoiceSampleAudio.addEventListener("ended", () => {
+    stopVoiceSamplePlayback();
+  }, { once: true });
+  activeVoiceSampleAudio.play().catch((error) => {
+    console.warn("voice sample playback failed", error);
+    stopVoiceSamplePlayback();
+    updateSeatFeedback(langText("声音样本播放失败，请确认你是通过本地页面或静态服务器打开原型。", "Voice sample playback failed. Open the prototype from a local page or static server and try again."), "pending");
+  });
+  renderSeatStack();
+  updateSeatFeedback(langText(`正在试听 ${role?.name || "该角色"} 的声音：${getVoiceSampleDisplayLabel(sample)}`, `Previewing ${role?.name || "this role"}: ${getVoiceSampleDisplayLabel(sample)}`), "success");
+}
+
+function stopVoiceSamplePlayback(options = {}) {
+  const { rerender = true } = options;
   if (activeVoiceSampleAudio) {
     activeVoiceSampleAudio.pause();
     activeVoiceSampleAudio.currentTime = 0;
+    activeVoiceSampleAudio = null;
   }
-
-  activeVoiceSampleAudio = new Audio(sample.filePath);
-  activeVoiceSampleAudio.play().catch((error) => {
-    console.warn("voice sample playback failed", error);
-    updateSeatFeedback(langText("声音样本播放失败，请确认你是通过本地页面或静态服务器打开原型。", "Voice sample playback failed. Open the prototype from a local page or static server and try again."), "pending");
-  });
-  updateSeatFeedback(langText(`正在试听 ${role?.name || "该角色"} 的声音：${getVoiceSampleDisplayLabel(sample)}`, `Previewing ${role?.name || "this role"}: ${getVoiceSampleDisplayLabel(sample)}`), "success");
+  activeVoiceSampleRoleId = "";
+  if (rerender && seatStack) {
+    renderSeatStack();
+  }
 }
 
 function inferRoleGender(role) {
@@ -1184,6 +1205,7 @@ const state = {
   generatingSeats: false,
   lastSummary: "",
   sharedResearchBrief: "",
+  sharedEvidenceEntries: [],
   rolePlanningBrief: "",
   pendingRoleClarification: [],
   taskSupplementMode: false,
@@ -1215,6 +1237,8 @@ let pendingConfirmResolver = null;
 let pendingUserParticipationResolver = null;
 let pendingDiscussionContinuationResolver = null;
 let activeRoundtableEvidenceId = "";
+let activeRoundtableEvidenceFilter = "all";
+const pendingEvidenceAnalysisIds = new Set();
 
 const peopleLibraryBackdrop = document.getElementById("people-library-backdrop");
 const peopleLibraryModal = document.getElementById("people-library-modal");
@@ -1226,6 +1250,7 @@ const closeRoundtableWorkbenchButton = document.getElementById("close-roundtable
 const openRoundtableWorkbenchButton = document.getElementById("open-roundtable-workbench");
 const roundtableEvidenceList = document.getElementById("roundtable-evidence-list");
 const roundtableEvidenceDetail = document.getElementById("roundtable-evidence-detail");
+const roundtableEvidenceFilterSelect = document.getElementById("roundtable-evidence-filter");
 const peopleLibraryStats = document.getElementById("people-library-stats");
 const peopleFilterTabs = document.getElementById("people-filter-tabs");
 const peopleSearch = document.getElementById("people-search");
@@ -1349,6 +1374,7 @@ let preferredReadAloudVoices = new Map();
 let readAloudQueue = [];
 let activeReadAloudUtterance = null;
 let activeVoiceSampleAudio = null;
+let activeVoiceSampleRoleId = "";
 let activeReadAloudElement = null;
 
 function openDatabase() {
@@ -1483,6 +1509,7 @@ function normalizeProjectArtifacts(records) {
         kind: record.kind || (String(record.type || "").startsWith("image/") ? "image" : "file"),
         dataUrl: record.dataUrl || "",
         textPreview: record.textPreview || "",
+        analysisText: record.analysisText || "",
         createdAt: Number(record.createdAt || Date.now()),
       }))
     : [];
@@ -1704,6 +1731,25 @@ function readFileAsText(file) {
   });
 }
 
+async function resizeImageForAnalysis(dataUrl, maxDim = 1024, quality = 0.82) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height, 1));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
 async function serializeAttachment(file) {
   const record = {
     id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1711,13 +1757,16 @@ async function serializeAttachment(file) {
     name: file.name,
     type: file.type || "application/octet-stream",
     size: file.size || 0,
-    kind: file.type?.startsWith("image/") ? "image" : "file",
+    kind: file.type?.startsWith("image/") ? "image" : file.type?.startsWith("video/") ? "video" : "file",
     createdAt: Date.now(),
     dataUrl: "",
     textPreview: "",
   };
 
   if (file.type?.startsWith("image/")) {
+    const raw = await readFileAsDataUrl(file);
+    record.dataUrl = await resizeImageForAnalysis(raw, 1024, 0.82);
+  } else if (file.type?.startsWith("video/")) {
     record.dataUrl = await readFileAsDataUrl(file);
   } else if (/^(text\/|application\/(json|xml))/i.test(file.type || "") || /\.(txt|md|json|csv)$/i.test(file.name || "")) {
     record.textPreview = summarizeText(await readFileAsText(file), 1200);
@@ -2016,9 +2065,6 @@ function buildSeatModelOptionsMarkup(role) {
 }
 
 function getRoleModelProfile(role) {
-  if (state.modelIndex === 0) {
-    return getConfiguredProfileById(getSeatDefaultProfileId(role)) || getPrimarySummaryProfile();
-  }
   return getConfiguredProfileById(ensureSeatModelAssignment(role)) || getPrimarySummaryProfile();
 }
 
@@ -2435,6 +2481,15 @@ function getAssignmentInstruction(assignment) {
 }
 
 function sanitizeDisplayedModelText(text) {
+  // 先整体剥离：如果文本以明确的 reasoning 段落标记开头，清掉整个 reasoning 块直到真正的中文正文
+  const reasoningHeaderPattern = /^(?:analyze user input|draft construction|mental refinement|key requirements|identify key requirements|constraints check|deconstruct & plan|deconstruct)/i;
+  if (reasoningHeaderPattern.test(text.trimStart())) {
+    // 找到第一个非空中文段落作为正文起点
+    const chineseParagraph = text.match(/\n\n([\u4e00-\u9fa5][^\n]{10,})/);
+    if (chineseParagraph && chineseParagraph.index !== undefined) {
+      text = text.slice(chineseParagraph.index).trim();
+    }
+  }
   return text
     .replace(/^here'?s a thinking process:?.*$/gim, "")
     .replace(/^thinking process:?.*$/gim, "")
@@ -2448,19 +2503,17 @@ function sanitizeDisplayedModelText(text) {
     .replace(/^unverified\s*[:：].*$/gim, "")
     .replace(/^mode requirements\s*[:：].*$/gim, "")
     .replace(/^position\s*[:：].*$/gim, "")
-    .replace(/^role\s*:\s*.*$/gim, "")
-    .replace(/^task\s*:\s*.*$/gim, "")
-    .replace(/^goal\s*:\s*.*$/gim, "")
-    .replace(/^output\s*:\s*.*$/gim, "")
-    .replace(/^context\s*:\s*.*$/gim, "")
-    .replace(/^tone\s*:\s*.*$/gim, "")
-    .replace(/^format\s*:\s*.*$/gim, "")
-    .replace(/^audience\s*:\s*.*$/gim, "")
+    .replace(/^role\s*:\s*(?=[a-z ])/gim, "")
+    .replace(/^goal\s*:\s*(?=[a-z ])/gim, "")
+    .replace(/^output\s*:\s*(?=[a-z ])/gim, "")
+    .replace(/^context\s*:\s*(?=[a-z ])/gim, "")
+    .replace(/^tone\s*:\s*(?=[a-z ])/gim, "")
+    .replace(/^format\s*:\s*(?=[a-z ])/gim, "")
+    .replace(/^audience\s*:\s*(?=[a-z ])/gim, "")
     .replace(/^you are\s+.*$/gim, "")
     .replace(/^as an?\s+.*$/gim, "")
-    .replace(/^step\s*\d+\s*:.*$/gim, "")
     .replace(/^i (need to|will|should|am going to|assume).*$/gim, "")
-    .replace(/^\s*[-*]?\s*(role|position|task|goal|output|context|tone|format|audience|constraints?|previous speaker(?:\s*\d+)?|previous发言|length|mode requirement|mode requirements|constraints check|task definition|shared facts|controversies|unverified)\s*[:：].*$/gim, "")
+    .replace(/^\s*[-*]?\s*(previous speaker(?:\s*\d+)?|previous发言|mode requirement|mode requirements|constraints check|task definition|shared facts|controversies|unverified)\s*[:：].*$/gim, "")
     .replace(/^[（(][^\n）)]{0,40}[）)]\s*/gm, "")
     .replace(/\*\*(.*?)\*\*/g, "$1")
     .replace(/^#{1,6}\s*/gm, "")
@@ -2477,6 +2530,10 @@ function profileSupportsVision(profile) {
   if (profile.compatibility === "anthropic") {
     return true;
   }
+  // Trust the vision probe result first (set after model test)
+  if (profile.supportsVision === true) {
+    return true;
+  }
 
   const provider = String(profile.providerName || "").toLowerCase();
   const modelId = String(profile.modelId || "").toLowerCase();
@@ -2490,7 +2547,7 @@ function profileSupportsVision(profile) {
     return true;
   }
 
-  return /(gpt-4o|gpt-4\.1|vision|vl|qvq|qwen2\.5-vl|internvl|minicpm-v|llava|claude-3|claude-sonnet-4)/.test(modelId);
+  return /(gpt-4o|gpt-4\.1|vision|vl|qvq|qwen2\.5-vl|internvl|minicpm-v|llava|claude-3|claude-sonnet-4|doubao|volc|ark)/.test(modelId);
 }
 
 async function probeVisionCapability(profile, timeoutMs = MODEL_TEST_TIMEOUT_MS) {
@@ -2579,7 +2636,10 @@ function setDiscussionControlsState(running) {
   cycleModeButton.disabled = running;
   document.getElementById("cycle-participation").disabled = running;
   document.getElementById("cycle-density").disabled = running;
-  document.getElementById("cycle-model").disabled = running;
+  const cycleModelButton = document.getElementById("cycle-model");
+  if (cycleModelButton) {
+    cycleModelButton.disabled = running;
+  }
   if (hostModelSelect) {
     hostModelSelect.disabled = running || !getConfiguredProfiles().length;
   }
@@ -2660,6 +2720,7 @@ function buildCurrentTopicSnapshot() {
     generatingSeats: state.generatingSeats,
     lastSummary: state.lastSummary,
     sharedResearchBrief: state.sharedResearchBrief,
+    sharedEvidenceEntries: Array.isArray(state.sharedEvidenceEntries) ? state.sharedEvidenceEntries : [],
     rolePlanningBrief: state.rolePlanningBrief,
     projectMemory: normalizeProjectMemory(state.projectMemory),
     pendingRoleClarification: [...state.pendingRoleClarification],
@@ -2787,6 +2848,7 @@ function applyTopicSnapshot(snapshot) {
   state.generatingSeats = !!snapshot.generatingSeats;
   state.lastSummary = snapshot.lastSummary || "";
   state.sharedResearchBrief = snapshot.sharedResearchBrief || "";
+  state.sharedEvidenceEntries = Array.isArray(snapshot.sharedEvidenceEntries) ? snapshot.sharedEvidenceEntries.filter(Boolean) : [];
   state.rolePlanningBrief = snapshot.rolePlanningBrief || "";
   state.projectMemory = normalizeProjectMemory(snapshot.projectMemory || buildEmptyProjectMemory());
   state.pendingRoleClarification = Array.isArray(snapshot.pendingRoleClarification) ? snapshot.pendingRoleClarification.filter(Boolean) : [];
@@ -2929,7 +2991,9 @@ function updateCompactSummary() {
   configDensity.textContent = state.appLanguage === "en"
     ? densityValuesEn[Math.min(densityValuesEn.length - 1, Math.max(0, state.densityIndex || 0))]
     : densityValues[Math.min(densityValues.length - 1, Math.max(0, state.densityIndex || 0))];
-  configModel.textContent = state.appLanguage === "en" ? modelValuesEn[state.modelIndex] : modelValues[state.modelIndex];
+  if (configModel) {
+    configModel.textContent = state.appLanguage === "en" ? modelValuesEn[state.modelIndex] : modelValues[state.modelIndex];
+  }
   discussionRoundsInput.value = String(state.discussionRounds);
   discussionSizeSelect.value = String(state.discussionSize);
 }
@@ -3098,13 +3162,13 @@ const UI_TEXT = {
     multimodalModelNote: "如果主持模型本身支持视觉，可以跟随主持。若主持模型偏快但不支持图片，请在这里单独指定一个支持多模态的模型。",
     multimodalAiTag: "多模态",
     peopleLibraryCurrentTag: "当前库",
-    peopleLibraryOpen: "打开人物库",
-    roundtableWorkbenchOpen: "打开圆桌台",
+    peopleLibraryOpen: "人物库",
+    roundtableWorkbenchOpen: "圆桌台",
     discussionSettingsTitle: "讨论设置",
     cycleModeLabel: "讨论目标",
     cycleParticipationLabel: "用户参与",
     cycleDensityLabel: "回答力度",
-    cycleModelLabel: "模型策略",
+    cycleModelLabel: "模型切换",
     discussionRoundsLabel: "讨论轮次",
     discussionSizeLabel: "讨论规模",
     peopleCountSuffix: "个人物原型",
@@ -3692,9 +3756,7 @@ function stopReadAloudPlayback() {
     activeReadAloudElement = null;
   }
   if (activeVoiceSampleAudio) {
-    activeVoiceSampleAudio.pause();
-    activeVoiceSampleAudio.currentTime = 0;
-    activeVoiceSampleAudio = null;
+    stopVoiceSamplePlayback({ rerender: false });
   }
   if (window.speechSynthesis) {
     window.speechSynthesis.cancel();
@@ -5033,7 +5095,6 @@ function renderSeatStack() {
   syncDiscussionOrder();
   const selectedRoles = getOrderedSelectedRoleIds().map((roleId) => normalizeRecommendedRolePersona(getRoleById(roleId))).filter(Boolean);
   syncRoleVoiceAssignments();
-  const availableReadAloudVoices = getAvailableReadAloudVoices();
   const orderedDiscussantCount = selectedRoles.filter((role) => getRoleAssignment(role) !== "judge").length;
   seatPickerCount.textContent = langText(`已选 ${selectedRoles.length} / ${state.discussionSize}`, `Selected ${selectedRoles.length} / ${state.discussionSize}`);
   if (seatConfigProgress) {
@@ -5053,9 +5114,6 @@ function renderSeatStack() {
       const assignment = ensureSeatAssignment(role);
       const currentProfile = getConfiguredProfileById(ensureSeatModelAssignment(role));
       const voiceSample = getAssignedVoiceSampleForRole(role);
-      const readAloudVoiceMarkup = availableReadAloudVoices.length
-        ? `<label class="seat-assignment"><span>${escapeHtml(langText("朗读音色", "Read-aloud Voice"))}</span><select class="seat-readaloud-voice-select" data-role-id="${role.id}">${buildSeatReadAloudVoiceOptionsMarkup(role)}</select></label>`
-        : `<label class="seat-assignment"><span>${escapeHtml(langText("朗读音色", "Read-aloud Voice"))}</span><div class="seat-assignment-static">${escapeHtml(langText("当前浏览器无可用语音", "No browser voice available"))}</div></label>`;
       const orderValue = state.discussionOrder[role.id] || 1;
       const orderOptions = Array.from({ length: Math.max(1, orderedDiscussantCount) })
         .map((_, index) => `<option value="${index + 1}" ${orderValue === index + 1 ? "selected" : ""}>${escapeHtml(langText(`顺序 ${index + 1}`, `Order ${index + 1}`))}</option>`)
@@ -5086,13 +5144,11 @@ function renderSeatStack() {
                 ${buildSeatModelOptionsMarkup(role)}
               </select>
             </label>
-            ${readAloudVoiceMarkup}
             <div class="seat-traits">${traits}</div>
-            ${voiceSample ? `<div class="seat-voice-line"><span>${escapeHtml(langText("声音样本", "Voice Sample"))}</span><strong>${escapeHtml(getVoiceSampleDisplayLabel(voiceSample))}</strong></div>` : ""}
           </div>
           <div class="seat-actions">
-            <div class="seat-action-row">
-              ${voiceSample ? `<button class="card-action seat-voice-preview" data-role-id="${role.id}" type="button">${escapeHtml(langText("试听声音", "Preview Voice"))}</button>` : ""}
+            <div class="seat-action-row ${voiceSample ? "with-audio" : ""}">
+              ${voiceSample ? `<button class="seat-voice-preview ${activeVoiceSampleRoleId === role.id ? "is-playing" : ""}" data-role-id="${role.id}" type="button" aria-label="${escapeHtml(activeVoiceSampleRoleId === role.id ? langText("停止声音样本", "Stop voice sample") : langText("播放声音样本", "Play voice sample"))}" aria-pressed="${activeVoiceSampleRoleId === role.id ? "true" : "false"}" title="${escapeHtml(activeVoiceSampleRoleId === role.id ? langText("停止声音样本", "Stop voice sample") : langText("播放声音样本", "Play voice sample"))}">${activeVoiceSampleRoleId === role.id ? `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 6h4v12H7zm6 0h4v12h-4z" fill="currentColor"></path></svg>` : `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6.5v11l9-5.5-9-5.5z" fill="currentColor"></path></svg>`}</button><strong class="seat-voice-sample-name">${escapeHtml(getVoiceSampleDisplayLabel(voiceSample))}</strong><span class="seat-action-spacer"></span>` : ""}
               ${canEditRole(role) || role.source === "recommended" ? `<button class="icon-button compact seat-edit seat-edit-icon" data-role-id="${role.id}" type="button" aria-label="${escapeHtml(langText("编辑人物", "Edit persona"))}" title="${escapeHtml(langText("编辑人物", "Edit persona"))}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15.2 4.8a2.6 2.6 0 0 1 3.7 3.7L9.3 18.1 5 19l.9-4.3 9.3-9.9Zm-8 10.7-.3 1.5 1.5-.3 8.8-9.3-1.2-1.2-8.8 9.3Z" fill="currentColor"></path></svg></button>` : ""}
               <button class="icon-button compact danger seat-delete" data-role-id="${role.id}" type="button" aria-label="${escapeHtml(langText("移出本轮", "Remove from this round"))}" title="${escapeHtml(langText("移出本轮", "Remove from this round"))}">
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -5188,10 +5244,6 @@ function renderMemoryChipList(items) {
 }
 
 function renderMemoryAgentWorkspace() {
-  if (!userMemoryPanel || !projectMemoryPanel) {
-    return;
-  }
-
   const userMemory = normalizeUserMemory(state.userMemory);
   const topRoles = getTopCountEntries(userMemory.selectedRoleCounts, 4)
     .map(([roleId, count]) => `${getReadableRoleNameById(roleId)} × ${count}`)
@@ -5200,58 +5252,183 @@ function renderMemoryAgentWorkspace() {
     .map(([profileId, count]) => `${getConfiguredProfileById(profileId)?.displayName || profileId} × ${count}`)
     .filter(Boolean);
 
-  userMemoryPanel.innerHTML = [
-    `<p class="memory-summary-line">${escapeHtml(langText(`偏好：${modeValues[userMemory.preferredModeIndex] || modeValues[0]} / ${densityValues[userMemory.preferredDensityIndex] || densityValues[1]} / ${userMemory.preferredDiscussionSize} 人`, `Preferences: ${modeValuesEn[userMemory.preferredModeIndex] || modeValuesEn[0]} / ${densityValuesEn[userMemory.preferredDensityIndex] || densityValuesEn[1]} / ${userMemory.preferredDiscussionSize} seats`))}</p>`,
-    `<p class="memory-summary-line">${escapeHtml(langText(`累计：已开始 ${userMemory.usage.discussionsStarted} 次讨论，上传 ${userMemory.usage.attachmentsUploaded} 个附件`, `Usage: ${userMemory.usage.discussionsStarted} discussions, ${userMemory.usage.attachmentsUploaded} attachments`))}</p>`,
-    topHosts.length ? renderMemoryChipList(topHosts) : "",
-    topRoles.length ? renderMemoryChipList(topRoles) : "",
-  ].filter(Boolean).join("");
+  if (userMemoryPanel) {
+    userMemoryPanel.innerHTML = [
+      `<p class="memory-summary-line">${escapeHtml(langText(`偏好：${modeValues[userMemory.preferredModeIndex] || modeValues[0]} / ${densityValues[userMemory.preferredDensityIndex] || densityValues[1]} / ${userMemory.preferredDiscussionSize} 人`, `Preferences: ${modeValuesEn[userMemory.preferredModeIndex] || modeValuesEn[0]} / ${densityValuesEn[userMemory.preferredDensityIndex] || densityValuesEn[1]} / ${userMemory.preferredDiscussionSize} seats`))}</p>`,
+      `<p class="memory-summary-line">${escapeHtml(langText(`累计：已开始 ${userMemory.usage.discussionsStarted} 次讨论，上传 ${userMemory.usage.attachmentsUploaded} 个附件`, `Usage: ${userMemory.usage.discussionsStarted} discussions, ${userMemory.usage.attachmentsUploaded} attachments`))}</p>`,
+      topHosts.length ? renderMemoryChipList(topHosts) : "",
+      topRoles.length ? renderMemoryChipList(topRoles) : "",
+    ].filter(Boolean).join("");
+  }
 
   const projectMemory = normalizeProjectMemory(state.projectMemory);
-  projectMemoryPanel.innerHTML = [
-    `<p class="memory-summary-line">${escapeHtml(projectMemory.taskSummary ? summarizeText(projectMemory.taskSummary, 120) : langText("当前项目还没有确认后的任务定义。", "This project does not have a confirmed task summary yet."))}</p>`,
-    projectMemory.sharedFacts ? `<p class="memory-summary-line">${escapeHtml(langText(`共享事实：${summarizeText(projectMemory.sharedFacts, 140)}`, `Shared brief: ${summarizeText(projectMemory.sharedFacts, 140)}`))}</p>` : "",
-    projectMemory.unresolvedQuestions.length ? renderMemoryChipList(projectMemory.unresolvedQuestions.slice(0, 4)) : "",
-    projectMemory.keyEvidence.length ? renderMemoryChipList(projectMemory.keyEvidence.slice(0, 4)) : "",
-  ].filter(Boolean).join("");
+  if (projectMemoryPanel) {
+    projectMemoryPanel.innerHTML = [
+      `<p class="memory-summary-line">${escapeHtml(projectMemory.taskSummary ? summarizeText(projectMemory.taskSummary, 120) : langText("当前项目还没有确认后的任务定义。", "This project does not have a confirmed task summary yet."))}</p>`,
+      projectMemory.sharedFacts ? `<p class="memory-summary-line">${escapeHtml(langText(`共享事实：${summarizeText(projectMemory.sharedFacts, 140)}`, `Shared brief: ${summarizeText(projectMemory.sharedFacts, 140)}`))}</p>` : "",
+      projectMemory.unresolvedQuestions.length ? renderMemoryChipList(projectMemory.unresolvedQuestions.slice(0, 4)) : "",
+      projectMemory.keyEvidence.length ? renderMemoryChipList(projectMemory.keyEvidence.slice(0, 4)) : "",
+    ].filter(Boolean).join("");
+  }
 
   syncSharedAgentInputsFromState();
-  updateSharedAgentStatus(state.sharedAgentStatus.text || langText("等待执行共享 Agent", "Waiting for shared agents"), state.sharedAgentStatus.tone || "");
+  updateSharedAgentStatus(state.sharedAgentStatus.text || langText("资料还没有更新", "No evidence update yet."), state.sharedAgentStatus.tone || "");
   renderRoundtableEvidenceWorkspace();
 }
 
+function buildEvidenceLabelFromText(text, fallbackLabel) {
+  const firstLine = String(text || "")
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .find((item) => item && !/^来源[:：]/.test(item) && !/^摘要[:：]/.test(item));
+  const normalized = String(firstLine || "")
+    .replace(/^[\d\-*.、\s]+/, "")
+    .replace(/^(图片证据补充|研究问题|共享事实包)[:：]\s*/i, "")
+    .trim();
+  return summarizeText(normalized, 34) || fallbackLabel;
+}
+
+function getEvidenceListKindLabel(filterType) {
+  if (filterType === "image") {
+    return langText("图片", "Image");
+  }
+  if (filterType === "file") {
+    return langText("文件", "File");
+  }
+  return langText("文本", "Text");
+}
+
+function formatEvidenceCreatedAt(timestamp) {
+  if (!timestamp) {
+    return "";
+  }
+  try {
+    return new Date(timestamp).toLocaleString("zh-CN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  } catch {
+    return "";
+  }
+}
+
+function buildEvidenceMetaLine(entry) {
+  const parts = [];
+  const createdAtText = formatEvidenceCreatedAt(entry.createdAt || 0);
+  if (createdAtText) {
+    parts.push(langText(`时间 ${createdAtText}`, `Time ${createdAtText}`));
+  }
+  if (entry.sourceLabel) {
+    parts.push(langText(`由 ${entry.sourceLabel} 提出`, `Proposed by ${entry.sourceLabel}`));
+  }
+  return parts.join("  ·  ");
+}
+
+function buildWebPreviewUrl(url) {
+  const normalized = String(url || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  return `https://r.jina.ai/http/${normalized.replace(/^https?:\/\//i, "")}`;
+}
+
+function detectArtifactFilterType(artifact) {
+  if (artifact.kind === "image") {
+    return "image";
+  }
+  if (artifact.kind === "video") {
+    return "video";
+  }
+  if (/^text\//i.test(artifact.type || "") || /\.(txt|md|json|csv)$/i.test(artifact.name || "")) {
+    return "text";
+  }
+  return "file";
+}
+
+function formatArtifactKindLabel(artifact, filterType) {
+  if (filterType === "image") {
+    return langText("图片", "Image");
+  }
+  if (filterType === "video") {
+    return langText("视频", "Video");
+  }
+  if (filterType === "text") {
+    return langText("文本", "Text");
+  }
+  return langText("文件", "File");
+}
+
+function getArtifactFormatLabel(artifact) {
+  const extMatch = String(artifact.name || "").match(/\.([A-Za-z0-9]+)$/);
+  if (extMatch?.[1]) {
+    return extMatch[1].toUpperCase();
+  }
+  return summarizeText(artifact.type || langText("文件", "File"), 18);
+}
+
+function getImageEvidenceAnalysisText() {
+  const blocks = String(state.sharedResearchBrief || "")
+    .split(/\n\s*\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const match = [...blocks].reverse().find((item) => /^图片证据补充[:：]/.test(item));
+  return match ? match.replace(/^图片证据补充[:：]\s*/, "").trim() : "";
+}
+
+function getSharedResearchEvidenceEntries() {
+  return Array.isArray(state.sharedEvidenceEntries)
+    ? state.sharedEvidenceEntries.filter((entry) => entry && entry.sourceUrl)
+    : [];
+}
+
 function getRoundtableEvidenceEntries() {
-  const artifactEntries = state.projectArtifacts.map((artifact) => ({
-    id: `artifact:${artifact.id}`,
-    label: artifact.name || langText("附件", "Attachment"),
-    kind: artifact.kind === "image"
-      ? langText("图片证据", "Image Evidence")
-      : artifact.textPreview
-        ? langText("文本证据", "Text Evidence")
-        : langText("附件", "Attachment"),
-    summary: artifact.textPreview
-      ? summarizeText(artifact.textPreview, 88)
-      : artifact.kind === "image"
-        ? langText("已上传图片，可在右侧查看详情。", "Image uploaded. View details on the right.")
-        : langText("当前附件没有可直接展开的文本内容。", "This attachment has no inline text preview."),
-    createdAt: artifact.createdAt || 0,
-    detail: artifact.textPreview || "",
-    imageUrl: artifact.kind === "image" ? artifact.dataUrl || "" : "",
-    meta: [artifact.type || "", artifact.size ? `${Math.max(1, Math.round(artifact.size / 1024))} KB` : ""].filter(Boolean),
+  const imageAnalysis = getImageEvidenceAnalysisText();
+  const artifactEntries = state.projectArtifacts.map((artifact) => {
+    const filterType = detectArtifactFilterType(artifact);
+    return {
+      id: `artifact:${artifact.id}`,
+      label: artifact.name || langText("附件", "Attachment"),
+      kind: formatArtifactKindLabel(artifact, filterType),
+      filterType,
+      summary: artifact.textPreview
+        ? summarizeText(artifact.textPreview, 82)
+        : artifact.kind === "image"
+          ? langText("已上传图片，点开后可看右侧预览和分析。", "Image uploaded. Open it to inspect the preview and analysis on the right.")
+          : artifact.kind === "video"
+            ? langText("已上传视频，点开后可在右侧播放预览。", "Video uploaded. Open it to play the preview on the right.")
+          : langText("当前文件没有可直接展开的文本内容。", "This file has no inline text preview yet."),
+      createdAt: artifact.createdAt || 0,
+      detail: artifact.textPreview || "",
+      imageUrl: artifact.kind === "image" ? artifact.dataUrl || "" : "",
+      videoUrl: artifact.kind === "video" ? artifact.dataUrl || "" : "",
+      analysis: artifact.kind === "image" ? (artifact.analysisText || imageAnalysis) : "",
+      sourceUrl: "",
+      previewUrl: "",
+      meta: [artifact.size ? `${Math.max(1, Math.round(artifact.size / 1024))} KB` : ""].filter(Boolean),
+      formatLabel: getArtifactFormatLabel(artifact),
+      listKindLabel: getEvidenceListKindLabel(filterType),
+      sourceLabel: langText("用户上传", "User Upload"),
+    };
+  });
+
+  const sharedEvidenceEntries = getSharedResearchEvidenceEntries().map((entry) => ({
+    ...entry,
+    listKindLabel: getEvidenceListKindLabel(entry.filterType),
+    sourceLabel: entry.sourceLabel || langText("网页搜索", "Web Search"),
   }));
 
-  const sharedEvidenceEntries = collectSharedResearchEvidenceEntries().map((entry, index) => ({
-    id: `shared:${index}`,
-    label: langText(`共享证据 ${index + 1}`, `Shared Evidence ${index + 1}`),
-    kind: langText("文本证据", "Text Evidence"),
-    summary: summarizeText(entry, 88),
-    createdAt: state.projectMemory?.updatedAt || 0,
-    detail: entry,
-    imageUrl: "",
-    meta: [langText("来自共享研究", "From shared research")],
-  }));
+  return [...artifactEntries, ...sharedEvidenceEntries].sort((left, right) => (left.createdAt || 0) - (right.createdAt || 0));
+}
 
-  return [...artifactEntries, ...sharedEvidenceEntries].sort((left, right) => (right.createdAt || 0) - (left.createdAt || 0));
+function filterRoundtableEvidenceEntries(entries) {
+  if (activeRoundtableEvidenceFilter === "all") {
+    return entries;
+  }
+  return entries.filter((entry) => entry.filterType === activeRoundtableEvidenceFilter);
 }
 
 function renderRoundtableEvidenceWorkspace() {
@@ -5259,42 +5436,83 @@ function renderRoundtableEvidenceWorkspace() {
     return;
   }
 
-  const evidenceEntries = getRoundtableEvidenceEntries();
+  if (roundtableEvidenceFilterSelect) {
+    roundtableEvidenceFilterSelect.value = activeRoundtableEvidenceFilter;
+  }
+
+  const evidenceEntries = filterRoundtableEvidenceEntries(getRoundtableEvidenceEntries());
   if (!evidenceEntries.length) {
     activeRoundtableEvidenceId = "";
-    roundtableEvidenceList.innerHTML = `<div class="empty-panel">${escapeHtml(langText("圆桌台里还没有证据。上传附件、执行网页搜索或图片解析后，会在这里出现。", "No evidence yet. Upload files or run the research tools to populate this area."))}</div>`;
-    roundtableEvidenceDetail.innerHTML = `<div class="evidence-detail-empty">${escapeHtml(langText("选中一条证据后，这里会显示完整内容。", "Select one evidence item to inspect the full detail."))}</div>`;
+    roundtableEvidenceList.innerHTML = `<div class="empty-panel">${escapeHtml(langText("当前筛选下还没有条目。上传附件、搜索网页或解析图片后，会按顺序出现在这里。", "No evidence matches this filter yet. Upload files or run search/image analysis to populate the list."))}</div>`;
+    roundtableEvidenceDetail.innerHTML = `<div class="evidence-detail-empty">${escapeHtml(langText("右侧会在你点开左边条目后显示详情。", "The detail panel appears here after you open an item from the list."))}</div>`;
     return;
   }
 
   if (!evidenceEntries.some((entry) => entry.id === activeRoundtableEvidenceId)) {
-    activeRoundtableEvidenceId = evidenceEntries[0].id;
+    activeRoundtableEvidenceId = "";
   }
 
-  const activeEntry = evidenceEntries.find((entry) => entry.id === activeRoundtableEvidenceId) || evidenceEntries[0];
+  const activeEntry = evidenceEntries.find((entry) => entry.id === activeRoundtableEvidenceId) || null;
+
+  if (!activeRoundtableEvidenceId) {
+    roundtableEvidenceList.scrollTop = 0;
+  }
 
   roundtableEvidenceList.innerHTML = evidenceEntries
-    .map((entry) => `
-      <button class="evidence-card ${entry.id === activeEntry.id ? "active" : ""}" data-evidence-id="${entry.id}" type="button">
-        <div class="evidence-card-head">
-          <strong>${escapeHtml(entry.label)}</strong>
-          <span class="profile-tag">${escapeHtml(entry.kind)}</span>
-        </div>
-        <p>${escapeHtml(entry.summary)}</p>
-        ${entry.meta.length ? `<div class="evidence-meta">${entry.meta.map((item) => `<span class="tiny-badge">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+    .map((entry, index) => `
+      <button class="evidence-list-item ${entry.id === activeRoundtableEvidenceId ? "active" : ""}" data-evidence-id="${entry.id}" type="button">
+        <span class="evidence-list-index">${index + 1}.</span>
+        <span class="evidence-list-label">${escapeHtml(entry.label)}</span>
+        <span class="evidence-list-kind">${escapeHtml(entry.listKindLabel || getEvidenceListKindLabel(entry.filterType))}</span>
       </button>
     `)
     .join("");
 
+  if (!activeEntry) {
+    roundtableEvidenceDetail.innerHTML = `<div class="evidence-detail-empty">${escapeHtml(langText("右侧当前没有打开的条目。点左边任意一项，这里就会展开详情。", "No item is open on the right yet. Click any row on the left to inspect its details here."))}</div>`;
+    return;
+  }
+
+  if (activeEntry.filterType === "image" && !activeEntry.analysis) {
+    const artifactId = String(activeEntry.id || "").replace(/^artifact:/, "");
+    if (artifactId && !pendingEvidenceAnalysisIds.has(artifactId)) {
+      pendingEvidenceAnalysisIds.add(artifactId);
+      updateSharedAgentStatus(langText("正在补跑当前图片的解析内容...", "Running analysis for the current image..."), "pending");
+      void analyzeSingleImageArtifact(artifactId)
+        .then(() => {
+          updateSharedAgentStatus(langText("当前图片的解析内容已更新。", "The current image analysis has been updated."), "success");
+        })
+        .catch((error) => {
+          updateSharedAgentStatus(error instanceof Error ? error.message : String(error), "error");
+        })
+        .finally(() => {
+          pendingEvidenceAnalysisIds.delete(artifactId);
+          renderRoundtableEvidenceWorkspace();
+        });
+    }
+  }
+
+  const _detailArtId = String(activeEntry.id || "").replace(/^artifact:/, "");
+  const _detailAnalyzing = activeEntry.filterType === "image" && !activeEntry.analysis && _detailArtId && pendingEvidenceAnalysisIds.has(_detailArtId);
+  const _detailModelName = _detailAnalyzing ? (getMultimodalProfile()?.displayName || langText("默认模型", "default model")) : "";
+  const analysisStatusBlock = activeEntry.filterType !== "image" || activeEntry.analysis ? ""
+    : _detailAnalyzing
+      ? `<div class="evidence-analyzing-indicator"><span class="evidence-analyzing-text">${escapeHtml(langText("正在解析图片", "Analyzing image"))}</span><span class="evidence-analyzing-dots"></span><span class="evidence-analyzing-model">${escapeHtml(langText("使用模型：", "Model: ") + _detailModelName)}</span></div>`
+      : `<div class="evidence-detail-placeholder">${escapeHtml(langText("这张图片还没有解析内容。正在尝试自动补跑；如果这一条仍为空，可以点右上角\u201c图片解析\u201d立即补跑。", "No analysis yet. Auto-analysis is being attempted; if still empty, click Image Analysis in the top-right."))}</div>`;
+
   roundtableEvidenceDetail.innerHTML = `
     <div class="evidence-detail-panel">
-      <div class="evidence-card-head">
-        <strong>${escapeHtml(activeEntry.label)}</strong>
-        <span class="profile-tag">${escapeHtml(activeEntry.kind)}</span>
+      <div class="evidence-detail-title">${escapeHtml(activeEntry.label)}</div>
+      <div class="evidence-detail-meta">${escapeHtml(buildEvidenceMetaLine(activeEntry) || langText("未记录时间与来源", "No time or source recorded"))}</div>
+      <div class="evidence-detail-surface">
+        ${activeEntry.previewUrl ? `<iframe class="evidence-web-frame" src="${activeEntry.previewUrl}" loading="lazy" referrerpolicy="no-referrer" title="${escapeHtml(activeEntry.label)}"></iframe>` : ""}
+        ${activeEntry.imageUrl ? `<img src="${activeEntry.imageUrl}" alt="${escapeHtml(activeEntry.label)}" />` : ""}
+        ${activeEntry.videoUrl ? `<video class="evidence-detail-video" src="${activeEntry.videoUrl}" controls preload="metadata"></video>` : ""}
+        ${analysisStatusBlock}
+        ${activeEntry.analysis ? `<div class="evidence-detail-copy">${escapeHtml(activeEntry.analysis)}</div>` : ""}
+        ${activeEntry.detail ? `<div class="evidence-detail-copy">${escapeHtml(activeEntry.detail)}</div>` : ""}
+        ${!activeEntry.previewUrl && !activeEntry.imageUrl && !activeEntry.videoUrl && !activeEntry.analysis && !activeEntry.detail ? `<div class="evidence-detail-copy">${escapeHtml(activeEntry.summary || langText("当前没有更多内容可展示。", "No additional content is available."))}</div>` : ""}
       </div>
-      ${activeEntry.meta.length ? `<div class="evidence-meta">${activeEntry.meta.map((item) => `<span class="tiny-badge">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
-      ${activeEntry.imageUrl ? `<img src="${activeEntry.imageUrl}" alt="${escapeHtml(activeEntry.label)}" />` : ""}
-      <div class="evidence-detail-copy">${escapeHtml(activeEntry.detail || activeEntry.summary || langText("当前没有更多内容可展示。", "No additional content is available."))}</div>
     </div>
   `;
 }
@@ -6065,7 +6283,7 @@ async function requestMultimodalModelText(profile, prompt, artifacts, maxTokens 
   } catch (error) {
     requestControl.cleanup();
     if (requestControl.didTimeOut()) {
-      throw new Error(`${profile.displayName} 的多模态解析超时。`);
+      throw new Error(`${profile.displayName} 的多模态解析超时（已等待 ${Math.round(timeoutMs / 1000)} 秒）。图片可能太大或网络不稳，请检查模型配置后再试。`);
     }
     throw error;
   }
@@ -6186,6 +6404,26 @@ async function runWebSearchAgent() {
       console.warn("fetchUrlDigest failed", error);
     }
   }
+  const createdAtBase = Date.now();
+  state.sharedEvidenceEntries = [
+    ...(Array.isArray(state.sharedEvidenceEntries) ? state.sharedEvidenceEntries : []).filter(Boolean),
+    ...results.slice(0, 6).map((item, index) => ({
+      id: `web:${createdAtBase}:${index}`,
+      label: buildEvidenceLabelFromText(item.title || item.url || item.snippet, langText(`网页证据 ${index + 1}`, `Web Evidence ${index + 1}`)),
+      kind: langText("网页", "Web"),
+      filterType: "web",
+      summary: summarizeText(item.snippet || item.title || item.url, 82),
+      createdAt: createdAtBase + index,
+      detail: item.snippet || item.title || item.url || "",
+      imageUrl: "",
+      analysis: "",
+      sourceUrl: item.url || "",
+      previewUrl: item.url ? buildWebPreviewUrl(item.url) : "",
+      meta: [],
+      formatLabel: "",
+      sourceLabel: langText("网页搜索", "Web Search"),
+    })),
+  ].slice(-12);
   return formatResearchSourceDigest(query, results.slice(0, 6), sourceUrls);
 }
 
@@ -6228,30 +6466,57 @@ async function executeMultimodalEvidenceAgent() {
   }
   const prompt = [
     "你现在是这张圆桌的共享多模态证据 agent。",
-    "你的任务不是替任何一个角色站队，而是先把图片里的可确认信息整理成所有席位共用的证据摘要。",
-    "请优先输出：图片里能确认的事实、图片支持了什么判断、图片还不能证明什么、哪些地方仍需结合外部资料核实。",
+    "你的任务不是替任何一个角色站队，而是先把图片里能直接看到的内容整理成所有席位共用的证据摘要。",
+    "必须优先写图片中实际可见的细节，例如人物/物体轮廓、皮肤或材质纹理、光影、关节、表情、边缘、反光、褶皱、背景痕迹。",
+    "如果你没有看到足够清晰的细节，就明确写看不清的点，不要输出泛化背景常识来凑字数。",
+    "请按这个顺序输出：1. 直接可见细节 2. 基于这些细节可支持的判断 3. 当前图片还不能证明什么。",
     "不要编造 OCR 结果，不要把看不清的地方说成已经确认。",
     `任务定义：${state.lastSummary || "当前项目"}`,
     `当前执行模型：${multimodalProfile.displayName}`,
     state.sharedResearchBrief ? `当前共享事实包：${state.sharedResearchBrief}` : "",
   ].filter(Boolean).join("\n\n");
   const result = await requestMultimodalModelText(multimodalProfile, prompt, imageArtifacts, 900);
+  const latestArtifact = imageArtifacts[imageArtifacts.length - 1];
+  if (latestArtifact) {
+    state.projectArtifacts = normalizeProjectArtifacts(
+      state.projectArtifacts.map((artifact) => artifact.id === latestArtifact.id ? { ...artifact, analysisText: result } : artifact)
+    );
+    await saveProjectArtifacts(state.activeTopicId, state.projectArtifacts);
+  }
   state.sharedResearchBrief = [state.sharedResearchBrief, `图片证据补充：${result}`].filter(Boolean).join("\n\n");
   appendProjectAgentNote("多模态证据 Agent", result);
-  appendMarkup(
-    createMessageMarkup({
-      speakerId: "multimodal-evidence-agent",
-      label: "图",
-      sublabel: langText("图片证据解析", "Image Evidence Analysis"),
-      body: result,
-      avatarLabel: "图",
-      avatarClass: "avatar-system",
-      tone: "system",
-    })
-  );
   syncUserMemoryFromState("multimodal");
   await persistUserMemory();
   await syncCurrentTopicSnapshot();
+}
+
+async function analyzeSingleImageArtifact(artifactId) {
+  const multimodalProfile = getMultimodalProfile();
+  if (!multimodalProfile) {
+    throw new Error("当前没有可用的多模态模型，所以这张图片还不能自动解析。先配置一个支持视觉的多模态模型。");
+  }
+  const artifact = state.projectArtifacts.find((item) => item.id === artifactId && item.kind === "image" && item.dataUrl);
+  if (!artifact) {
+    throw new Error("没有找到可解析的图片条目。请重新上传图片后再试。");
+  }
+  const prompt = [
+    "你现在是这张圆桌的共享多模态证据 agent。",
+    "只分析当前这一张图片，不要泛泛而谈，也不要把别的图片内容混进来。",
+    "必须优先写图片中实际可见的细节，例如人物/物体轮廓、材质纹理、光影、表情、边缘、反光、背景痕迹。",
+    "如果细节不清楚，就明确说明看不清的点，不要用背景常识凑结论。",
+    "请按这个顺序输出：1. 直接可见细节 2. 基于这些细节可支持的判断 3. 当前图片还不能证明什么。",
+    `任务定义：${state.lastSummary || "当前项目"}`,
+    `当前执行模型：${multimodalProfile.displayName}`,
+  ].filter(Boolean).join("\n\n");
+  const result = await requestMultimodalModelText(multimodalProfile, prompt, [artifact], 900, undefined, 120000);
+  state.projectArtifacts = normalizeProjectArtifacts(
+    state.projectArtifacts.map((item) => item.id === artifact.id ? { ...item, analysisText: result } : item)
+  );
+  await saveProjectArtifacts(state.activeTopicId, state.projectArtifacts);
+  // 把分析结果同步写入共享事实包，让主持/席位 agent 在下一轮能读到
+  state.sharedResearchBrief = [state.sharedResearchBrief, `图片证据补充（${artifact.name || "图片"}）：${result}`].filter(Boolean).join("\n\n");
+  await syncCurrentTopicSnapshot();
+  return result;
 }
 
 function shouldEnhanceGeneratedPrompt(promptText) {
@@ -7913,6 +8178,7 @@ function appendAiSummary(content) {
   state.lastSummary = summary;
   state.sharedAgentQuery = summary;
   state.sharedResearchBrief = "";
+  state.sharedEvidenceEntries = [];
   state.rolePlanningBrief = "";
   state.pendingRoleClarification = [];
   state.taskSupplementMode = false;
@@ -8030,11 +8296,12 @@ async function finishSeatGeneration(options = {}) {
     if (!state.recommendedRoles.length) {
       throw new Error(generationResult.failures.map((item) => `第 ${item.slotIndex + 1} 个失败：${item.error}`).join("；") || "没有拿到任何可用人物结果。");
     }
-    const generatedCountDetail = generationResult.roles.length === generationResult.targetCount
-      ? langText(`本轮共生成 ${generationResult.roles.length} 个针对性人物。`, `${generationResult.roles.length} targeted personas were generated.`)
-      : langText(`本轮先生成了 ${generationResult.roles.length}/${generationResult.targetCount} 个人物，其余位稍后可重试或从人物库补齐。`, `${generationResult.roles.length}/${generationResult.targetCount} personas were generated. The remaining slots can be retried later or filled from the library.`);
+
+    const generatedCountDetail = state.recommendedRoles.length === generationResult.targetCount
+      ? langText(`本轮共生成 ${state.recommendedRoles.length} 个针对性人物。`, `${state.recommendedRoles.length} targeted personas were generated.`)
+      : langText(`本轮先生成了 ${state.recommendedRoles.length}/${generationResult.targetCount} 个人物，其余位稍后可重试或从人物库补齐。`, `${state.recommendedRoles.length}/${generationResult.targetCount} personas were generated. The remaining slots can be retried later or filled from the library.`);
     state.recommendedRoleGenerationMeta = createRoleGenerationMeta("ai", hostProfile, generatedCountDetail, false);
-    updateSeatFeedback(generatedCountDetail, generationResult.roles.length === generationResult.targetCount ? "success" : "pending");
+    updateSeatFeedback(generatedCountDetail, state.recommendedRoles.length === generationResult.targetCount ? "success" : "pending");
   } catch (error) {
     console.error(error);
     state.recommendedRoles = [];
@@ -8213,6 +8480,7 @@ function seedConversation() {
   state.generatingSeats = false;
   state.lastSummary = "";
   state.sharedResearchBrief = "";
+  state.sharedEvidenceEntries = [];
   state.rolePlanningBrief = "";
   state.projectMemory = buildEmptyProjectMemory();
   state.projectArtifacts = [];
@@ -8289,6 +8557,11 @@ function bindEvents() {
       return;
     }
     activeRoundtableEvidenceId = trigger.dataset.evidenceId || "";
+    renderRoundtableEvidenceWorkspace();
+  });
+  roundtableEvidenceFilterSelect?.addEventListener("change", () => {
+    activeRoundtableEvidenceFilter = roundtableEvidenceFilterSelect.value || "all";
+    activeRoundtableEvidenceId = "";
     renderRoundtableEvidenceWorkspace();
   });
 
@@ -8496,6 +8769,9 @@ function bindEvents() {
     if (!button) {
       return;
     }
+    if (activeVoiceSampleRoleId === button.dataset.roleId) {
+      stopVoiceSamplePlayback({ rerender: false });
+    }
     state.selectedIds.delete(button.dataset.roleId);
     delete state.seatAssignments[button.dataset.roleId];
     delete state.discussionOrder[button.dataset.roleId];
@@ -8689,12 +8965,15 @@ function bindEvents() {
 
   runMultimodalAgentButton?.addEventListener("click", async () => {
     updateSharedAgentStatus(langText("多模态证据 Agent 正在解析图片...", "Multimodal evidence agent is analyzing images..."), "pending");
+    renderRoundtableEvidenceWorkspace();
     try {
       await executeMultimodalEvidenceAgent();
       updateSharedAgentStatus(langText("图片解析已完成，并已补入共享事实包。", "Image analysis completed and was appended to the shared brief."), "success");
       renderMemoryAgentWorkspace();
+      renderRoundtableEvidenceWorkspace();
     } catch (error) {
       updateSharedAgentStatus(error instanceof Error ? error.message : String(error), "error");
+      renderRoundtableEvidenceWorkspace();
     }
   });
 
@@ -8750,6 +9029,17 @@ function bindEvents() {
     const attachments = [...state.pendingAttachments];
     appendUserMessage(content || "我上传了附件，请结合附件继续整理。", state.pendingAttachments);
     await storeAttachmentsForActiveTopic(attachments);
+    const hasNewImageAttachment = attachments.some((file) => file?.type?.startsWith("image/"));
+    if (hasNewImageAttachment && getMultimodalProfile()) {
+      try {
+        updateSharedAgentStatus(langText("检测到新图片，正在自动补跑图片解析...", "New images detected. Running image analysis automatically..."), "pending");
+        await executeMultimodalEvidenceAgent();
+        updateSharedAgentStatus(langText("图片解析已自动更新到证据详情。", "Image analysis was automatically updated in the evidence details."), "success");
+      } catch (error) {
+        console.warn("auto image analysis failed", error);
+        updateSharedAgentStatus(error instanceof Error ? error.message : String(error), "error");
+      }
+    }
     state.pendingAttachments = [];
     renderAttachmentStrip();
     state.projectMemory = deriveProjectMemoryFromState();
@@ -8924,7 +9214,7 @@ function bindEvents() {
   cycleModeButton.addEventListener("blur", hideModeTooltip);
   document.getElementById("cycle-participation").addEventListener("click", () => cycleSetting("participationIndex", participationValues));
   document.getElementById("cycle-density").addEventListener("click", () => cycleSetting("densityIndex", densityValues));
-  document.getElementById("cycle-model").addEventListener("click", () => cycleSetting("modelIndex", modelValues));
+  document.getElementById("cycle-model")?.addEventListener("click", () => cycleSetting("modelIndex", modelValues));
   hostModelSelect?.addEventListener("change", async () => {
     if (state.discussionRunning) {
       return;
