@@ -7,7 +7,7 @@ const MODEL_REQUEST_TIMEOUT_MS = 70000;
 const ROLE_PLANNING_TIMEOUT_MS = 35000;
 const ROLE_GENERATION_TIMEOUT_MS = 120000;
 const ROLE_EMERGENCY_TIMEOUT_MS = 120000;
-const ROLE_IDENTITY_TIMEOUT_MS = 45000;
+const ROLE_IDENTITY_TIMEOUT_MS = 90000;
 const MODEL_TEST_TIMEOUT_MS = 18000;
 const MIN_RECOMMENDED_ROLE_COUNT = 8;
 const MAX_EXEMPLAR_ROLE_RATIO = 0.25;
@@ -4227,21 +4227,53 @@ async function runSingleDiscussionRound({
     const assignment = getRoleAssignment(speakerRole);
     const isLead = assignment === "challenger" || assignment === "rebuttal";
     const discussionProfile = getRoleModelProfile(speakerRole);
+
+    // 席位级即时搜索：发言前先根据角色立场搜索相关网页，把结果作为额外证据塞进 prompt
+    setSpeakerCardForRole(speakerRole, langText(`第 ${round} 轮 · 正在搜索`, `Round ${round} · Searching`), langText("正在搜索与本轮论点相关的网页资料...", "Searching for web references relevant to this turn..."));
+    updateLiveStatus(langText(`第 ${round} 轮：${speakerRole.name} 正在搜索网页`, `Round ${round}: ${speakerRole.name} is searching the web`), "pending");
+    const speakerSearchDigest = await runSpeakerWebSearch(speakerRole, summary, signal);
+
     const speakerPrompt = [
       `你现在是本场讨论里的第 ${state.discussionOrder[speakerRole.id] || 1} 位发言者，第 ${round}/${totalRounds} 轮发言。`,
       getAssignmentInstruction(assignment),
       getSpeakerModeInstruction(assignment),
       "请只基于任务、主持AI前面轮次的小结，以及本轮已经出现的发言继续往下讲。不要假装看到了还没发言的人。",
       buildDiscussionContext(summary, roundNotes, liveTurns),
+      speakerSearchDigest ? `你在发言前做了一次网页搜索，以下是你查到的参考资料，可以引用其中的事实或数据来支撑你的论点（如果相关）：\n${speakerSearchDigest}` : "",
       rolePromptBlock(speakerRole),
       `篇幅要求：${isLead ? budget.charHint : "控制在 280 到 520 字内。"}`,
       "绝对不要输出 thinking process、analyze user input、自检步骤、constraint list 或任何内部推理过程。",
       "要求：直接输出本轮发言正文，不要自我介绍，不要使用 Markdown 标题和列表。",
-    ].join("\n\n");
+    ].filter(Boolean).join("\n\n");
+
     setSpeakerCardForRole(speakerRole, langText(`第 ${round} 轮 · 正在思考`, `Round ${round} · Thinking`), langText("正在读取任务和前面已发言内容，并准备按顺序接续。", "Reading the task and previous turns, then preparing to continue in order."));
     updateLiveStatus(langText(`第 ${round} 轮：${speakerRole.name} 正在思考`, `Round ${round}: ${speakerRole.name} is thinking`), "pending");
     updateSeatFeedback(langText(`第 ${round} 轮：${speakerRole.name} 正在思考`, `Round ${round}: ${speakerRole.name} is thinking`), "pending");
-    const speakerText = await requestModelText(discussionProfile, speakerPrompt, isLead ? budget.main : budget.participant, signal);
+    let speakerText;
+    try {
+      speakerText = await requestModelText(discussionProfile, speakerPrompt, isLead ? budget.main : budget.participant, signal);
+    } catch (speakerError) {
+      if (speakerError?.name === "AbortError") {
+        throw speakerError;
+      }
+      const skipMsg = langText(
+        `${speakerRole.name} 这一轮未能发言（${speakerError instanceof Error ? speakerError.message : String(speakerError)}），已跳过，讨论继续。`,
+        `${speakerRole.name} could not speak this round (${speakerError instanceof Error ? speakerError.message : String(speakerError)}). Skipped, discussion continues.`
+      );
+      appendMarkup(
+        createMessageMarkup({
+          speakerId: "system",
+          label: "系",
+          sublabel: langText("席位跳过", "Seat Skipped"),
+          body: skipMsg,
+          avatarLabel: "系",
+          avatarClass: "avatar-system",
+          tone: "system",
+        })
+      );
+      updateLiveStatus(skipMsg, "pending");
+      continue;
+    }
     setSpeakerCardForRole(speakerRole, langText(`第 ${round} 轮 · 正在发言`, `Round ${round} · Speaking`), langText("当前顺序发言已生成，马上写入讨论流。", "The current turn has been generated and will be written into the discussion stream next."));
     updateLiveStatus(langText(`第 ${round} 轮：${speakerRole.name} 正在发言`, `Round ${round}: ${speakerRole.name} is speaking`), "pending");
     appendRoleMessage(speakerRole, `第 ${round} 轮 · ${speakerRole.name}`, speakerText, discussionProfile.displayName);
@@ -6375,6 +6407,37 @@ function formatResearchSourceDigest(query, collectedResults, sourceUrls) {
     sourceUrls.length ? `用户补充网址：${sourceUrls.join("，")}` : "",
     ...collectedResults.map((item, index) => `${index + 1}. ${item.title}${item.url ? `\n来源：${item.url}` : ""}\n摘要：${item.snippet}`),
   ].filter(Boolean).join("\n\n");
+}
+
+// 席位级即时搜索：在发言前根据角色立场生成一个精准查询词，搜索 DuckDuckGo + Wikipedia，返回摘要字符串
+async function runSpeakerWebSearch(speakerRole, summary, signal) {
+  try {
+    const profile = getRoleModelProfile(speakerRole);
+    if (!profile) return "";
+    const queryPrompt = [
+      `你是"${speakerRole.name}"（${speakerRole.seat}），你的立场是：${speakerRole.traits?.stance || speakerRole.description || ""}。`,
+      `本次讨论话题：${summary}`,
+      "你准备搜索一条能支撑你这一轮发言的网页。请输出一个最有用的搜索关键词（5到15个字，中文或英文均可）。",
+      "只输出关键词本身，不要任何解释。",
+    ].join("\n");
+    const rawQuery = await requestModelText(profile, queryPrompt, 40, signal, 10000).catch(() => "");
+    const searchQuery = rawQuery.trim().split("\n")[0].trim().slice(0, 60) || summary.slice(0, 40);
+    if (!searchQuery) return "";
+
+    const [duckResult, wikiResult] = await Promise.allSettled([
+      fetchDuckDuckGoSearchDigest(searchQuery),
+      fetchWikipediaSearchDigest(searchQuery),
+    ]);
+    const results = [
+      ...(duckResult.status === "fulfilled" ? duckResult.value : []),
+      ...(wikiResult.status === "fulfilled" ? wikiResult.value : []),
+    ].slice(0, 4);
+    if (!results.length) return "";
+    return `【${speakerRole.name} 搜索到的参考资料（关键词："${searchQuery}"）】\n` +
+      results.map((item, i) => `${i + 1}. ${item.title}\n${item.snippet}`).join("\n\n");
+  } catch {
+    return "";
+  }
 }
 
 async function runWebSearchAgent() {
