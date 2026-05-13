@@ -6518,6 +6518,33 @@ async function runSpeakerWebSearch(speakerRole, summary, signal) {
       ...(wikiResult.status === "fulfilled" ? wikiResult.value : []),
     ].slice(0, 4);
     if (!results.length) return "";
+
+    // 把搜索结果写入证据链，让用户在圆桌台里看到原始出处
+    const createdAtBase = Date.now();
+    const newEntries = results.filter((item) => item.url).map((item, index) => ({
+      id: `speaker-web:${speakerRole.id}:${createdAtBase}:${index}`,
+      label: buildEvidenceLabelFromText(item.title || item.url, langText(`${speakerRole.name} · 搜索 ${index + 1}`, `${speakerRole.name} · Search ${index + 1}`)),
+      kind: langText("网页", "Web"),
+      filterType: "web",
+      summary: summarizeText(item.snippet || item.title || item.url, 82),
+      createdAt: createdAtBase + index,
+      detail: item.snippet || item.title || item.url || "",
+      imageUrl: "",
+      analysis: "",
+      sourceUrl: item.url || "",
+      previewUrl: item.url ? buildWebPreviewUrl(item.url) : "",
+      meta: [speakerRole.name],
+      formatLabel: "",
+      sourceLabel: langText(`${speakerRole.name} 引用`, `Cited by ${speakerRole.name}`),
+    }));
+    if (newEntries.length) {
+      state.sharedEvidenceEntries = [
+        ...(Array.isArray(state.sharedEvidenceEntries) ? state.sharedEvidenceEntries : []).filter(Boolean),
+        ...newEntries,
+      ].slice(-30); // 最多保留 30 条，超出时淘汰最旧的
+      void syncCurrentTopicSnapshot();
+    }
+
     return `【${speakerRole.name} 搜索到的参考资料（关键词："${searchQuery}"）】\n` +
       results.map((item, i) => `${i + 1}. ${item.title}\n${item.snippet}`).join("\n\n");
   } catch {
