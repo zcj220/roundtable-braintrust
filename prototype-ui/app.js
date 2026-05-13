@@ -5211,9 +5211,10 @@ function renderSeatStack() {
       startDiscussionButton.textContent = t("startDiscussion");
     }
   }
-  // 人物已生成时显示"重新生成人物"独立按钮
+  // 人物已生成、或正在生成（卡住时也需要出口）时显示"重新生成"按钮
   if (regeneratePersonasButton) {
-    regeneratePersonasButton.style.display = (state.seatsReady && !state.discussionRunning) ? "" : "none";
+    const showRegen = (state.seatsReady || state.generatingSeats) && !state.discussionRunning;
+    regeneratePersonasButton.style.display = showRegen ? "" : "none";
   }
 
   if (!selectedRoles.length) {

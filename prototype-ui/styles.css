@@ -534,6 +534,14 @@ button {
   color: var(--muted);
 }
 
+.seat-secondary-actions {
+  align-items: center;
+}
+
+.seat-secondary-actions .seat-voice-toggle {
+  margin-left: auto;
+}
+
 .seat-inline-toggle {
   display: inline-flex;
   align-items: center;
