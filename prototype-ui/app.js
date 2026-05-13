@@ -1882,12 +1882,12 @@ function getRoundLabel() {
 
 function getRoundTokenBudget() {
   if (state.densityIndex === 0) {
-    return { main: 620, participant: 420, challenger: 620, rebuttal: 620, judge: 900, report: 1000, charHint: "控制在 220 到 420 字内，结论要直接。" };
+    return { main: 620, participant: 420, challenger: 620, rebuttal: 620, judge: 1100, report: 1400, charHint: "结论报告控制在 500 到 700 字内，以确据和结论为主体，不确定内容简短带过。" };
   }
   if (state.densityIndex === 2) {
-    return { main: 1300, participant: 950, challenger: 1300, rebuttal: 1300, judge: 1650, report: 1750, charHint: "控制在 700 到 980 字内，但不要空话。" };
+    return { main: 1300, participant: 950, challenger: 1300, rebuttal: 1300, judge: 2000, report: 2600, charHint: "结论报告控制在 1200 到 1800 字内，每一条确立的论据都要充分展开，给出清晰有力的综合结论。" };
   }
-  return { main: 900, participant: 700, challenger: 900, rebuttal: 900, judge: 1200, report: 1300, charHint: "控制在 500 到 750 字内。" };
+  return { main: 900, participant: 700, challenger: 900, rebuttal: 900, judge: 1500, report: 2000, charHint: "结论报告控制在 800 到 1200 字内，以证据和结论为重点，篇幅充实，不要空话。" };
 }
 
 function getDensityDescription() {
@@ -2118,28 +2118,23 @@ function getActiveTopic() {
 async function createConclusionReport(mainProfile, judgeText, roundNotes, signal) {
   const budget = getRoundTokenBudget();
   const prompt = [
-    "你现在要把本次圆桌讨论整理成一份给用户直接阅读的最终文字报告。",
-    "这不是聊天回复，也不是裁判发言复述，而是一份由主持 AI 站在全桌视角整理出的正式结论纪要。",
-    "语言要成熟、完整、克制，像一份真正给用户留档的分析报告。",
-    "请明确分成 6 个部分来写，并直接写给用户看：",
-    "第1点，讨论到底在回答什么问题，以及这张桌子已经达成了哪些基本共识。",
-    "第2点，目前已经相对确认的结论是什么。这里要写清楚为什么这些点可以先成立。",
-    "第3点，目前还不能确认、不能下死结论、还需要补证据的是什么。不要含糊，要直接点出来。",
-    "第4点，桌上仍然存在的关键分歧是什么，各方分歧分别卡在什么依据、假设或价值取向上。",
-    "第5点，如果主持人现在必须给用户一个综合判断，最稳妥的结论与建议应该怎么说。",
-    "第6点，如果下一步继续深挖，最值得追问、验证或补充的事项是什么。",
-    "写法要求：每一点都先有一个简短的小标题，然后展开成 1 到 2 段完整中文，不要只写一句话。",
-    "不要使用 Markdown 标题符号，不要写成空洞套话，不要只重复谁支持谁反对。",
-    "如果某些点依据不足，要明确写出“目前还不能下死结论”或“这一点仍待验证”。",
-    "整体语气应当像主持人在替整张桌子做收束，而不是像裁判宣布输赢。",
+    "你现在要把本次圆桌讨论整理成一份给用户直接阅读的正式结论报告。",
+    "这不是聊天回复，也不是讨论过程复述，而是一份经过完整讨论后、由主持AI站在全桌视角整理出的结论文件。",
+    "核心写作原则：报告以已确立的证据和结论为重心，而不是以不确定性为重心。如果讨论已经形成有力的论证，就直接清楚地表达，不要为显示客观平衡而稀释已成立的结论。",
+    "请分成以下5个部分撰写，每部分先写简短小标题，然后展开成2到4段完整中文：",
+    "第一部分，议题与论证路径：本次讨论在回答什么具体问题，采用了哪种论证框架，对证据的要求是什么。篇幅简洁。",
+    "第二部分，已确立的核心证据（本报告最重要的部分，篇幅最多）：哪些证据和论证经受了多轮质疑仍然站得住脚？逐条具体展开，每条说明内容是什么、来源类型是什么、为什么在反驳下仍然成立。不能只写词语列表，要有实质内容。",
+    "第三部分，综合结论：基于上述证据，给出清晰有力的综合判断。如果证据总体指向某个方向，就明确说出来，不要模糊成有一定可能。如有附加条件，说清楚条件是什么，而不是用保留条款掩盖结论本身。",
+    "第四部分，边界与尚未闭合的难点（篇幅简短）：哪些具体论点没有完全证实？明确区分这些难点是致命的还是属于周边细节。不要用边缘难点否定已确立的核心。",
+    "第五部分，深化论证的优先方向：如果要向怀疑者系统展示或未来补强，最值得投入的2到3个具体方向是什么，说明理由。",
+    "格式：不要使用#等Markdown符号，每部分以中文数字序号开头，展开成有实质内容的段落。",
     buildDiscussionContext(state.lastSummary, roundNotes, []),
-    `裁判总结可作为参考材料，但不要直接照抄其口吻：${judgeText}`,
+    `裁判总结供参考，从中提取已确立的论据，不要照抄口吻：${judgeText}`,
     `篇幅要求：${budget.charHint}`,
   ].join("\n\n");
 
   return requestModelText(mainProfile, prompt, budget.report, signal);
 }
-
 function discussionEvidenceRules() {
   return [
     "证据要求：只能使用你能合理确认的事实。不要编造考古发现、历史文献、论文、年份、数据、引文和法条。",
@@ -4334,15 +4329,20 @@ async function runSingleDiscussionRound({
     liveTurns.push({ role: speakerRole, assignmentLabel: `第 ${round} 轮 · ${speakerRole.name}`, text: speakerText, searchDigest: speakerSearchDigest || "" });
   }
 
+  const isFinalRound = round >= totalRounds;
   const moderatorRoundSummaryPrompt = [
     `你现在是本场讨论的主持AI，需要在第 ${round}/${totalRounds} 轮结束后做一段主持小结。`,
     getModeratorModeInstruction(),
-    "你的任务是压缩本轮重点，明确谁提出了什么、谁提出了反对或保留、哪些例子或依据最关键。",
+    isFinalRound
+      ? "这是最后一轮讨论，你的小结要做收束：把所有轮次中已经在质疑和反驳中站稳的论据明确点出来，用确定的语气写出；对经过多轮未被推翻的论点直接肯定它成立；不要再罗列不确定性。"
+      : "你的任务是压缩本轮重点，明确谁提出了什么、谁提出了反对或保留、哪些例子或依据最关键。确认已成立的论点不必再争，把焦点留给下一轮仍待解决的问题。",
     "这段小结既要给用户看，也要为下一轮压缩上下文，所以要信息密、语言自然、不要太长。",
     `任务定义：${summary}`,
     `本轮记录：${liveTurns.map((turn) => `${turn.assignmentLabel}\n${turn.text}`).join("\n\n")}`,
     "绝对不要输出 thinking process、英文分析草稿、自检步骤、constraint list 或任何内部推理过程。",
-    "要求：控制在 260 到 420 字内，点出本轮最关键的共识、分歧和例证。",
+    isFinalRound
+      ? "要求：控制在 300 到 500 字内，给出明确的收束性判断，哪些已经确立、哪些仍有边界，写清楚。"
+      : "要求：控制在 260 到 420 字内，点出本轮最关键的共识、分歧和例证。",
   ].join("\n\n");
   setSpeakerCardForRole(moderatorRole, langText(`第 ${round} 轮后 · 正在思考`, `After Round ${round} · Thinking`), langText("正在压缩本轮发言，整理谁说了什么、哪里有争议。", "Compressing this round and organizing who said what and where the disagreements are."));
   updateLiveStatus(langText(`第 ${round} 轮后：主持AI 正在总结`, `After round ${round}: Host AI is summarizing`), "pending");
@@ -4364,16 +4364,16 @@ async function runSingleDiscussionRound({
 
 async function generateStageConclusion({ targetRounds, judgeRole, judgeProfile, moderatorProfile, roundNotes, budget, signal }) {
   const judgePrompt = [
-    `你现在是圆桌讨论的中立裁判，需要在 ${targetRounds} 轮讨论结束后做最终总结。`,
+    `你现在是圆桌讨论的中立裁判，经过 ${targetRounds} 轮讨论，现在必须给出明确的最终裁决。`,
     getJudgeModeInstruction(),
-    "你要像真正的人类裁判一样写最终结论，语言自然、清楚、完整，不要写成 Markdown 标题、提纲或代码注释。",
-    "请明确回答：谁的论证更站得住脚、哪些补充信息最有价值、最终建议怎么讲给人听。",
-    "如果双方都有道理，也可以明确指出哪部分更强、哪部分还不能下死结论。",
+    "你的首要任务是给出决断，而不是再次罗列各方观点。经过多轮讨论和反驳，哪些论据已经站稳脚跟，就直接确认它们成立，不要为了追求平衡而稀释已经成立的结论。",
+    "裁判发言结构：第一，开门见山说出最终判断是什么（一两句话）；第二，逐条列出支撑这个判断的核心论据，每条说明为什么它在质疑下仍然成立；第三，指出哪些边界条件不影响核心结论但用户应当知晓；第四，给用户一句具体的行动建议或方向。",
+    "如果某方的论证在讨论中被充分质疑且未能有效回应，要明确指出其不足，而不是给它同等地位。",
     buildDiscussionContext(state.lastSummary, roundNotes, []),
     rolePromptBlock(judgeRole),
     `篇幅要求：${budget.charHint}`,
     "绝对不要输出 thinking process、英文分析草稿、自检步骤、constraint list 或任何内部推理过程。",
-    "要求：直接输出最终裁判发言正文，要给人类用户看，至少写 4 段，并给出一个清晰的最终判断。",
+    "要求：直接输出最终裁判发言正文，至少写 4 段，开头必须是清晰的最终判断，结尾必须是具体建议。",
   ].join("\n\n");
   setSpeakerCardForRole(judgeRole, langText(`第 ${targetRounds} 轮后 · 正在思考`, `After Round ${targetRounds} · Thinking`), langText("正在综合全部轮次，判断哪些说法更有依据，哪些地方仍然不能下结论。", "Reviewing all rounds to judge which claims are best supported and which points still remain unresolved."));
   updateLiveStatus(langText(`最终总结前：${judgeRole.name} 正在思考`, `Before the final summary: ${judgeRole.name} is thinking`), "pending");
