@@ -30,6 +30,98 @@ $mimeTypes = @{
   ".webp" = "image/webp"
 }
 
+$proxyUserAgent = "RoundtableBraintrust/1.0"
+
+function Write-TextResponse($context, [int]$statusCode, [string]$text, [string]$contentType = "text/plain; charset=utf-8") {
+  $buffer = [System.Text.Encoding]::UTF8.GetBytes([string]$text)
+  $context.Response.StatusCode = $statusCode
+  $context.Response.ContentType = $contentType
+  $context.Response.ContentLength64 = $buffer.LongLength
+  $context.Response.OutputStream.Write($buffer, 0, $buffer.Length)
+  $context.Response.Close()
+}
+
+function Get-ProxyTargetUri($request) {
+  $kind = [string]$request.QueryString["kind"]
+  switch ($kind) {
+    "duck" {
+      $query = [string]$request.QueryString["q"]
+      if ([string]::IsNullOrWhiteSpace($query)) {
+        return $null
+      }
+      return "https://api.duckduckgo.com/?q=$([System.Uri]::EscapeDataString($query))&format=json&no_redirect=1&no_html=1&skip_disambig=1"
+    }
+    "wiki" {
+      $query = [string]$request.QueryString["q"]
+      if ([string]::IsNullOrWhiteSpace($query)) {
+        return $null
+      }
+      return "https://zh.wikipedia.org/w/api.php?action=opensearch&search=$([System.Uri]::EscapeDataString($query))&limit=3&namespace=0&format=json&origin=*"
+    }
+    "url" {
+      $targetUrl = [string]$request.QueryString["url"]
+      if ([string]::IsNullOrWhiteSpace($targetUrl)) {
+        return $null
+      }
+      if ($targetUrl -notmatch '^https?://') {
+        return $null
+      }
+      $normalized = $targetUrl -replace '^https?://', ''
+      return "https://r.jina.ai/http/$normalized"
+    }
+    default {
+      return $null
+    }
+  }
+}
+
+function Invoke-ProxyRequest([string]$targetUri) {
+  $request = [System.Net.HttpWebRequest]::Create($targetUri)
+  $request.Method = "GET"
+  $request.Timeout = 25000
+  $request.ReadWriteTimeout = 25000
+  $request.UserAgent = $proxyUserAgent
+  $request.AutomaticDecompression = [System.Net.DecompressionMethods]::GZip -bor [System.Net.DecompressionMethods]::Deflate
+  try {
+    $response = [System.Net.HttpWebResponse]$request.GetResponse()
+    try {
+      $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
+      try {
+        return [pscustomobject]@{
+          StatusCode = [int]$response.StatusCode
+          ContentType = if ([string]::IsNullOrWhiteSpace($response.ContentType)) { "text/plain; charset=utf-8" } else { $response.ContentType }
+          Body = $reader.ReadToEnd()
+        }
+      } finally {
+        $reader.Dispose()
+      }
+    } finally {
+      $response.Close()
+    }
+  } catch [System.Net.WebException] {
+    $webException = $_.Exception
+    $errorResponse = $webException.Response
+    if ($errorResponse) {
+      $httpResponse = [System.Net.HttpWebResponse]$errorResponse
+      try {
+        $reader = New-Object System.IO.StreamReader($httpResponse.GetResponseStream())
+        try {
+          return [pscustomobject]@{
+            StatusCode = [int]$httpResponse.StatusCode
+            ContentType = if ([string]::IsNullOrWhiteSpace($httpResponse.ContentType)) { "text/plain; charset=utf-8" } else { $httpResponse.ContentType }
+            Body = $reader.ReadToEnd()
+          }
+        } finally {
+          $reader.Dispose()
+        }
+      } finally {
+        $httpResponse.Close()
+      }
+    }
+    throw
+  }
+}
+
 function Get-ContentType([string]$path) {
   $extension = [System.IO.Path]::GetExtension($path).ToLowerInvariant()
   if ($mimeTypes.ContainsKey($extension)) {
@@ -74,14 +166,27 @@ try {
   while ($listener.IsListening) {
     $context = $listener.GetContext()
     $requestPath = [System.Uri]::UnescapeDataString($context.Request.Url.AbsolutePath)
+
+    if ($requestPath -eq "/__roundtable_proxy") {
+      $targetUri = Get-ProxyTargetUri $context.Request
+      if (-not $targetUri) {
+        Write-TextResponse $context 400 "Bad Request"
+        continue
+      }
+
+      try {
+        $proxyResult = Invoke-ProxyRequest $targetUri
+        Write-TextResponse $context $proxyResult.StatusCode $proxyResult.Body $proxyResult.ContentType
+      } catch {
+        Write-TextResponse $context 502 $_.Exception.Message
+      }
+      continue
+    }
+
     $target = Resolve-RequestPath $requestPath
 
     if (-not $target) {
-      $context.Response.StatusCode = 404
-      $buffer = [System.Text.Encoding]::UTF8.GetBytes("Not Found")
-      $context.Response.ContentType = "text/plain; charset=utf-8"
-      $context.Response.OutputStream.Write($buffer, 0, $buffer.Length)
-      $context.Response.Close()
+      Write-TextResponse $context 404 "Not Found"
       continue
     }
 

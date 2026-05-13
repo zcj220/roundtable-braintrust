@@ -6431,7 +6431,11 @@ async function requestMultimodalModelText(profile, prompt, artifacts, maxTokens 
 }
 
 async function fetchDuckDuckGoSearchDigest(query) {
-  const response = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&no_html=1&skip_disambig=1`);
+  const response = await fetch(
+    canUseLocalWebSearchProxy()
+      ? buildLocalWebSearchProxyUrl("duck", query)
+      : `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&no_html=1&skip_disambig=1`
+  );
   if (!response.ok) {
     throw new Error(`DuckDuckGo 搜索失败：${response.status}`);
   }
@@ -6466,7 +6470,11 @@ async function fetchDuckDuckGoSearchDigest(query) {
 }
 
 async function fetchWikipediaSearchDigest(query) {
-  const response = await fetch(`https://zh.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=3&namespace=0&format=json&origin=*`);
+  const response = await fetch(
+    canUseLocalWebSearchProxy()
+      ? buildLocalWebSearchProxyUrl("wiki", query)
+      : `https://zh.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=3&namespace=0&format=json&origin=*`
+  );
   if (!response.ok) {
     throw new Error(`Wikipedia 搜索失败：${response.status}`);
   }
@@ -6486,7 +6494,9 @@ async function fetchUrlDigest(url) {
   if (!normalized) {
     return null;
   }
-  const mirrorUrl = `https://r.jina.ai/http/${normalized.replace(/^https?:\/\//i, "")}`;
+  const mirrorUrl = canUseLocalWebSearchProxy()
+    ? buildLocalWebSearchProxyUrl("url", normalized)
+    : `https://r.jina.ai/http/${normalized.replace(/^https?:\/\//i, "")}`;
   const response = await fetch(mirrorUrl);
   if (!response.ok) {
     throw new Error(`网页抓取失败：${normalized}`);
@@ -6507,6 +6517,112 @@ function formatResearchSourceDigest(query, collectedResults, sourceUrls) {
   ].filter(Boolean).join("\n\n");
 }
 
+function canUseLocalWebSearchProxy() {
+  return /^https?:$/i.test(window.location.protocol)
+    && /^(127\.0\.0\.1|localhost)$/i.test(window.location.hostname);
+}
+
+function buildLocalWebSearchProxyUrl(kind, value) {
+  const url = new URL("/__roundtable_proxy", window.location.origin);
+  url.searchParams.set("kind", kind);
+  if (kind === "url") {
+    url.searchParams.set("url", value);
+  } else {
+    url.searchParams.set("q", value);
+  }
+  return url.toString();
+}
+
+function formatWebSearchError(error) {
+  if (!error) {
+    return langText("未知错误", "Unknown error");
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  if (/AbortError|aborted/i.test(message)) {
+    return langText("请求被中止", "Request aborted");
+  }
+  if (/ERR_CONNECTION_TIMED_OUT|timeout/i.test(message)) {
+    return langText("连接超时", "Connection timed out");
+  }
+  if (/Failed to fetch/i.test(message)) {
+    return langText("浏览器未能完成跨站请求", "Browser failed to complete the cross-site request");
+  }
+  return message;
+}
+
+function formatWebSearchDiagnostics(diagnostics) {
+  return (Array.isArray(diagnostics) ? diagnostics : [])
+    .filter(Boolean)
+    .map((item) => {
+      const source = item.source || langText("来源", "Source");
+      if (item.ok) {
+        return langText(`${source} ${item.count || 0} 条`, `${source} ${item.count || 0} result(s)`);
+      }
+      return langText(`${source} 失败：${item.detail || "未知错误"}`, `${source} failed: ${item.detail || "Unknown error"}`);
+    })
+    .join("；");
+}
+
+async function collectPublicWebResearch(query, sourceUrls = []) {
+  const diagnostics = [];
+  const results = [];
+  const [duckResult, wikiResult] = await Promise.allSettled([
+    fetchDuckDuckGoSearchDigest(query),
+    fetchWikipediaSearchDigest(query),
+  ]);
+
+  if (duckResult.status === "fulfilled") {
+    const items = Array.isArray(duckResult.value) ? duckResult.value.filter(Boolean) : [];
+    diagnostics.push({ source: "DuckDuckGo", ok: true, count: items.length, detail: "" });
+    results.push(...items);
+  } else {
+    diagnostics.push({
+      source: "DuckDuckGo",
+      ok: false,
+      count: 0,
+      detail: formatWebSearchError(duckResult.reason),
+    });
+  }
+
+  if (wikiResult.status === "fulfilled") {
+    const items = Array.isArray(wikiResult.value) ? wikiResult.value.filter(Boolean) : [];
+    diagnostics.push({ source: "Wikipedia", ok: true, count: items.length, detail: "" });
+    results.push(...items);
+  } else {
+    diagnostics.push({
+      source: "Wikipedia",
+      ok: false,
+      count: 0,
+      detail: formatWebSearchError(wikiResult.reason),
+    });
+  }
+
+  for (const [index, url] of sourceUrls.slice(0, 2).entries()) {
+    try {
+      const digest = await fetchUrlDigest(url);
+      diagnostics.push({
+        source: langText(`补充网址 ${index + 1}`, `Extra URL ${index + 1}`),
+        ok: Boolean(digest),
+        count: digest ? 1 : 0,
+        detail: digest ? "" : langText("未提取到内容", "No content extracted"),
+      });
+      if (digest) {
+        results.push(digest);
+      }
+    } catch (error) {
+      console.warn("fetchUrlDigest failed", error);
+      diagnostics.push({
+        source: langText(`补充网址 ${index + 1}`, `Extra URL ${index + 1}`),
+        ok: false,
+        count: 0,
+        detail: formatWebSearchError(error),
+      });
+    }
+  }
+
+  return { results, diagnostics };
+}
+
 // 席位级即时搜索：在发言前根据角色立场生成一个精准查询词，搜索 DuckDuckGo + Wikipedia，返回摘要字符串
 async function runSpeakerWebSearch(speakerRole, summary, signal) {
   try {
@@ -6522,21 +6638,43 @@ async function runSpeakerWebSearch(speakerRole, summary, signal) {
     const searchQuery = rawQuery.trim().split("\n")[0].trim().slice(0, 60) || summary.slice(0, 40);
     if (!searchQuery) return "";
 
-    const [duckResult, wikiResult] = await Promise.allSettled([
-      fetchDuckDuckGoSearchDigest(searchQuery),
-      fetchWikipediaSearchDigest(searchQuery),
-    ]);
-    const results = [
-      ...(duckResult.status === "fulfilled" ? duckResult.value : []),
-      ...(wikiResult.status === "fulfilled" ? wikiResult.value : []),
-    ].slice(0, 4);
+    const research = await collectPublicWebResearch(searchQuery);
+    const results = research.results.slice(0, 4);
     console.log("[speaker-web-search]", {
       speakerId: speakerRole?.id || "",
       speakerName: speakerRole?.name || "",
       query: searchQuery,
       resultCount: results.length,
+      diagnostics: research.diagnostics,
     });
-    if (!results.length) return "";
+    if (!results.length) {
+      // 搜索无结果时，也写一条诊断占位，方便用户在圆桌台证据区直接看到原因
+      const failedAt = Date.now();
+      const diagnosticSummary = formatWebSearchDiagnostics(research.diagnostics);
+      const failEntry = {
+        id: `speaker-web-fail:${speakerRole.id}:${failedAt}`,
+        label: langText(`${speakerRole.name} · 搜索未返回结果`, `${speakerRole.name} · No search result`),
+        kind: langText("网页", "Web"),
+        filterType: "web",
+        summary: diagnosticSummary || langText("搜索未返回任何结果。", "No results returned by the search."),
+        createdAt: failedAt,
+        detail: diagnosticSummary || langText("搜索未返回任何结果。", "No results returned by the search."),
+        imageUrl: "",
+        analysis: "",
+        sourceUrl: "",
+        previewUrl: "",
+        meta: [speakerRole.name],
+        formatLabel: "",
+        sourceLabel: langText(`${speakerRole.name} 引用`, `Cited by ${speakerRole.name}`),
+      };
+      state.sharedEvidenceEntries = [
+        ...(Array.isArray(state.sharedEvidenceEntries) ? state.sharedEvidenceEntries : []).filter(Boolean),
+        failEntry,
+      ].slice(-30);
+      void syncCurrentTopicSnapshot();
+      renderRoundtableEvidenceWorkspace();
+      return "";
+    }
 
     // 把搜索结果写入证据链，让用户在圆桌台里看到原始出处
     const createdAtBase = Date.now();
@@ -6584,26 +6722,16 @@ async function runWebSearchAgent() {
     throw new Error("还没有可用的研究问题。先确认任务，或在研究问题里手动填写。 ");
   }
   const sourceUrls = parseSourceUrls(state.sharedAgentSources);
-  const results = [];
-  const [duckResult, wikiResult] = await Promise.allSettled([
-    fetchDuckDuckGoSearchDigest(query),
-    fetchWikipediaSearchDigest(query),
-  ]);
-  if (duckResult.status === "fulfilled") {
-    results.push(...duckResult.value);
-  }
-  if (wikiResult.status === "fulfilled") {
-    results.push(...wikiResult.value);
-  }
-  for (const url of sourceUrls.slice(0, 2)) {
-    try {
-      const digest = await fetchUrlDigest(url);
-      if (digest) {
-        results.push(digest);
-      }
-    } catch (error) {
-      console.warn("fetchUrlDigest failed", error);
-    }
+  const research = await collectPublicWebResearch(query, sourceUrls);
+  const results = research.results;
+  console.log("[shared-web-search]", {
+    query,
+    resultCount: results.length,
+    diagnostics: research.diagnostics,
+  });
+  if (!results.length) {
+    const diagnosticSummary = formatWebSearchDiagnostics(research.diagnostics);
+    throw new Error(diagnosticSummary ? `网页搜索未拿到可用结果。${diagnosticSummary}` : "网页搜索未拿到可用结果。");
   }
   const createdAtBase = Date.now();
   state.sharedEvidenceEntries = [
@@ -6625,7 +6753,11 @@ async function runWebSearchAgent() {
       sourceLabel: langText("网页搜索", "Web Search"),
     })),
   ].slice(-12);
-  return formatResearchSourceDigest(query, results.slice(0, 6), sourceUrls);
+  return {
+    digest: formatResearchSourceDigest(query, results.slice(0, 6), sourceUrls),
+    diagnostics: research.diagnostics,
+    resultCount: results.length,
+  };
 }
 
 async function executeSharedResearchAgent(options = {}) {
@@ -6636,7 +6768,19 @@ async function executeSharedResearchAgent(options = {}) {
   }
   const query = String(state.sharedAgentQuery || state.lastSummary || "").trim();
   const orderedSpeakers = getOrderedSelectedRoleIds().map((roleId) => getRoleById(roleId)).filter(Boolean);
-  const sourceDigest = includeWebSearch ? await runWebSearchAgent() : "";
+  let webSearchResult = { digest: "", diagnostics: [], resultCount: 0 };
+  let sourceDigest = "";
+  if (includeWebSearch) {
+    webSearchResult = await runWebSearchAgent();
+    sourceDigest = webSearchResult.digest;
+  } else {
+    try {
+      webSearchResult = await runWebSearchAgent();
+      sourceDigest = webSearchResult.digest;
+    } catch (error) {
+      console.warn("shared research fallback without web evidence", error);
+    }
+  }
   const brief = await buildSharedResearchBriefFromSources(query || state.lastSummary, moderatorProfile, orderedSpeakers, sourceDigest);
   state.sharedResearchBrief = brief;
   appendProjectAgentNote(includeWebSearch ? "网页搜索 Agent" : "共享 research agent", brief);
@@ -6654,6 +6798,10 @@ async function executeSharedResearchAgent(options = {}) {
   syncUserMemoryFromState(includeWebSearch ? "research" : "passive");
   await persistUserMemory();
   await syncCurrentTopicSnapshot();
+  return {
+    brief,
+    webSearch: webSearchResult,
+  };
 }
 
 async function executeMultimodalEvidenceAgent() {
@@ -9157,8 +9305,16 @@ function bindEvents() {
   runWebSearchAgentButton?.addEventListener("click", async () => {
     updateSharedAgentStatus(langText("网页搜索 Agent 正在整理公开网页结果...", "Web search agent is collecting public results..."), "pending");
     try {
-      await executeSharedResearchAgent({ includeWebSearch: true });
-      updateSharedAgentStatus(langText("网页搜索结果已并入共享事实包。", "Web search results were merged into the shared brief."), "success");
+      const result = await executeSharedResearchAgent({ includeWebSearch: true });
+      const resultCount = Number(result?.webSearch?.resultCount || 0);
+      const diagnosticSummary = formatWebSearchDiagnostics(result?.webSearch?.diagnostics || []);
+      updateSharedAgentStatus(
+        langText(
+          `网页搜索已入库 ${resultCount} 条证据。${diagnosticSummary ? `来源状态：${diagnosticSummary}` : ""}`,
+          `Stored ${resultCount} web evidence item(s). ${diagnosticSummary ? `Source status: ${diagnosticSummary}` : ""}`
+        ).trim(),
+        "success"
+      );
       renderMemoryAgentWorkspace();
     } catch (error) {
       updateSharedAgentStatus(error instanceof Error ? error.message : String(error), "error");
