@@ -529,8 +529,8 @@ button {
 .seat-inline-toggle,
 .seat-voice-toggle {
   appearance: none;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
+  border: none;
+  background: transparent;
   color: var(--muted);
 }
 
@@ -546,7 +546,7 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 12px;
+  padding: 0;
   border-radius: 999px;
 }
 
@@ -591,12 +591,12 @@ button {
 }
 
 .seat-voice-toggle {
-  width: 40px;
-  height: 40px;
+  width: auto;
+  height: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  border-radius: 0;
   padding: 0;
   position: relative;
   margin-left: 10px;
