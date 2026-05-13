@@ -6556,6 +6556,7 @@ async function runSpeakerWebSearch(speakerRole, summary, signal) {
         ...newEntries,
       ].slice(-30); // 最多保留 30 条，超出时淘汰最旧的
       void syncCurrentTopicSnapshot();
+      renderRoundtableEvidenceWorkspace(); // 立即刷新证据链界面
     }
 
     return `【${speakerRole.name} 搜索到的参考资料（关键词："${searchQuery}"）】\n` +
