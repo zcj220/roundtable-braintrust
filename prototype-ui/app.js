@@ -1350,6 +1350,7 @@ const discussionSizeSelect = document.getElementById("discussion-size-select");
 const newTopicButton = document.getElementById("new-topic");
 const startDiscussionButton = document.getElementById("start-discussion");
 const stopDiscussionButton = document.getElementById("stop-discussion");
+const regeneratePersonasButton = document.getElementById("regenerate-personas");
 const toggleAiRoleRecommendationButton = document.getElementById("toggle-ai-role-recommendation");
 const toggleVoiceReadButton = document.getElementById("toggle-voice-read");
 const seatFeedback = document.getElementById("seat-feedback");
@@ -5214,6 +5215,10 @@ function renderSeatStack() {
       startDiscussionButton.textContent = t("startDiscussion");
       startDiscussionButton.dataset.mode = "start";
     }
+  }
+  // 人物已生成时显示"重新生成人物"独立按钮
+  if (regeneratePersonasButton) {
+    regeneratePersonasButton.style.display = (state.seatsReady && !state.discussionRunning) ? "" : "none";
   }
 
   if (!selectedRoles.length) {
@@ -9410,6 +9415,20 @@ function bindEvents() {
   stopDiscussionButton.addEventListener("click", () => {
     stopDiscussionFlow();
   });
+  if (regeneratePersonasButton) {
+    regeneratePersonasButton.addEventListener("click", () => {
+      state.seatsReady = false;
+      state.generatingSeats = false;
+      state.recommendedRoles = [];
+      state.selectedIds.clear();
+      state.seatAssignments = {};
+      state.discussionOrder = {};
+      state.seatModelAssignments = {};
+      renderSeatStack();
+      renderSeatPicker();
+      startSeatGeneration();
+    });
+  }
 }
 
 async function init() {
