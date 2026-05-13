@@ -2423,8 +2423,9 @@ function formatTurnContext(turn) {
     `席位：${turn.assignmentLabel}`,
     `职责：${turn.role.description}`,
     `角色提示：${turn.role.systemPrompt || "无"}`,
+    turn.searchDigest ? `此人发言前搜索到的网页证据（其他人可据此质疑或核实）：\n${turn.searchDigest}` : "",
     `发言内容：${turn.text}`,
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 function formatFinishedRoundContext(note) {
@@ -4319,7 +4320,7 @@ async function runSingleDiscussionRound({
     setSpeakerCardForRole(speakerRole, langText(`第 ${round} 轮 · 正在发言`, `Round ${round} · Speaking`), langText("当前顺序发言已生成，马上写入讨论流。", "The current turn has been generated and will be written into the discussion stream next."));
     updateLiveStatus(langText(`第 ${round} 轮：${speakerRole.name} 正在发言`, `Round ${round}: ${speakerRole.name} is speaking`), "pending");
     appendRoleMessage(speakerRole, `第 ${round} 轮 · ${speakerRole.name}`, speakerText, discussionProfile.displayName);
-    liveTurns.push({ role: speakerRole, assignmentLabel: `第 ${round} 轮 · ${speakerRole.name}`, text: speakerText });
+    liveTurns.push({ role: speakerRole, assignmentLabel: `第 ${round} 轮 · ${speakerRole.name}`, text: speakerText, searchDigest: speakerSearchDigest || "" });
   }
 
   const moderatorRoundSummaryPrompt = [
