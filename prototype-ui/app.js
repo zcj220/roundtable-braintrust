@@ -2645,6 +2645,10 @@ function setDiscussionControlsState(running) {
   if (hostModelSelect) {
     hostModelSelect.disabled = running || !getConfiguredProfiles().length;
   }
+  if (!running) {
+    // 讨论结束后刷新按钮文字（继续讨论 / 重新生成人物 / 开始讨论）
+    renderSeatStack();
+  }
 }
 
 function stopDiscussionFlow() {
@@ -3377,7 +3381,7 @@ function applyLanguageToStaticUi() {
   if (openModelProfileModalButton) {
     openModelProfileModalButton.textContent = t("openModelProfileModal");
   }
-  if (startDiscussionButton) {
+  if (startDiscussionButton && !startDiscussionButton.dataset.mode) {
     startDiscussionButton.textContent = t("startDiscussion");
   }
   if (stopDiscussionButton) {
@@ -5196,6 +5200,21 @@ function renderSeatStack() {
     seatConfigProgress.classList.toggle("warm", selectedRoles.length < state.discussionSize);
   }
   startDiscussionButton.disabled = state.discussionRunning || selectedRoles.length < state.discussionSize;
+
+  // 动态更新按钮文字：根据当前状态给用户明确提示
+  if (!state.discussionRunning) {
+    const completedRounds = getCompletedRoundCount();
+    if (!state.seatsReady && state.topicConfirmed) {
+      startDiscussionButton.textContent = langText("重新生成人物", "Regenerate Personas");
+      startDiscussionButton.dataset.mode = "regenerate";
+    } else if (completedRounds > 0 && state.seatsReady) {
+      startDiscussionButton.textContent = langText(`继续讨论（已 ${completedRounds} 轮）`, `Continue Discussion (${completedRounds} done)`);
+      startDiscussionButton.dataset.mode = "continue";
+    } else {
+      startDiscussionButton.textContent = t("startDiscussion");
+      startDiscussionButton.dataset.mode = "start";
+    }
+  }
 
   if (!selectedRoles.length) {
     seatStack.innerHTML = `<div class="seat-empty">${escapeHtml(langText("确认任务后，系统会推荐一组人物。你也可以从人物库里手动挑选。", "Once the task is confirmed, the system will recommend a set of personas. You can also pick manually from the library."))}</div>`;
@@ -9369,6 +9388,20 @@ function bindEvents() {
     void syncCurrentTopicSnapshot();
   });
   startDiscussionButton.addEventListener("click", () => {
+    if (startDiscussionButton.dataset.mode === "regenerate") {
+      // 人物生成失败/不满意，重新生成
+      state.seatsReady = false;
+      state.generatingSeats = false;
+      state.recommendedRoles = [];
+      state.selectedIds.clear();
+      state.seatAssignments = {};
+      state.discussionOrder = {};
+      state.seatModelAssignments = {};
+      renderSeatStack();
+      renderSeatPicker();
+      startSeatGeneration();
+      return;
+    }
     syncUserMemoryFromState("discussion-start");
     void persistUserMemory();
     renderMemoryAgentWorkspace();
