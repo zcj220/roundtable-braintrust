@@ -2950,6 +2950,7 @@ async function activateTopic(topicId) {
   await hydrateProjectScopedState(topicId);
   await persistTopics();
   renderMemoryAgentWorkspace();
+  renderRoundtableEvidenceWorkspace();
   renderTopicList();
 }
 
@@ -5736,9 +5737,11 @@ function closePeopleLibraryModal() {
 }
 
 function openRoundtableWorkbench() {
+  activeRoundtableEvidenceId = "";
   roundtableWorkbenchBackdrop?.classList.add("open");
   roundtableWorkbenchModal?.classList.add("open");
   renderMemoryAgentWorkspace();
+  renderRoundtableEvidenceWorkspace();
 }
 
 function closeRoundtableWorkbench() {
