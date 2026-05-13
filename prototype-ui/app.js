@@ -8293,15 +8293,7 @@ function appendSupplementPrompt() {
 }
 
 function renderSeedConversation() {
-  discussionStream.innerHTML = createMessageMarkup({
-    speakerId: "system",
-    label: "系",
-    sublabel: t("seedSubtitle"),
-    body: t("seedBody"),
-    avatarLabel: "系",
-    avatarClass: "avatar-system",
-    tone: "system",
-  });
+  discussionStream.innerHTML = `<div class="no-task-hint">${langText("暂无任务。点击上方「+ 新建话题」开始。", 'No task yet. Click "+ New Topic" above to start.')}</div>`;
 }
 
 async function finishSeatGeneration(options = {}) {
@@ -9201,7 +9193,7 @@ function bindEvents() {
     setSpeakerCard(langText("主 AI 整理中", "Primary AI Processing"), langText("正在调用真实模型", "Calling the live model"), langText("会先用你已接入的主 AI 整理任务，再回来让你确认。", "The connected primary AI will first organize the task and then return for your confirmation."), "系");
     sendCommand.disabled = true;
     try {
-      const treatAsSupplement = !!state.lastSummary && (state.taskSupplementMode || state.pendingRoleClarification.length > 0);
+      const treatAsSupplement = !!state.lastSummary;
       const summary = await requestAiTaskSummary(content || langText("已收到附件，请结合附件整理任务定义", "Attachments received. Please organize the task definition using them."), attachments, {
         treatAsSupplement,
         baseSummary: state.lastSummary,

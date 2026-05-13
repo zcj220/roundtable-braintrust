@@ -31,7 +31,7 @@ test('left shortcuts and roundtable workbench render correctly', async ({ page }
     });
   });
 
-  await page.goto('http://127.0.0.1:4176/prototype-ui/index.html', { waitUntil: 'domcontentloaded' });
+  await page.goto('http://127.0.0.1:4176/prototype-ui/', { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#open-people-library');
 
   await page.evaluate(async () => {

@@ -725,6 +725,14 @@ button {
   gap: 14px;
 }
 
+.no-task-hint {
+  color: var(--text-muted, #888);
+  font-size: 0.85rem;
+  text-align: center;
+  padding: 48px 16px;
+  opacity: 0.6;
+}
+
 .chat-item {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr);
