@@ -2436,12 +2436,14 @@ function formatFinishedRoundContext(note) {
   ].filter(Boolean).join("\n\n");
 }
 
-function buildDiscussionContext(summary, roundNotes, liveTurns) {
-  const finishedRounds = roundNotes.length
-    ? `前面轮次记录：\n${roundNotes
-        .map((note) => formatFinishedRoundContext(note))
-        .join("\n\n")}`
-    : "";
+function buildDiscussionContext(summary, roundNotes, liveTurns, compressedHistory) {
+  const finishedRounds = compressedHistory
+    ? `前面各轮压缩记忆：\n${compressedHistory}`
+    : roundNotes.length
+      ? `前面轮次记录：\n${roundNotes
+          .map((note) => formatFinishedRoundContext(note))
+          .join("\n\n")}`
+      : "";
   const currentTurns = liveTurns.length
     ? `本轮前面已经发言的内容：\n${liveTurns.map((turn) => formatTurnContext(turn)).join("\n\n")}`
     : "";
@@ -4215,6 +4217,7 @@ async function runSingleDiscussionRound({
   moderatorRole,
   moderatorProfile,
   roundNotes,
+  compressedHistory,
   budget,
   signal,
   userParticipationEnabled,
@@ -4238,7 +4241,7 @@ async function runSingleDiscussionRound({
       getAssignmentInstruction(assignment),
       getSpeakerModeInstruction(assignment),
       "请只基于任务、主持AI前面轮次的小结，以及本轮已经出现的发言继续往下讲。不要假装看到了还没发言的人。",
-      buildDiscussionContext(summary, roundNotes, liveTurns),
+      buildDiscussionContext(summary, roundNotes, liveTurns, compressedHistory),
       speakerSearchDigest ? `你在发言前做了一次网页搜索，以下是你查到的参考资料，可以引用其中的事实或数据来支撑你的论点（如果相关）：\n${speakerSearchDigest}` : "",
       rolePromptBlock(speakerRole),
       `篇幅要求：${isLead ? budget.charHint : "控制在 280 到 520 字内。"}`,
@@ -4452,6 +4455,8 @@ async function runDiscussionFlow() {
     const openingText = await requestModelText(moderatorProfile, openingPrompt, Math.min(520, budget.participant), signal);
     appendRoleMessage(moderatorRole, `开场 · ${moderatorRole.name}`, openingText, moderatorProfile.displayName);
 
+    let compressedHistory = "";
+
     while (currentRound <= targetRounds) {
       if (state.discussionAbortRequested) {
         throw new DOMException("用户结束了本轮讨论。", "AbortError");
@@ -4463,6 +4468,7 @@ async function runDiscussionFlow() {
         moderatorRole,
         moderatorProfile,
         roundNotes,
+        compressedHistory,
         budget,
         signal,
         userParticipationEnabled,
@@ -4471,6 +4477,29 @@ async function runDiscussionFlow() {
       roundNotes.push(roundNote);
       state.discussionRoundNotes = [...roundNotes];
       void syncCurrentTopicSnapshot();
+
+      // 每轮结束后，如果后面还有轮次，主持AI把本轮记忆压缩到 compressedHistory
+      if (currentRound < targetRounds) {
+        setSpeakerCardForRole(moderatorRole, langText(`第 ${currentRound} 轮后 · 压缩记忆中`, `After Round ${currentRound} · Compressing Memory`), langText("正在把本轮要点并入压缩记忆，下一轮各席位将只看压缩后的历史。", "Merging this round into compressed memory. Next round, each seat will see only the compressed history."));
+        updateLiveStatus(langText(`第 ${currentRound} 轮结束，正在压缩记忆供下一轮使用...`, `Round ${currentRound} done. Compressing memory for the next round...`), "pending");
+        try {
+          const prevMemoryBlock = compressedHistory ? `已有压缩记忆（第 1 到第 ${currentRound - 1} 轮）：\n${compressedHistory}\n\n` : "";
+          const latestRoundBlock = `本轮（第 ${currentRound} 轮）各席位发言摘要：\n${roundNote.turns.map((t) => `${t.assignmentLabel}：${t.text.slice(0, 300)}${t.text.length > 300 ? "……" : ""}`).join("\n\n")}\n\n主持小结：${roundNote.moderatorSummary}`;
+          const compressionPrompt = [
+            "你是本场圆桌讨论的主持AI，现在需要把已有压缩记忆和刚完成的这一轮合并，输出一段新的压缩记忆供下一轮所有席位使用。",
+            "目标：用最少的字数保留最多的信息密度——每位参与者的核心立场、关键论据、分歧焦点、已形成的共识、仍悬而未决的问题。",
+            "要求：控制在 400 字以内，不要输出标题或 Markdown 格式，用连续段落即可。",
+            `任务定义：${state.lastSummary}`,
+            prevMemoryBlock + latestRoundBlock,
+          ].filter(Boolean).join("\n\n");
+          compressedHistory = await requestModelText(moderatorProfile, compressionPrompt, 600, signal);
+        } catch (compressionError) {
+          console.warn("memory compression failed, falling back to summaries", compressionError);
+          // 压缩失败则退化为原有拼接方式，不中断讨论
+          compressedHistory = "";
+        }
+      }
+
       currentRound += 1;
     }
 
