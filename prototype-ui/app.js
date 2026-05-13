@@ -4020,57 +4020,90 @@ function buildOpenAiCompatibleRequestBody(profile, prompt, maxTokens, extras = {
   return body;
 }
 
+function isNetworkError(error) {
+  if (!error) return false;
+  if (error.name === "AbortError") return false;
+  const msg = error instanceof Error ? error.message : String(error);
+  return /failed to fetch|network.*error|networkerror|load failed|the internet connection appears to be offline/i.test(msg);
+}
+
 async function requestModelText(profile, prompt, maxTokens = 420, signal, timeoutMs = MODEL_REQUEST_TIMEOUT_MS) {
-  const requestControl = createRequestSignal(signal, timeoutMs);
-  let response;
-  try {
-    if (profile.compatibility === "anthropic") {
-      response = await fetch(joinUrl(profile.baseUrl, profile.endpointPath || "/messages"), {
-        method: "POST",
-        signal: requestControl.signal,
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": profile.apiKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: profile.modelId,
-          max_tokens: maxTokens,
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-    } else {
-      response = await fetch(joinUrl(profile.baseUrl, profile.endpointPath || "/chat/completions"), {
-        method: "POST",
-        signal: requestControl.signal,
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${profile.apiKey}`,
-        },
-        body: JSON.stringify(buildOpenAiCompatibleRequestBody(profile, prompt, maxTokens, {
-          temperature: 0.35,
-        })),
-      });
+  const MAX_NETWORK_RETRIES = 3;
+  const NETWORK_RETRY_DELAY_MS = 3000;
+
+  for (let attempt = 0; attempt <= MAX_NETWORK_RETRIES; attempt += 1) {
+    if (signal?.aborted) {
+      throw new DOMException("请求已中止。", "AbortError");
     }
-  } catch (error) {
+    if (attempt > 0) {
+      // 断网重试：等待后再试，让用户有时间恢复网络
+      await new Promise((resolve) => setTimeout(resolve, NETWORK_RETRY_DELAY_MS));
+      if (signal?.aborted) {
+        throw new DOMException("请求已中止。", "AbortError");
+      }
+    }
+
+    const requestControl = createRequestSignal(signal, timeoutMs);
+    let response;
+    try {
+      if (profile.compatibility === "anthropic") {
+        response = await fetch(joinUrl(profile.baseUrl, profile.endpointPath || "/messages"), {
+          method: "POST",
+          signal: requestControl.signal,
+          headers: {
+            "content-type": "application/json",
+            "x-api-key": profile.apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: profile.modelId,
+            max_tokens: maxTokens,
+            messages: [{ role: "user", content: prompt }],
+          }),
+        });
+      } else {
+        response = await fetch(joinUrl(profile.baseUrl, profile.endpointPath || "/chat/completions"), {
+          method: "POST",
+          signal: requestControl.signal,
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${profile.apiKey}`,
+          },
+          body: JSON.stringify(buildOpenAiCompatibleRequestBody(profile, prompt, maxTokens, {
+            temperature: 0.35,
+          })),
+        });
+      }
+    } catch (error) {
+      requestControl.cleanup();
+      if (error?.name === "AbortError") {
+        throw error;
+      }
+      if (requestControl.didTimeOut()) {
+        throw new Error(`${profile.displayName} 响应超时。这个模型已接通，但当前请求长时间没有返回。`);
+      }
+      if (isNetworkError(error) && attempt < MAX_NETWORK_RETRIES) {
+        // 断网/切换网络：等待后自动重试
+        console.warn(`网络请求失败（第 ${attempt + 1} 次），${NETWORK_RETRY_DELAY_MS / 1000}s 后自动重试...`, error.message);
+        continue;
+      }
+      throw error;
+    }
     requestControl.cleanup();
-    if (requestControl.didTimeOut()) {
-      throw new Error(`${profile.displayName} 响应超时。这个模型已接通，但当前请求长时间没有返回。`);
+
+    if (!response.ok) {
+      throw new Error(formatHttpFailureMessage(profile, response));
     }
-    throw error;
-  }
-  requestControl.cleanup();
 
-  if (!response.ok) {
-    throw new Error(formatHttpFailureMessage(profile, response));
+    const payload = await response.json();
+    const text = extractTextFromModelResponse(payload, profile.compatibility);
+    if (!text) {
+      throw new Error(`${profile.displayName} 返回了空内容`);
+    }
+    return sanitizeDisplayedModelText(text);
   }
 
-  const payload = await response.json();
-  const text = extractTextFromModelResponse(payload, profile.compatibility);
-  if (!text) {
-    throw new Error(`${profile.displayName} 返回了空内容`);
-  }
-  return sanitizeDisplayedModelText(text);
+  throw new Error(`${profile.displayName} 网络请求反复失败，请检查网络后重试。`);
 }
 
 function isModelTimeoutError(error) {
