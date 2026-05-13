@@ -4138,11 +4138,22 @@ function rolePromptBlock(role) {
 }
 
 function appendRoleMessage(role, assignmentLabel, body, modelName) {
+  const assignment = role ? getRoleAssignment(role) : "";
+  const assignmentBadgeMap = {
+    challenger: langText("主讲", "Lead"),
+    rebuttal: langText("辩驳", "Rebuttal"),
+    neutral: langText("中立评议", "Neutral"),
+    judge: langText("裁判", "Judge"),
+    moderator: langText("主持", "Host"),
+    participant: langText("旁证", "Participant"),
+  };
+  const badgeLabel = assignmentBadgeMap[assignment] || "";
   appendMarkup(
     createMessageMarkup({
       speakerId: role?.id || assignmentLabel,
       label: role?.name || assignmentLabel,
       sublabel: `${assignmentLabel}${modelName ? ` · ${modelName}` : ""}`,
+      badgeLabel,
       body,
       avatarLabel: role ? roleAvatar(role) : assignmentLabel.slice(0, 1),
       avatarClass: "avatar-system",
@@ -4813,7 +4824,7 @@ function joinUrl(baseUrl, endpointPath) {
   return `${normalizedBase}${normalizedPath}`;
 }
 
-function createMessageMarkup({ speakerId, label, sublabel = "", body, avatarLabel, avatarClass = "avatar-system", avatarStyleText = "", tone = "system", actions = "", attachments = [] }) {
+function createMessageMarkup({ speakerId, label, sublabel = "", badgeLabel = "", body, avatarLabel, avatarClass = "avatar-system", avatarStyleText = "", tone = "system", actions = "", attachments = [] }) {
   const attachmentMarkup = attachments.length
     ? `<div class="chat-attachments">${attachments
         .map((file) => `<span class="attachment-pill">${escapeHtml(file.name)} · ${Math.max(1, Math.round((file.size || 0) / 1024))} KB</span>`)
@@ -4828,6 +4839,7 @@ function createMessageMarkup({ speakerId, label, sublabel = "", body, avatarLabe
           <strong>${label}</strong>
           ${sublabel ? `<span>${sublabel}</span>` : ""}
           <span class="speaking-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+          ${badgeLabel ? `<span class="chat-assignment-badge">${escapeHtml(badgeLabel)}</span>` : ""}
         </div>
         <div class="chat-bubble">
           <p>${escapeHtml(body)}</p>
