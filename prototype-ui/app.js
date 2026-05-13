@@ -6530,6 +6530,12 @@ async function runSpeakerWebSearch(speakerRole, summary, signal) {
       ...(duckResult.status === "fulfilled" ? duckResult.value : []),
       ...(wikiResult.status === "fulfilled" ? wikiResult.value : []),
     ].slice(0, 4);
+    console.log("[speaker-web-search]", {
+      speakerId: speakerRole?.id || "",
+      speakerName: speakerRole?.name || "",
+      query: searchQuery,
+      resultCount: results.length,
+    });
     if (!results.length) return "";
 
     // 把搜索结果写入证据链，让用户在圆桌台里看到原始出处
@@ -6555,6 +6561,12 @@ async function runSpeakerWebSearch(speakerRole, summary, signal) {
         ...(Array.isArray(state.sharedEvidenceEntries) ? state.sharedEvidenceEntries : []).filter(Boolean),
         ...newEntries,
       ].slice(-30); // 最多保留 30 条，超出时淘汰最旧的
+      console.log("[speaker-web-search:evidence-updated]", {
+        speakerId: speakerRole?.id || "",
+        speakerName: speakerRole?.name || "",
+        addedCount: newEntries.length,
+        totalCount: state.sharedEvidenceEntries.length,
+      });
       void syncCurrentTopicSnapshot();
       renderRoundtableEvidenceWorkspace(); // 立即刷新证据链界面
     }
