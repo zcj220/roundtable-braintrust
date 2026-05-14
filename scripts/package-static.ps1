@@ -31,7 +31,10 @@ $zipPath = Get-AvailableZipPath $zipPath
 New-Item -ItemType Directory -Path $dist | Out-Null
 Copy-Item -Path (Join-Path $root "index.html") -Destination $dist
 Copy-Item -Path (Join-Path $root "prototype-ui") -Destination $dist -Recurse
-Copy-Item -Path (Join-Path $root "assets") -Destination $dist -Recurse
+$assetsPath = Join-Path $root "assets"
+if (Test-Path $assetsPath) {
+  Copy-Item -Path $assetsPath -Destination $dist -Recurse
+}
 Copy-Item -Path (Join-Path $launcherRoot "serve-static.ps1") -Destination (Join-Path $dist "serve-static.ps1")
 Copy-Item -Path (Join-Path $launcherRoot "Start-Roundtable-Web.bat") -Destination (Join-Path $dist "Start-Roundtable-Web.bat")
 

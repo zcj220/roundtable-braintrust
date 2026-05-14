@@ -154,10 +154,11 @@ button {
 }
 
 .speaking-wave {
-  display: none;
+  display: inline-flex;
+  visibility: hidden;
   align-items: end;
   gap: 3px;
-  margin-left: auto;
+  margin-left: 4px;
   height: 16px;
 }
 
@@ -184,7 +185,7 @@ button {
 }
 
 .chat-item.chat-item-reading .speaking-wave {
-  display: inline-flex;
+  visibility: visible;
 }
 
 @keyframes speaking-wave-bars {
@@ -401,6 +402,9 @@ button {
   font-size: clamp(28px, 3vw, 40px);
   max-width: 15em;
   line-height: 1.22;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tiny-badge,
@@ -683,6 +687,7 @@ button {
 }
 
 .live-status-banner {
+  display: none;
   padding: 12px 16px;
   border-radius: 18px;
   border: 1px solid rgba(231, 182, 112, 0.28);
@@ -729,6 +734,8 @@ button {
   min-height: 0;
   overflow: auto;
   padding-right: 6px;
+  padding-bottom: 42vh;
+  scroll-padding-top: 12px;
   display: grid;
   gap: 14px;
 }
@@ -746,7 +753,7 @@ button {
   grid-template-columns: 44px minmax(0, 1fr);
   gap: 12px;
   align-items: start;
-  scroll-margin-block: 38vh;
+  scroll-margin-block: 12px;
 }
 
 .chat-item.chat-item-reading {
@@ -807,7 +814,6 @@ button {
 }
 
 .chat-assignment-badge {
-  margin-left: auto;
   font-size: 11px;
   color: var(--muted);
   opacity: 0.7;
@@ -816,6 +822,56 @@ button {
   border-radius: 999px;
   border: 1px solid var(--line);
 }
+
+/* ── 每条讨论消息的朗读控制按钮（标题行右侧） ── */
+.chat-msg-voice-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.chat-msg-voice-btns {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.chat-msg-voice-btns button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.chat-msg-voice-btns button:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text);
+}
+
+/* 默认：播放键显示播放图标；暂停图标隐藏；停止键淡化不可点 */
+.chat-msg-playpause .icon-pause { display: none; }
+.chat-msg-stop { opacity: 0.3; pointer-events: none; }
+
+/* 播放中：显示暂停图标（温暖色）；停止键可用 */
+.chat-item-reading .chat-msg-playpause .icon-play  { display: none; }
+.chat-item-reading .chat-msg-playpause .icon-pause { display: block; color: var(--warm-soft, #f5a623); }
+.chat-item-reading .chat-msg-stop { opacity: 1; pointer-events: auto; }
+
+/* 暂停中：显示播放图标（冷色）；停止键可用 */
+.chat-item-voice-paused .chat-msg-playpause .icon-play  { display: block; color: var(--cool, #5ec7d4); }
+.chat-item-voice-paused .chat-msg-playpause .icon-pause { display: none; }
+.chat-item-voice-paused .chat-msg-stop { opacity: 1; pointer-events: auto; }
 
 .chat-bubble {
   padding: 10px 14px;
@@ -970,10 +1026,10 @@ button {
   width: 100%;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: 6px;
   text-align: left;
   align-items: center;
-  padding: 6px 8px 6px 10px;
+  padding: 6px 6px 6px 8px;
   border-radius: 0;
   border: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
@@ -994,13 +1050,13 @@ button {
 
 .evidence-list-index {
   color: var(--warm-soft);
-  font-size: 12px;
-  min-width: 22px;
+  font-size: 11px;
+  min-width: 18px;
 }
 
 .evidence-list-label {
   min-width: 0;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.3;
   color: var(--text);
   white-space: nowrap;
@@ -1009,7 +1065,7 @@ button {
 }
 
 .evidence-list-kind {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--muted);
   white-space: nowrap;
 }
@@ -1153,6 +1209,26 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.02);
+}
+
+.evidence-source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(94, 199, 212, 0.25);
+  background: rgba(94, 199, 212, 0.07);
+  color: var(--cool);
+  font-size: 12px;
+  word-break: break-all;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+
+.evidence-source-link:hover {
+  background: rgba(94, 199, 212, 0.14);
+  text-decoration: underline;
 }
 
 .roundtable-toolbar-actions {
@@ -2143,35 +2219,6 @@ select.round-input option {
 
 .seat-action-spacer {
   flex: 1 1 auto;
-}
-
-.seat-voice-preview {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border-radius: 10px;
-  border: 0;
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--cool);
-}
-
-.seat-voice-preview.is-playing {
-  background: rgba(216, 139, 68, 0.12);
-  color: var(--warm-soft);
-}
-
-.seat-voice-preview svg {
-  width: 16px;
-  height: 16px;
-}
-
-.seat-voice-sample-name {
-  font-size: 12px;
-  color: var(--text);
-  line-height: 1.4;
 }
 
 .seat-edit-icon,

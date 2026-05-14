@@ -49,14 +49,15 @@ function Get-ProxyTargetUri($request) {
       if ([string]::IsNullOrWhiteSpace($query)) {
         return $null
       }
-      return "https://api.duckduckgo.com/?q=$([System.Uri]::EscapeDataString($query))&format=json&no_redirect=1&no_html=1&skip_disambig=1"
+      # 使用英文结果页（kl=us-en），避免中文GBK摘要乱码
+      return "https://html.duckduckgo.com/html/?q=$([System.Uri]::EscapeDataString($query))&kl=us-en"
     }
     "wiki" {
       $query = [string]$request.QueryString["q"]
       if ([string]::IsNullOrWhiteSpace($query)) {
         return $null
       }
-      return "https://zh.wikipedia.org/w/api.php?action=opensearch&search=$([System.Uri]::EscapeDataString($query))&limit=3&namespace=0&format=json&origin=*"
+      return "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=$([System.Uri]::EscapeDataString($query))&srlimit=3&format=json&origin=*"
     }
     "url" {
       $targetUrl = [string]$request.QueryString["url"]
@@ -80,20 +81,27 @@ function Invoke-ProxyRequest([string]$targetUri) {
   $request.Method = "GET"
   $request.Timeout = 25000
   $request.ReadWriteTimeout = 25000
-  $request.UserAgent = $proxyUserAgent
+  # 使用真实浏览器 UA，避免被 DuckDuckGo 拦截
+  $request.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
   $request.AutomaticDecompression = [System.Net.DecompressionMethods]::GZip -bor [System.Net.DecompressionMethods]::Deflate
+  
+  $readBytes = {
+    param($webResp)
+    $stream = $webResp.GetResponseStream()
+    try {
+      $mem = New-Object System.IO.MemoryStream
+      $stream.CopyTo($mem)
+      return $mem.ToArray()
+    } finally { $stream.Dispose() }
+  }
+
   try {
     $response = [System.Net.HttpWebResponse]$request.GetResponse()
     try {
-      $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
-      try {
-        return [pscustomobject]@{
-          StatusCode = [int]$response.StatusCode
-          ContentType = if ([string]::IsNullOrWhiteSpace($response.ContentType)) { "text/plain; charset=utf-8" } else { $response.ContentType }
-          Body = $reader.ReadToEnd()
-        }
-      } finally {
-        $reader.Dispose()
+      return [pscustomobject]@{
+        StatusCode  = [int]$response.StatusCode
+        ContentType = if ([string]::IsNullOrWhiteSpace($response.ContentType)) { "application/octet-stream" } else { $response.ContentType }
+        Bytes       = & $readBytes $response
       }
     } finally {
       $response.Close()
@@ -104,15 +112,10 @@ function Invoke-ProxyRequest([string]$targetUri) {
     if ($errorResponse) {
       $httpResponse = [System.Net.HttpWebResponse]$errorResponse
       try {
-        $reader = New-Object System.IO.StreamReader($httpResponse.GetResponseStream())
-        try {
-          return [pscustomobject]@{
-            StatusCode = [int]$httpResponse.StatusCode
-            ContentType = if ([string]::IsNullOrWhiteSpace($httpResponse.ContentType)) { "text/plain; charset=utf-8" } else { $httpResponse.ContentType }
-            Body = $reader.ReadToEnd()
-          }
-        } finally {
-          $reader.Dispose()
+        return [pscustomobject]@{
+          StatusCode  = [int]$httpResponse.StatusCode
+          ContentType = if ([string]::IsNullOrWhiteSpace($httpResponse.ContentType)) { "application/octet-stream" } else { $httpResponse.ContentType }
+          Bytes       = & $readBytes $httpResponse
         }
       } finally {
         $httpResponse.Close()
@@ -176,7 +179,12 @@ try {
 
       try {
         $proxyResult = Invoke-ProxyRequest $targetUri
-        Write-TextResponse $context $proxyResult.StatusCode $proxyResult.Body $proxyResult.ContentType
+        # 直接透传原始字节，不做任何字符编码转换
+        $context.Response.StatusCode = $proxyResult.StatusCode
+        $context.Response.ContentType = $proxyResult.ContentType
+        $context.Response.ContentLength64 = $proxyResult.Bytes.LongLength
+        $context.Response.OutputStream.Write($proxyResult.Bytes, 0, $proxyResult.Bytes.Length)
+        $context.Response.Close()
       } catch {
         Write-TextResponse $context 502 $_.Exception.Message
       }

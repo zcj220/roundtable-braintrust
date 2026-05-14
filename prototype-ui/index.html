@@ -171,6 +171,7 @@
           <article class="memory-card">
             <div class="memory-card-head roundtable-list-head">
               <p class="topic-tag">证据链</p>
+              <div style="display:flex;align-items:center;gap:8px;">
               <label class="roundtable-filter-field" for="roundtable-evidence-filter">
                 <span>筛选</span>
                 <select id="roundtable-evidence-filter">
@@ -182,6 +183,8 @@
                   <option value="text">文本</option>
                 </select>
               </label>
+              <button id="evidence-translate-toggle" type="button" style="font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.06);color:var(--text-dim);cursor:pointer;white-space:nowrap;" title="开启后，搜索结果采用AI自动翻译为中文">自动翻译 ✔</button>
+              </div>
             </div>
             <div class="memory-card-body evidence-list" id="roundtable-evidence-list"></div>
           </article>

@@ -1,4 +1,4 @@
-const DB_NAME = "roundtable-braintrust";
+﻿const DB_NAME = "roundtable-braintrust";
 const DB_VERSION = 1;
 const ROLE_STORE = "peopleRoles";
 const PROFILE_STORE = "modelProfiles";
@@ -10,7 +10,7 @@ const ROLE_EMERGENCY_TIMEOUT_MS = 120000;
 const ROLE_IDENTITY_TIMEOUT_MS = 90000;
 const MODEL_TEST_TIMEOUT_MS = 18000;
 const MIN_RECOMMENDED_ROLE_COUNT = 8;
-const MAX_EXEMPLAR_ROLE_RATIO = 0.25;
+const MAX_EXEMPLAR_ROLE_RATIO = 0.5;
 
 const modeValues = ["自由讨论", "立场内求最强答案", "客观求真", "灵感探索"];
 const participationValues = ["每轮后表态", "全程旁观"];
@@ -19,7 +19,7 @@ const modelValues = ["系统切换", "手动切换"];
 const modeHelpTexts = [
   "把一个复杂问题拆成几个角度分别讲。可以分子问题、分层次、分时间或分利益相关方展开，先讲开再由主持收回来。",
   "先把支持与反对两边最强的版本都讲完整。反对方负责提前打出最难的质疑，支持方负责把这些质疑正面回应并补强防守。",
-  "不预设立场，优先区分事实、推断和猜测。最后按证据链收敛出一个最稳判断，而不是看谁声音更大。",
+  "不预设立场，优先区分事实、推断和猜测。双方以证据为主展开讨论，最后由裁判依据证据链和论证质量明确判出输赢，必须有胜负结论。",
   "允许大胆设想和跨界联想，但要标清哪些是事实、哪些是推测。对自己的想法可以发散，对别人的想法也要判断可行性、风险和前提条件。",
 ];
 const modeValuesEn = ["Open", "Strongest Case", "Truth-Seeking", "Ideas"];
@@ -29,7 +29,7 @@ const modelValuesEn = ["System Switching", "Manual Switching"];
 const modeHelpTextsEn = [
   "Break a complex issue into a few angles and let the table open them up before the host pulls the threads back together.",
   "Present the strongest version of both support and opposition. Critics should surface the hardest objections early, and supporters should answer them directly.",
-  "Do not assume a stance. Separate facts, inferences, and guesses, then converge toward the most defensible judgment from the evidence chain.",
+  "Do not assume a stance. Separate facts, inferences, and guesses. Both sides argue from evidence, and the judge must declare a clear winner based on the strength of the evidence chain and reasoning quality.",
   "Allow bold ideas and cross-domain associations, but mark clearly what is factual and what is speculative, then test which ideas are worth keeping.",
 ];
 
@@ -43,31 +43,6 @@ const ROLE_VOICE_AGE_BUCKETS = {
   senior: { labelZh: "老年", labelEn: "Senior", sampleAges: [61, 68, 75] },
 };
 
-const ROLE_VOICE_SAMPLE_FILES = [
-  "f_15-25_01.mp3",
-  "f_15-25_02.mp3",
-  "f_20-45_01.mp3",
-  "f_20-50_02.mp3",
-  "m_25-55_01.mp3",
-  "m_25-55_03.mp3",
-  "m_25-60 (1).mp3",
-  "m_25-60 (2).mp3",
-  "m_30-50_01.mp3",
-  "m_30-50_02.mp3",
-  "m_30-50_03.mp3",
-  "m_30-55_01.mp3",
-  "m_50-60_01.mp3",
-  "zhuchi.mp3",
-];
-
-const ROLE_VOICE_BUCKET_TARGET_AGES = {
-  child: 10,
-  teen: 16,
-  young: 28,
-  middle: 45,
-  senior: 68,
-};
-
 const HOST_VOICE_ROLE = {
   id: "host-ai",
   name: "主持AI",
@@ -77,50 +52,6 @@ const HOST_VOICE_ROLE = {
   description: "负责开场、控制节奏、每轮小结、压缩上下文，并在最后整理给用户的结论稿。",
   traits: { stance: "保持中立主持", method: "总结压缩", temper: "清晰" },
 };
-
-function parseRoleVoiceSampleFile(fileName) {
-  if (!fileName) {
-    return null;
-  }
-  if (/^zhuchi\.mp3$/i.test(fileName)) {
-    return {
-      id: "voice-host-zhuchi",
-      fileName,
-      filePath: `../assets/${fileName}`,
-      gender: "female",
-      minAge: 28,
-      maxAge: 42,
-      midAge: 35,
-      variant: "host",
-      isHost: true,
-    };
-  }
-
-  const match = fileName.match(/^([fm])_(\d+)-(\d+)(?:\s*\((\d+)\)|_(\d+))?\.mp3$/i);
-  if (!match) {
-    return null;
-  }
-
-  const genderCode = match[1].toLowerCase();
-  const minAge = Number(match[2]);
-  const maxAge = Number(match[3]);
-  const variant = match[4] || match[5] || "01";
-  return {
-    id: `voice-${genderCode}-${minAge}-${maxAge}-${variant}`,
-    fileName,
-    filePath: `../assets/${fileName}`,
-    gender: genderCode === "f" ? "female" : "male",
-    minAge,
-    maxAge,
-    midAge: Math.round((minAge + maxAge) / 2),
-    variant,
-    isHost: false,
-  };
-}
-
-const ROLE_VOICE_SAMPLES = ROLE_VOICE_SAMPLE_FILES.map(parseRoleVoiceSampleFile).filter(Boolean);
-const HOST_VOICE_SAMPLE = ROLE_VOICE_SAMPLES.find((sample) => sample.isHost) || null;
-const ROLE_VOICE_SAMPLE_MAP = new Map(ROLE_VOICE_SAMPLES.map((sample) => [sample.id, sample]));
 
 function getStableStringHash(value) {
   return Array.from(String(value || "")).reduce((total, char) => ((total << 5) - total + char.charCodeAt(0)) | 0, 0);
@@ -210,109 +141,6 @@ function buildAgeFromBucket(bucket, seedText) {
   return `${samples[index]}岁`;
 }
 
-function getApproximateRoleAge(role) {
-  const explicitAge = extractNumericAge(normalizeRoleAge(role?.age || role?.ageLabel || role?.ageText || role?.ageRange));
-  if (explicitAge) {
-    return explicitAge;
-  }
-  return ROLE_VOICE_BUCKET_TARGET_AGES[getRoleVoiceAgeBucket(role)] || ROLE_VOICE_BUCKET_TARGET_AGES.middle;
-}
-
-function getVoiceSampleById(sampleId) {
-  return ROLE_VOICE_SAMPLE_MAP.get(sampleId) || null;
-}
-
-function getVoiceSampleDistance(sample, age) {
-  if (!sample) {
-    return Number.MAX_SAFE_INTEGER;
-  }
-  if (age >= sample.minAge && age <= sample.maxAge) {
-    return 0;
-  }
-  if (age < sample.minAge) {
-    return sample.minAge - age;
-  }
-  return age - sample.maxAge;
-}
-
-function getVoiceSampleDisplayLabel(sample) {
-  if (!sample) {
-    return "";
-  }
-  if (sample.isHost) {
-    return langText("主持专属女声", "Dedicated host voice");
-  }
-  const genderLabel = sample.gender === "female" ? langText("女声", "Female") : langText("男声", "Male");
-  return `${genderLabel} ${sample.minAge}-${sample.maxAge} · ${sample.variant}`;
-}
-
-function getRoleVoiceCandidates(role, usedSampleIds = new Set()) {
-  const targetGender = normalizeRoleGender(role?.gender) || inferRoleGender(role);
-  const targetAge = getApproximateRoleAge(role);
-  const sameGender = ROLE_VOICE_SAMPLES.filter((sample) => !sample.isHost && sample.gender === targetGender);
-  const primaryPool = sameGender.length ? sameGender : ROLE_VOICE_SAMPLES.filter((sample) => !sample.isHost);
-  const compare = (left, right) => {
-    const distanceDiff = getVoiceSampleDistance(left, targetAge) - getVoiceSampleDistance(right, targetAge);
-    if (distanceDiff !== 0) {
-      return distanceDiff;
-    }
-    return left.fileName.localeCompare(right.fileName, "zh-CN");
-  };
-  const unused = primaryPool.filter((sample) => !usedSampleIds.has(sample.id)).sort(compare);
-  const used = primaryPool.filter((sample) => usedSampleIds.has(sample.id)).sort(compare);
-  return [...unused, ...used];
-}
-
-function voiceSampleMatchesRole(sample, role) {
-  if (!sample || sample.isHost) {
-    return false;
-  }
-  const targetGender = normalizeRoleGender(role?.gender) || inferRoleGender(role);
-  return sample.gender === targetGender;
-}
-
-function syncRoleVoiceAssignments() {
-  const nextAssignments = {};
-  const usedSampleIds = new Set();
-  if (HOST_VOICE_SAMPLE) {
-    nextAssignments[HOST_VOICE_ROLE.id] = HOST_VOICE_SAMPLE.id;
-    usedSampleIds.add(HOST_VOICE_SAMPLE.id);
-  }
-
-  const selectedRoles = getOrderedSelectedRoleIds().map((roleId) => getRoleById(roleId)).filter(Boolean);
-  selectedRoles.forEach((role) => {
-    const existing = getVoiceSampleById(state.voiceSampleAssignments?.[role.id]);
-    if (existing && voiceSampleMatchesRole(existing, role) && !usedSampleIds.has(existing.id)) {
-      nextAssignments[role.id] = existing.id;
-      usedSampleIds.add(existing.id);
-    }
-  });
-
-  selectedRoles.forEach((role) => {
-    if (nextAssignments[role.id]) {
-      return;
-    }
-    const sample = getRoleVoiceCandidates(role, usedSampleIds)[0] || null;
-    if (sample) {
-      nextAssignments[role.id] = sample.id;
-      usedSampleIds.add(sample.id);
-    }
-  });
-
-  state.voiceSampleAssignments = nextAssignments;
-  return nextAssignments;
-}
-
-function getAssignedVoiceSampleForRole(role) {
-  if (!role) {
-    return null;
-  }
-  if (!state.voiceSampleAssignments[role.id]) {
-    syncRoleVoiceAssignments();
-  }
-  return getVoiceSampleById(state.voiceSampleAssignments[role.id]) || null;
-}
-
 function getDiscussionSpeakerRoleById(speakerId) {
   if (!speakerId) {
     return null;
@@ -324,8 +152,7 @@ function getDiscussionSpeakerRoleById(speakerId) {
 }
 
 function buildReadAloudProfile(role) {
-  const sample = getAssignedVoiceSampleForRole(role);
-  const gender = sample?.gender || normalizeRoleGender(role?.gender) || inferRoleGender(role);
+  const gender = normalizeRoleGender(role?.gender) || inferRoleGender(role);
   const bucket = role ? getRoleVoiceAgeBucket(role) : "middle";
   let rate = state.appLanguage === "en" ? 0.96 : 0.92;
   let pitch = gender === "male" ? 0.88 : 1.08;
@@ -348,47 +175,6 @@ function buildReadAloudProfile(role) {
     rate: Math.max(0.8, Math.min(1.08, rate)),
     pitch: Math.max(0.72, Math.min(1.28, pitch)),
   };
-}
-
-function playVoiceSampleForRole(role) {
-  const sample = getAssignedVoiceSampleForRole(role);
-  if (!sample) {
-    updateSeatFeedback(langText("当前没有可试听的声音样本。", "No voice sample is available for this persona."), "pending");
-    return;
-  }
-
-  if (activeVoiceSampleRoleId === role?.id && activeVoiceSampleAudio) {
-    stopVoiceSamplePlayback();
-    updateSeatFeedback(langText(`已停止 ${role?.name || "该角色"} 的声音样本。`, `Stopped ${role?.name || "this role"} voice sample.`), "");
-    return;
-  }
-
-  stopVoiceSamplePlayback({ rerender: false });
-  activeVoiceSampleAudio = new Audio(sample.filePath);
-  activeVoiceSampleRoleId = role?.id || "";
-  activeVoiceSampleAudio.addEventListener("ended", () => {
-    stopVoiceSamplePlayback();
-  }, { once: true });
-  activeVoiceSampleAudio.play().catch((error) => {
-    console.warn("voice sample playback failed", error);
-    stopVoiceSamplePlayback();
-    updateSeatFeedback(langText("声音样本播放失败，请确认你是通过本地页面或静态服务器打开原型。", "Voice sample playback failed. Open the prototype from a local page or static server and try again."), "pending");
-  });
-  renderSeatStack();
-  updateSeatFeedback(langText(`正在试听 ${role?.name || "该角色"} 的声音：${getVoiceSampleDisplayLabel(sample)}`, `Previewing ${role?.name || "this role"}: ${getVoiceSampleDisplayLabel(sample)}`), "success");
-}
-
-function stopVoiceSamplePlayback(options = {}) {
-  const { rerender = true } = options;
-  if (activeVoiceSampleAudio) {
-    activeVoiceSampleAudio.pause();
-    activeVoiceSampleAudio.currentTime = 0;
-    activeVoiceSampleAudio = null;
-  }
-  activeVoiceSampleRoleId = "";
-  if (rerender && seatStack) {
-    renderSeatStack();
-  }
 }
 
 function inferRoleGender(role) {
@@ -1206,7 +992,7 @@ const state = {
   lastSummary: "",
   sharedResearchBrief: "",
   sharedEvidenceEntries: [],
-  rolePlanningBrief: "",
+  autoTranslateEvidence: true,
   pendingRoleClarification: [],
   taskSupplementMode: false,
   generatingTimer: null,
@@ -1219,7 +1005,6 @@ const state = {
   selectedIds: new Set(),
   seatAssignments: {},
   discussionOrder: {},
-  voiceSampleAssignments: {},
   ttsVoiceAssignments: {},
   seatModelAssignments: {},
   topics: [],
@@ -1374,9 +1159,8 @@ let modelProfileEditMode = false;
 let preferredReadAloudVoices = new Map();
 let readAloudQueue = [];
 let activeReadAloudUtterance = null;
-let activeVoiceSampleAudio = null;
-let activeVoiceSampleRoleId = "";
 let activeReadAloudElement = null;
+let readAloudPaused = false;
 
 function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -1872,8 +1656,17 @@ function updateLiveStatus(message, tone = "") {
   liveStatusBanner.className = `live-status-banner ${tone}`.trim();
 }
 
+function formatCurrentTopicTitle(title = "") {
+  const chars = Array.from(String(title || "").trim());
+  if (!chars.length) {
+    return "目前还没有任务";
+  }
+  return chars.length > 14 ? `${chars.slice(0, 14).join("")}...` : chars.join("");
+}
+
 function updateCurrentTopicTitle(title = "目前还没有任务") {
-  currentTopicTitle.textContent = title;
+  currentTopicTitle.textContent = formatCurrentTopicTitle(title);
+  currentTopicTitle.title = title || "目前还没有任务";
 }
 
 function getRoundLabel() {
@@ -2155,8 +1948,9 @@ function getDiscussionModeDirective() {
   if (state.modeIndex === 2) {
     return [
       `讨论目标：${modeValues[state.modeIndex]}。`,
-      "要求：优先区分事实、推断和猜测，优先校验证据链，而不是急着下漂亮结论。",
+      "要求：双方以证据为主展开讨论，优先区分事实、推断和猜测，优先校验证据链，而不是急着下漂亮结论。",
       "如果前文有偷换概念、证据不足、出处含糊或逻辑跳跃，要直接点破并收紧结论。",
+      "最终由裁判依据各轮证据链质量和论证严密性明确判出输赢，裁判必须给出明确的胜负结论，不允许两边打平或模糊收场。",
     ].join("\n");
   }
   if (state.modeIndex === 3) {
@@ -2211,8 +2005,9 @@ function getOpeningModeInstruction() {
   }
   if (state.modeIndex === 2) {
     return [
-      "开场要求：你要明确告诉用户，这场讨论不预设立场，重点是核验证据链、区分事实和推断，并邀请每位嘉宾先提出自己最想先核验的证据、疑点或解释方向。",
-      "不要把这场讨论讲成观点比赛，要讲成求真过程。",
+      "开场要求：你要明确告诉用户，这场讨论不预设立场，双方以证据为主展开论辩，重点是核验证据链、区分事实和推断。",
+      "同时告知：讨论结束后裁判会依据证据链质量和论证严密性明确判出输赢，必须有胜负结论，不允许模糊收场。",
+      "邀请每位嘉宾先提出自己最想先核验的证据、疑点或解释方向。",
     ].join("\n");
   }
   if (state.modeIndex === 3) {
@@ -2230,7 +2025,7 @@ function getOpeningModeInstruction() {
 function getSpeakerModeInstruction(assignment) {
   if (state.modeIndex === 1) {
     return [
-      "模式要求：先把你这一侧最强、最完整、最能成立的版本讲出来，不允许故意把任何一方说弱。",
+      "先把你这一侧最强、最完整、最能成立的版本讲出来，不允许故意把任何一方说弱。",
       assignment === "challenger"
         ? "如果你承担主讲职责，要把本方 strongest case 的主论点、关键依据和最难反驳的部分讲扎实。"
         : assignment === "rebuttal"
@@ -2240,11 +2035,12 @@ function getSpeakerModeInstruction(assignment) {
           : "如果你承担旁证职责，要补足本方 strongest case 的背景、案例、约束和现实回应。",
       "如果你承担反对或质疑功能，你的任务不是为了赢而偷换概念，而是提前提出现实世界里最强的反对意见，帮助后续形成更强回应。",
       "承接前轮要求：把前面已经稳住的防守点、已经被有效击中的薄弱点、仍未回应的关键反对都当成当前攻防账本，不要把已经回应过的点重新当成没回应。",
+      "这些约束只作为你心里的发言骨架，不要把它们原样说出来，不要使用统一小标题、固定口头禅或机械模板。",
     ].join("\n");
   }
   if (state.modeIndex === 2) {
     return [
-      "模式要求：请按“能确认的事实 -> 基于事实的推断 -> 仍然不确定的空白 -> 暂时判断”这个顺序推进。",
+      "请把发言内在地建立在四层推进上：先压实可以确认的部分，再在此基础上做推断，接着明确仍然存在的证据空白，最后给出当前阶段性的判断。",
       "如果前文给了模糊出处、似是而非的事实、跳跃推理或偷换概念，要直接点破并收紧结论。",
       assignment === "neutral"
         ? "作为中立评议者，你要主动压实证据，而不是做礼貌性总结。"
@@ -2252,11 +2048,12 @@ function getSpeakerModeInstruction(assignment) {
           ? "作为辩驳者，你要优先检查主讲刚才的证据链是否真的闭合，哪些地方只是推断冒充事实。"
         : "不要求你保持语气温和，但要求你优先服从真假和证据链，而不是服从角色偏好。",
       "承接前轮要求：把前面已经形成的共识当成本轮默认约束，优先在尚未确认的点和证据缺口上继续推进，不要把已经收住的点重新说散。",
+      "不要显式说“能确认的事实”“基于事实的推断”“仍然不确定的空白”“暂时判断”这类统一标题，也不要把整段发言写成四段固定模板。",
     ].join("\n");
   }
   if (state.modeIndex === 3) {
     return [
-      "模式要求：你既要提出新设想，也要判断前文设想的可行性、风险和前提条件。",
+      "你既要提出新设想，也要判断前文设想的可行性、风险和前提条件。",
       "对自己的新想法可以大胆提出，对别人的新想法不能只会附和或只会否定，要说明为什么可能行、为什么不行，或者怎样改才可能行。",
       assignment === "challenger"
         ? "作为主讲，你应当主动提出一个值得继续追的新方向，而不是只做保守评论。"
@@ -2264,10 +2061,11 @@ function getSpeakerModeInstruction(assignment) {
           ? "作为辩驳者，你要优先指出主讲新方向里最容易翻车的前提和最可能被忽略的代价。"
         : "作为非主讲角色，你可以沿着别人的思路做变体、筛选和条件修正。",
       "承接前轮要求：把前面已经被证明值得继续试的方向、仍属探索但可保留的方向、以及已经判定风险过高的方向分开对待，不要把明显应放弃的想法重新包装成主方向。",
+      "这些要求只能体现在你的思路里，不要写成统一标题、固定三段式或每个人都一样的套话。",
     ].join("\n");
   }
   return [
-    "模式要求：请把一个复杂问题拆成几个子问题、层次、时间段或利益相关方中的某一条继续展开，而不是平铺重复。",
+    "请把一个复杂问题拆成几个子问题、层次、时间段或利益相关方中的某一条继续展开，而不是平铺重复。",
     "你可以选择顺着前文扩展，也可以选择把前文没分清的层面拆开讲，但最终要帮助用户把问题看得更开、更清楚。",
     assignment === "neutral"
       ? "作为中立评议者，你要帮助用户看清哪些讨论线已经展开、哪些还没展开。"
@@ -2275,6 +2073,7 @@ function getSpeakerModeInstruction(assignment) {
         ? "作为辩驳者，你要专门盯住主讲当前拆法里的漏洞、遗漏和不成立的跳步。"
       : "不要试图一口气把所有层面说完，优先把你这一条线讲透。",
     "承接前轮要求：把前面已经展开过的讨论线、已经形成的暂时共识和仍未展开的线区分开，优先补还没讲透的部分，而不是重复已经讲开的线。",
+    "不要把这些要求直接说出口，也不要把发言写成统一标题模板。",
   ].join("\n");
 }
 
@@ -2392,9 +2191,11 @@ function getJudgeModeInstruction() {
   }
   if (state.modeIndex === 2) {
     return [
-      "裁判要求：最终判断优先服从真假和证据链，而不是服从任何角色原始立场。",
-      "请以各轮已经形成的共识链为基础，尽量收敛出一个统一判断，同时明确写出少数保留意见、证据缺口，以及为什么最终这样裁定。",
-      "不要把前面已经形成的共识重新打散，除非你能明确指出那份共识为什么其实站不住脚。",
+      "裁判要求：你必须在最终裁定中明确判出输赢，不允许两边打平或模糊收场，这是本模式的硬性规则。",
+      "判断依据：证据链的完整性、论证的严密性、是否有偷换概念或逻辑跳跃、关键疑点是否被正面回应。",
+      "先梳理各轮已经确认的事实与共识，再对比双方论证质量，最终明确宣告哪一方的证据链更强、为什么胜出，以及对方哪些关键点没能成立。",
+      "同时写出：胜方仍存在的不足、败方中有价值的部分、整体讨论还留有哪些待查证的空白。",
+      "不要把前面已经形成的共识重新打散，除非你能明确指出那份共识为什么站不住脚。",
       getJudgeLedgerInstruction(),
     ].join("\n");
   }
@@ -2445,16 +2246,16 @@ function buildDiscussionContext(summary, roundNotes, liveTurns, compressedHistor
     ? `本轮前面已经发言的内容：\n${liveTurns.map((turn) => formatTurnContext(turn)).join("\n\n")}`
     : "";
   const sharedResearch = state.sharedResearchBrief
-    ? `共享事实包（所有角色共用同一份材料，不要假装各自另查到不同外部资料）：\n${state.sharedResearchBrief}`
+    ? `【置顶基准事实包 · 全程有效，每轮必须遵守】本次讨论的共识基础如下，所有角色共用同一份材料，不得假装另查到不同外部资料，不得与此包中确认内容矛盾：\n${state.sharedResearchBrief}`
     : "";
   const userMemory = buildUserMemoryPrompt();
   const projectMemory = buildProjectMemoryPrompt();
 
   return [
     `任务定义：${summary}`,
+    sharedResearch,
     userMemory ? `用户记忆（长期偏好，可作为语气和组织方式参考）：\n${userMemory}` : "",
     projectMemory ? `项目记忆（当前项目沉淀）：\n${projectMemory}` : "",
-    sharedResearch,
     getDiscussionModeDirective(),
     finishedRounds,
     currentTurns,
@@ -2740,7 +2541,6 @@ function buildCurrentTopicSnapshot() {
     selectedIds: [...state.selectedIds],
     seatAssignments: { ...state.seatAssignments },
     discussionOrder: { ...state.discussionOrder },
-    voiceSampleAssignments: { ...state.voiceSampleAssignments },
     ttsVoiceAssignments: { ...state.ttsVoiceAssignments },
     seatModelAssignments: { ...state.seatModelAssignments },
     pendingAttachments: [],
@@ -2871,7 +2671,6 @@ function applyTopicSnapshot(snapshot) {
   state.selectedIds = new Set(snapshot.selectedIds || []);
   state.seatAssignments = snapshot.seatAssignments || {};
   state.discussionOrder = snapshot.discussionOrder || {};
-  state.voiceSampleAssignments = snapshot.voiceSampleAssignments || {};
   state.ttsVoiceAssignments = snapshot.ttsVoiceAssignments || {};
   state.seatModelAssignments = snapshot.seatModelAssignments || {};
   sanitizeSeatModelAssignments();
@@ -3755,32 +3554,74 @@ function renderVoiceReadToggle() {
 function stopReadAloudPlayback() {
   readAloudQueue = [];
   activeReadAloudUtterance = null;
+  readAloudPaused = false;
   if (activeReadAloudElement) {
-    activeReadAloudElement.classList.remove("chat-item-reading");
+    activeReadAloudElement.classList.remove("chat-item-reading", "chat-item-voice-paused");
     activeReadAloudElement = null;
-  }
-  if (activeVoiceSampleAudio) {
-    stopVoiceSamplePlayback({ rerender: false });
   }
   if (window.speechSynthesis) {
     window.speechSynthesis.cancel();
   }
 }
 
+// 刷新非当前消息的播放按钮状态（清除已不活跃条目的高亮）
+function updateMsgVoiceBtnState() {
+  discussionStream.querySelectorAll(".chat-item[data-has-voice]").forEach((el) => {
+    if (el !== activeReadAloudElement) {
+      el.classList.remove("chat-item-reading", "chat-item-voice-paused");
+    }
+  });
+}
+
+// 从指定消息开始朗读，并自动续读后续消息
+function playFromElement(startElement) {
+  if (!state.voiceReadEnabled) {
+    return;
+  }
+  stopReadAloudPlayback();
+  const allItems = [...discussionStream.querySelectorAll(".chat-item[data-has-voice]")];
+  const startIdx = allItems.indexOf(startElement);
+  if (startIdx === -1) {
+    return;
+  }
+  for (const el of allItems.slice(startIdx)) {
+    const body = el.querySelector(".chat-bubble p")?.textContent?.trim() || "";
+    if (!body) {
+      continue;
+    }
+    readAloudQueue.push({
+      text: sanitizeReadAloudText(body),
+      speakerId: el.dataset.speakerId || "",
+      role: getDiscussionSpeakerRoleById(el.dataset.speakerId || ""),
+      element: el,
+    });
+  }
+  drainReadAloudQueue();
+}
+
 function focusReadAloudMessage(element) {
   if (activeReadAloudElement && activeReadAloudElement !== element) {
-    activeReadAloudElement.classList.remove("chat-item-reading");
+    activeReadAloudElement.classList.remove("chat-item-reading", "chat-item-voice-paused");
   }
   if (!element) {
     activeReadAloudElement = null;
     setSpeakerCardSpeaking(false);
+    updateMsgVoiceBtnState();
     return;
   }
   activeReadAloudElement = element;
   activeReadAloudElement.classList.add("chat-item-reading");
+  readAloudPaused = false;
   setSpeakerCardSpeaking(true);
+  updateMsgVoiceBtnState();
   requestAnimationFrame(() => {
-    activeReadAloudElement?.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+    if (!activeReadAloudElement) return;
+    const container = discussionStream;
+    const targetTop = Math.max(0, activeReadAloudElement.offsetTop - 140);
+    const delta = Math.abs(container.scrollTop - targetTop);
+    if (delta > 10) {
+      container.scrollTo({ top: targetTop, behavior: "smooth" });
+    }
   });
 }
 
@@ -3799,7 +3640,11 @@ function drainReadAloudQueue() {
 
   const utterance = new SpeechSynthesisUtterance(nextText);
   utterance.lang = state.appLanguage === "en" ? "en-US" : "zh-CN";
-  const speakerRole = typeof nextEntry === "string" ? null : nextEntry?.role || getDiscussionSpeakerRoleById(nextEntry?.speakerId);
+  // 使用最新的 role 对象（避免持有生成时的旧引用，保证性别字段最新）
+  const entryRoleId = typeof nextEntry === "string" ? null : nextEntry?.speakerId || nextEntry?.role?.id || null;
+  const speakerRole = entryRoleId
+    ? getDiscussionSpeakerRoleById(entryRoleId)
+    : (typeof nextEntry === "string" ? null : nextEntry?.role || null);
   const speechProfile = buildReadAloudProfile(speakerRole);
   utterance.rate = speechProfile.rate;
   utterance.pitch = speechProfile.pitch;
@@ -3855,8 +3700,8 @@ function getPreferredReadAloudVoice(options = {}) {
     return cachedVoice;
   }
 
-  const zhFemalePattern = /xiaoxiao|xiaoyi|female|huihui|xiaomei|xiaomeng|xiaorui/i;
-  const zhMalePattern = /yunxi|yunyang|male|xiaobei|yunjian|xiaogang|xiaomo|yunhao/i;
+  const zhFemalePattern = /xiaoxiao|xiaoyi|female|huihui|xiaomei|xiaomeng|xiaorui|yaoyao|xiaohan|xiaoshuang|hanhan/i;
+  const zhMalePattern = /yunxi|yunyang|male|xiaobei|yunjian|xiaogang|xiaomo|yunhao|kangkang|zhiwei|yunfeng|yunze|xiaochen/i;
   const enFemalePattern = /female|zira|aria|jenny|samantha|ava|emma|sara/i;
   const enMalePattern = /male|david|guy|mark|andrew|roger|tony|brian|christopher|daniel/i;
   const malePattern = state.appLanguage === "en" ? enMalePattern : zhMalePattern;
@@ -3894,10 +3739,10 @@ function inferReadAloudVoiceGender(voice) {
     return "";
   }
   const fingerprint = `${voice.name} ${voice.voiceURI}`;
-  if (/yunxi|yunyang|male|xiaobei|yunjian|xiaogang|xiaomo|yunhao|david|guy|mark|andrew|roger|tony|brian|christopher|daniel/i.test(fingerprint)) {
+  if (/yunxi|yunyang|male|xiaobei|yunjian|xiaogang|xiaomo|yunhao|kangkang|zhiwei|yunfeng|yunze|xiaochen|david|guy|mark|andrew|roger|tony|brian|christopher|daniel/i.test(fingerprint)) {
     return "male";
   }
-  if (/xiaoxiao|xiaoyi|female|huihui|xiaomei|xiaomeng|xiaorui|zira|aria|jenny|samantha|ava|emma|sara/i.test(fingerprint)) {
+  if (/xiaoxiao|xiaoyi|female|huihui|xiaomei|xiaomeng|xiaorui|yaoyao|xiaohan|xiaoshuang|hanhan|zira|aria|jenny|samantha|ava|emma|sara/i.test(fingerprint)) {
     return "female";
   }
   return "";
@@ -4078,11 +3923,11 @@ async function requestModelText(profile, prompt, maxTokens = 420, signal, timeou
       }
     } catch (error) {
       requestControl.cleanup();
-      if (error?.name === "AbortError") {
-        throw error;
-      }
       if (requestControl.didTimeOut()) {
         throw new Error(`${profile.displayName} 响应超时。这个模型已接通，但当前请求长时间没有返回。`);
+      }
+      if (error?.name === "AbortError") {
+        throw error;
       }
       if (isNetworkError(error) && attempt < MAX_NETWORK_RETRIES) {
         // 断网/切换网络：等待后自动重试
@@ -4133,7 +3978,7 @@ function rolePromptBlock(role) {
 }
 
 function appendRoleMessage(role, assignmentLabel, body, modelName) {
-  const assignment = role ? getRoleAssignment(role) : "";
+  const assignment = role ? (role.id === "host-ai" ? "moderator" : getRoleAssignment(role)) : "";
   const assignmentBadgeMap = {
     challenger: langText("主讲", "Lead"),
     rebuttal: langText("辩驳", "Rebuttal"),
@@ -4143,6 +3988,7 @@ function appendRoleMessage(role, assignmentLabel, body, modelName) {
     participant: langText("旁证", "Participant"),
   };
   const badgeLabel = assignmentBadgeMap[assignment] || "";
+  const isDiscussantRole = !!role;
   appendMarkup(
     createMessageMarkup({
       speakerId: role?.id || assignmentLabel,
@@ -4154,6 +4000,7 @@ function appendRoleMessage(role, assignmentLabel, body, modelName) {
       avatarClass: "avatar-system",
       avatarStyleText: role ? avatarStyle(role) : "",
       tone: "system",
+      showVoiceControls: isDiscussantRole,
     })
   );
 }
@@ -4292,7 +4139,7 @@ async function runSingleDiscussionRound({
       rolePromptBlock(speakerRole),
       `篇幅要求：${isLead ? budget.charHint : "控制在 280 到 520 字内。"}`,
       "绝对不要输出 thinking process、analyze user input、自检步骤、constraint list 或任何内部推理过程。",
-      "要求：直接输出本轮发言正文，不要自我介绍，不要使用 Markdown 标题和列表。",
+      "要求：直接输出本轮发言正文，不要自我介绍，不要使用 Markdown 标题和列表，也不要使用统一小标题、固定口头禅或把模式约束原样复述出来。",
     ].filter(Boolean).join("\n\n");
 
     setSpeakerCardForRole(speakerRole, langText(`第 ${round} 轮 · 正在思考`, `Round ${round} · Thinking`), langText("正在读取任务和前面已发言内容，并准备按顺序接续。", "Reading the task and previous turns, then preparing to continue in order."));
@@ -4481,6 +4328,7 @@ async function runDiscussionFlow() {
           avatarLabel: "研",
           avatarClass: "avatar-system",
           tone: "system",
+          showVoiceControls: true,
         })
       );
       void syncCurrentTopicSnapshot();
@@ -4620,13 +4468,14 @@ async function runDiscussionFlow() {
       activeTopic.status = "completed";
       activeTopic.summary = "本次讨论已完成，结论可下载。";
     }
+    setSpeakerCardSpeaking(false);
     setSpeakerCard(langText("讨论完成", "Discussion Complete"), langText("主持总结已完成", "Host wrap-up completed"), langText(`已按 ${targetRounds} 轮完成顺序讨论、逐轮主持压缩和最终裁判流程。`, `Completed ${targetRounds} round(s) of ordered discussion, host compression, and final judgment.`), "系");
     updateLiveStatus(langText("讨论完成：结论报告已生成，可下载。", "Discussion complete: the final report is ready to download."), "success");
     updateSeatFeedback(langText("本轮讨论已完成。你可以继续补充任务，或调整角色后再来一轮。", "This discussion is complete. You can add more task details or adjust personas and run another round."), "success");
     await syncCurrentTopicSnapshot();
   } catch (error) {
     console.error(error);
-    const aborted = error?.name === "AbortError" || state.discussionAbortRequested;
+    const aborted = state.discussionAbortRequested;
     appendMarkup(
       createMessageMarkup({
         speakerId: "system",
@@ -4638,6 +4487,7 @@ async function runDiscussionFlow() {
         tone: "system",
       })
     );
+    setSpeakerCardSpeaking(false);
     setSpeakerCard(aborted ? langText("讨论已结束", "Discussion Stopped") : langText("讨论中断", "Discussion Interrupted"), aborted ? langText("已按你的要求停止", "Stopped as requested") : langText("模型调用失败", "Model call failed"), aborted ? langText("当前已经执行完的发言会保留，你可以调整后重新开始。", "Completed turns will be kept. You can adjust the setup and start again.") : error.message || langText("执行多角色讨论时失败。", "The multi-person discussion failed."), "系");
     updateLiveStatus(aborted ? langText("讨论已结束：已停止后续角色发言。", "Discussion stopped: later speakers have been halted.") : langText(`讨论中断：${error.message || "模型调用失败"}`, `Discussion interrupted: ${error.message || "Model call failed"}`), aborted ? "" : "pending");
     updateSeatFeedback(aborted ? langText("讨论已结束。你可以调整轮次或席位后重新开始。", "Discussion stopped. You can adjust rounds or seats and start again.") : error.message || langText("执行多角色讨论时失败。", "The multi-person discussion failed."), "pending");
@@ -4824,22 +4674,34 @@ function joinUrl(baseUrl, endpointPath) {
   return `${normalizedBase}${normalizedPath}`;
 }
 
-function createMessageMarkup({ speakerId, label, sublabel = "", badgeLabel = "", body, avatarLabel, avatarClass = "avatar-system", avatarStyleText = "", tone = "system", actions = "", attachments = [] }) {
+function createMessageMarkup({ speakerId, label, sublabel = "", badgeLabel = "", body, avatarLabel, avatarClass = "avatar-system", avatarStyleText = "", tone = "system", actions = "", attachments = [], showVoiceControls = false }) {
   const attachmentMarkup = attachments.length
     ? `<div class="chat-attachments">${attachments
         .map((file) => `<span class="attachment-pill">${escapeHtml(file.name)} · ${Math.max(1, Math.round((file.size || 0) / 1024))} KB</span>`)
         .join("")}</div>`
     : "";
 
+  const voiceControlsMarkup = showVoiceControls ? `
+    <div class="chat-msg-voice-bar">
+      <span class="chat-msg-voice-btns" aria-label="朗读控制">
+        <button class="chat-msg-playpause" type="button" title="朗读/暂停">
+          <svg class="icon-play" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M8 6.5v11l9-5.5-9-5.5z" fill="currentColor"/></svg>
+          <svg class="icon-pause" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M6 5h3v14H6zm9 0h3v14h-3z" fill="currentColor"/></svg>
+        </button>
+        <button class="chat-msg-stop" type="button" title="停止朗读"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor"/></svg></button>
+      </span>
+      <span class="speaking-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+    </div>` : "";
+
   return `
-    <article class="chat-item ${tone}" data-speaker-id="${speakerId}">
+    <article class="chat-item ${tone}" data-speaker-id="${speakerId}"${showVoiceControls ? ' data-has-voice="1"' : ""}>
       <div class="avatar-badge ${avatarClass}" ${avatarStyleText ? `style="${escapeHtml(avatarStyleText)}"` : ""}>${avatarLabel}</div>
       <div class="chat-content">
         <div class="chat-meta">
           <strong>${label}</strong>
           ${sublabel ? `<span>${sublabel}</span>` : ""}
-          <span class="speaking-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
           ${badgeLabel ? `<span class="chat-assignment-badge">${escapeHtml(badgeLabel)}</span>` : ""}
+          ${voiceControlsMarkup}
         </div>
         <div class="chat-bubble">
           <p>${escapeHtml(body)}</p>
@@ -5207,7 +5069,6 @@ function renderPeopleSummary() {
 function renderSeatStack() {
   syncDiscussionOrder();
   const selectedRoles = getOrderedSelectedRoleIds().map((roleId) => normalizeRecommendedRolePersona(getRoleById(roleId))).filter(Boolean);
-  syncRoleVoiceAssignments();
   const orderedDiscussantCount = selectedRoles.filter((role) => getRoleAssignment(role) !== "judge").length;
   seatPickerCount.textContent = langText(`已选 ${selectedRoles.length} / ${state.discussionSize}`, `Selected ${selectedRoles.length} / ${state.discussionSize}`);
   if (seatConfigProgress) {
@@ -5241,7 +5102,6 @@ function renderSeatStack() {
       const traits = buildRoleTraitsMarkup(role, { compact: true });
       const assignment = ensureSeatAssignment(role);
       const currentProfile = getConfiguredProfileById(ensureSeatModelAssignment(role));
-      const voiceSample = getAssignedVoiceSampleForRole(role);
       const orderValue = state.discussionOrder[role.id] || 1;
       const orderOptions = Array.from({ length: Math.max(1, orderedDiscussantCount) })
         .map((_, index) => `<option value="${index + 1}" ${orderValue === index + 1 ? "selected" : ""}>${escapeHtml(langText(`顺序 ${index + 1}`, `Order ${index + 1}`))}</option>`)
@@ -5275,8 +5135,7 @@ function renderSeatStack() {
             <div class="seat-traits">${traits}</div>
           </div>
           <div class="seat-actions">
-            <div class="seat-action-row ${voiceSample ? "with-audio" : ""}">
-              ${voiceSample ? `<button class="seat-voice-preview ${activeVoiceSampleRoleId === role.id ? "is-playing" : ""}" data-role-id="${role.id}" type="button" aria-label="${escapeHtml(activeVoiceSampleRoleId === role.id ? langText("停止声音样本", "Stop voice sample") : langText("播放声音样本", "Play voice sample"))}" aria-pressed="${activeVoiceSampleRoleId === role.id ? "true" : "false"}" title="${escapeHtml(activeVoiceSampleRoleId === role.id ? langText("停止声音样本", "Stop voice sample") : langText("播放声音样本", "Play voice sample"))}">${activeVoiceSampleRoleId === role.id ? `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 6h4v12H7zm6 0h4v12h-4z" fill="currentColor"></path></svg>` : `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6.5v11l9-5.5-9-5.5z" fill="currentColor"></path></svg>`}</button><strong class="seat-voice-sample-name">${escapeHtml(getVoiceSampleDisplayLabel(voiceSample))}</strong><span class="seat-action-spacer"></span>` : ""}
+            <div class="seat-action-row">
               ${canEditRole(role) || role.source === "recommended" ? `<button class="icon-button compact seat-edit seat-edit-icon" data-role-id="${role.id}" type="button" aria-label="${escapeHtml(langText("编辑人物", "Edit persona"))}" title="${escapeHtml(langText("编辑人物", "Edit persona"))}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15.2 4.8a2.6 2.6 0 0 1 3.7 3.7L9.3 18.1 5 19l.9-4.3 9.3-9.9Zm-8 10.7-.3 1.5 1.5-.3 8.8-9.3-1.2-1.2-8.8 9.3Z" fill="currentColor"></path></svg></button>` : ""}
               <button class="icon-button compact danger seat-delete" data-role-id="${role.id}" type="button" aria-label="${escapeHtml(langText("移出本轮", "Remove from this round"))}" title="${escapeHtml(langText("移出本轮", "Remove from this round"))}">
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -5549,7 +5408,30 @@ function getRoundtableEvidenceEntries() {
     sourceLabel: entry.sourceLabel || langText("网页搜索", "Web Search"),
   }));
 
-  return [...artifactEntries, ...sharedEvidenceEntries].sort((left, right) => (left.createdAt || 0) - (right.createdAt || 0));
+  const briefEntry = state.sharedResearchBrief ? [{
+    id: "shared-research-brief",
+    label: langText("置顶基准事实包", "Pinned Shared Brief"),
+    kind: langText("共享事实包", "Shared Brief"),
+    filterType: "brief",
+    summary: summarizeText(state.sharedResearchBrief, 120),
+    createdAt: 0,
+    detail: state.sharedResearchBrief,
+    imageUrl: "",
+    videoUrl: "",
+    analysis: "",
+    sourceUrl: "",
+    previewUrl: "",
+    meta: [langText("全程有效·每轮必遵", "Active all rounds")],
+    formatLabel: langText("事实包", "Brief"),
+    listKindLabel: langText("置顶共识", "Pinned"),
+    sourceLabel: langText("共享 Research Agent", "Shared Research Agent"),
+  }] : [];
+
+  return [...briefEntry, ...artifactEntries, ...sharedEvidenceEntries].sort((left, right) => {
+    if (left.id === "shared-research-brief") return -1;
+    if (right.id === "shared-research-brief") return 1;
+    return (left.createdAt || 0) - (right.createdAt || 0);
+  });
 }
 
 function filterRoundtableEvidenceEntries(entries) {
@@ -5633,13 +5515,13 @@ function renderRoundtableEvidenceWorkspace() {
       <div class="evidence-detail-title">${escapeHtml(activeEntry.label)}</div>
       <div class="evidence-detail-meta">${escapeHtml(buildEvidenceMetaLine(activeEntry) || langText("未记录时间与来源", "No time or source recorded"))}</div>
       <div class="evidence-detail-surface">
-        ${activeEntry.previewUrl ? `<iframe class="evidence-web-frame" src="${activeEntry.previewUrl}" loading="lazy" referrerpolicy="no-referrer" title="${escapeHtml(activeEntry.label)}"></iframe>` : ""}
+        ${activeEntry.sourceUrl ? `<a class="evidence-source-link" href="${escapeHtml(activeEntry.sourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(activeEntry.sourceUrl)}</a>` : ""}
         ${activeEntry.imageUrl ? `<img src="${activeEntry.imageUrl}" alt="${escapeHtml(activeEntry.label)}" />` : ""}
         ${activeEntry.videoUrl ? `<video class="evidence-detail-video" src="${activeEntry.videoUrl}" controls preload="metadata"></video>` : ""}
         ${analysisStatusBlock}
         ${activeEntry.analysis ? `<div class="evidence-detail-copy">${escapeHtml(activeEntry.analysis)}</div>` : ""}
         ${activeEntry.detail ? `<div class="evidence-detail-copy">${escapeHtml(activeEntry.detail)}</div>` : ""}
-        ${!activeEntry.previewUrl && !activeEntry.imageUrl && !activeEntry.videoUrl && !activeEntry.analysis && !activeEntry.detail ? `<div class="evidence-detail-copy">${escapeHtml(activeEntry.summary || langText("当前没有更多内容可展示。", "No additional content is available."))}</div>` : ""}
+        ${!activeEntry.sourceUrl && !activeEntry.imageUrl && !activeEntry.videoUrl && !activeEntry.analysis && !activeEntry.detail ? `<div class="evidence-detail-copy">${escapeHtml(activeEntry.summary || langText("当前没有更多内容可展示。", "No additional content is available."))}</div>` : ""}
       </div>
     </div>
   `;
@@ -6250,7 +6132,7 @@ async function requestRoleGenerationIntake(summary) {
     "你的任务是先把这件事从头到尾会牵涉的关键环节想清楚，再判断每个环节至少需要什么人来补位。",
     "不要按行业模板列人，不要直接输出最终人物卡。你现在只规划人物位。",
     "重点检查这些维度：现场执行者、第一接触者或使用者、专业判断者、证据或信息解释者、现实落地者、风险校正者、非常规但有价值的视角。",
-    "如果现实中有高辨识度人物、历史人物或著名虚构人物非常贴题，可以少量借用，但不能超过总人数四分之一，而且必须保留现代知识覆盖层。",
+    "先判断这个任务属于哪个核心领域（例如天文/宇宙科学、医学、工程、法律、商业、历史等），再根据该领域推荐对应的历史或当代名人。名人必须在该核心领域有直接建树，不允许因为方法论相似就跨领域借用——例如宇宙科学话题不能因为推理能力强就用侦探人物，探索类话题不能因为证据分析能力就用破案人物。名人/历史人物不能超过总人数一半，而且必须保留现代知识覆盖层。",
     getPeoplePoolRoleNamesText() ? `当前人物池里已有这些名字，后续实例化时禁止重复生成：${getPeoplePoolRoleNamesText()}` : "",
     `本轮目标人数：${targetCount}`,
     "严格输出 JSON 对象，不要解释，不要 Markdown。",
@@ -6431,10 +6313,72 @@ async function requestMultimodalModelText(profile, prompt, artifacts, maxTokens 
 }
 
 async function fetchDuckDuckGoSearchDigest(query) {
+  if (canUseLocalWebSearchProxy()) {
+    // 代理模式：抓取 DuckDuckGo HTML 网页搜索结果（比 Instant Answers API 返回真实网页）
+    const response = await fetch(buildLocalWebSearchProxyUrl("duck", query));
+    if (!response.ok) {
+      throw new Error(`DuckDuckGo 搜索失败：${response.status}`);
+    }
+    const html = await response.text();
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const items = [];
+
+    // 打印诊断：前500字符帮助识别是否为验证码/拦截页
+    const htmlSnippet = html.replace(/\s+/g, " ").slice(0, 500);
+    const isCaptcha = /captcha|unusual traffic|robot|blocked/i.test(html);
+    console.log("[duck-html-parse]", {
+      query,
+      rawLength: html.length,
+      isCaptcha,
+      htmlSnippet,
+    });
+
+    if (isCaptcha) {
+      throw new Error("DuckDuckGo 返回了人机验证页，无法解析（可能是 VPN 出口被限制）");
+    }
+
+    // 方案A: .result__a（标准 HTML 结果页）
+    doc.querySelectorAll(".result__a").forEach((anchor) => {
+      if (items.length >= 5) return;
+      const title = anchor.textContent.trim();
+      const url = anchor.getAttribute("href") || "";
+      const container = anchor.closest(".result") || anchor.parentElement?.parentElement?.parentElement;
+      const snippetEl = container?.querySelector(".result__snippet");
+      const snippet = snippetEl?.textContent?.trim() || "";
+      if (title && url && !url.includes("duckduckgo.com")) {
+        items.push({ title, snippet: snippet || title, url });
+      }
+    });
+
+    // 方案B: .links_main a（lite 版结果页）
+    if (!items.length) {
+      doc.querySelectorAll(".links_main a[href]").forEach((anchor) => {
+        if (items.length >= 5) return;
+        const href = anchor.getAttribute("href") || "";
+        if (!href.startsWith("http")) return;
+        const title = anchor.textContent.trim();
+        if (title.length > 5) items.push({ title, snippet: title, url: href });
+      });
+    }
+
+    // 方案C：所有 http 外链（最后兜底）
+    if (!items.length) {
+      doc.querySelectorAll("a[href^='http']").forEach((anchor) => {
+        if (items.length >= 4) return;
+        const href = anchor.getAttribute("href") || "";
+        if (href.includes("duckduckgo.com")) return;
+        const title = anchor.textContent.trim();
+        if (title.length > 10) items.push({ title, snippet: title, url: href });
+      });
+    }
+
+    console.log("[duck-html-parse:result]", { parsedCount: items.length, firstItem: items[0] || null });
+    return items;
+  }
+
+  // 非代理模式：依然用 Instant Answers JSON API
   const response = await fetch(
-    canUseLocalWebSearchProxy()
-      ? buildLocalWebSearchProxyUrl("duck", query)
-      : `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&no_html=1&skip_disambig=1`
+    `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&no_html=1&skip_disambig=1`
   );
   if (!response.ok) {
     throw new Error(`DuckDuckGo 搜索失败：${response.status}`);
@@ -6473,20 +6417,18 @@ async function fetchWikipediaSearchDigest(query) {
   const response = await fetch(
     canUseLocalWebSearchProxy()
       ? buildLocalWebSearchProxyUrl("wiki", query)
-      : `https://zh.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=3&namespace=0&format=json&origin=*`
+      : `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=3&format=json&origin=*`
   );
   if (!response.ok) {
     throw new Error(`Wikipedia 搜索失败：${response.status}`);
   }
   const payload = await response.json();
-  const titles = Array.isArray(payload?.[1]) ? payload[1] : [];
-  const descriptions = Array.isArray(payload?.[2]) ? payload[2] : [];
-  const urls = Array.isArray(payload?.[3]) ? payload[3] : [];
-  return titles.map((title, index) => ({
-    title,
-    snippet: descriptions[index] || title,
-    url: urls[index] || "",
-  })).filter((item) => item.snippet).slice(0, 3);
+  const searchResults = Array.isArray(payload?.query?.search) ? payload.query.search : [];
+  return searchResults.map((item) => ({
+    title: item.title || "",
+    snippet: (item.snippet || item.title || "").replace(/<[^>]+>/g, ""),
+    url: item.title ? `https://en.wikipedia.org/wiki/${encodeURIComponent(String(item.title).replace(/ /g, "_"))}` : "",
+  })).filter((item) => item.title).slice(0, 3);
 }
 
 async function fetchUrlDigest(url) {
@@ -6631,8 +6573,8 @@ async function runSpeakerWebSearch(speakerRole, summary, signal) {
     const queryPrompt = [
       `你是"${speakerRole.name}"（${speakerRole.seat}），你的立场是：${speakerRole.traits?.stance || speakerRole.description || ""}。`,
       `本次讨论话题：${summary}`,
-      "你准备搜索一条能支撑你这一轮发言的网页。请输出一个最有用的搜索关键词（5到15个字，中文或英文均可）。",
-      "只输出关键词本身，不要任何解释。",
+      "你准备搜索一条能支撑你这一轮发言的网页。请用英文输出一个最有用的搜索关键词（3到8个英文单词）。",
+      "只输出英文关键词本身，不要中文，不要任何解释。",
     ].join("\n");
     const rawQuery = await requestModelText(profile, queryPrompt, 40, signal, 10000).catch(() => "");
     const searchQuery = rawQuery.trim().split("\n")[0].trim().slice(0, 60) || summary.slice(0, 40);
@@ -6678,21 +6620,38 @@ async function runSpeakerWebSearch(speakerRole, summary, signal) {
 
     // 把搜索结果写入证据链，让用户在圆桌台里看到原始出处
     const createdAtBase = Date.now();
-    const newEntries = results.filter((item) => item.url).map((item, index) => ({
-      id: `speaker-web:${speakerRole.id}:${createdAtBase}:${index}`,
-      label: buildEvidenceLabelFromText(item.title || item.url, langText(`${speakerRole.name} · 搜索 ${index + 1}`, `${speakerRole.name} · Search ${index + 1}`)),
-      kind: langText("网页", "Web"),
-      filterType: "web",
-      summary: summarizeText(item.snippet || item.title || item.url, 82),
-      createdAt: createdAtBase + index,
-      detail: item.snippet || item.title || item.url || "",
-      imageUrl: "",
-      analysis: "",
-      sourceUrl: item.url || "",
-      previewUrl: item.url ? buildWebPreviewUrl(item.url) : "",
-      meta: [speakerRole.name],
-      formatLabel: "",
-      sourceLabel: langText(`${speakerRole.name} 引用`, `Cited by ${speakerRole.name}`),
+    const translateSnippet = async (text) => {
+      if (!state.autoTranslateEvidence) return text;
+      const profile = getPrimarySummaryProfile();
+      if (!profile) return text;
+      try {
+        const translated = await requestModelText(
+          profile,
+          `把下面这段英文翻译成简洁中文，直接输出翻译结果，不要加任何说明：\n${text}`,
+          120, null, 8000
+        );
+        return translated.trim() || text;
+      } catch { return text; }
+    };
+    const newEntries = await Promise.all(results.filter((item) => item.url).map(async (item, index) => {
+      const rawSnippet = item.snippet || item.title || item.url || "";
+      const displaySnippet = await translateSnippet(rawSnippet);
+      return {
+        id: `speaker-web:${speakerRole.id}:${createdAtBase}:${index}`,
+        label: buildEvidenceLabelFromText(item.title || item.url, langText(`${speakerRole.name} · 搜索 ${index + 1}`, `${speakerRole.name} · Search ${index + 1}`)),
+        kind: langText("网页", "Web"),
+        filterType: "web",
+        summary: summarizeText(displaySnippet, 82),
+        createdAt: createdAtBase + index,
+        detail: displaySnippet,
+        imageUrl: "",
+        analysis: "",
+        sourceUrl: item.url || "",
+        previewUrl: "",
+        meta: [speakerRole.name],
+        formatLabel: "",
+        sourceLabel: langText(`${speakerRole.name} 引用`, `Cited by ${speakerRole.name}`),
+      };
     }));
     if (newEntries.length) {
       state.sharedEvidenceEntries = [
@@ -6747,7 +6706,7 @@ async function runWebSearchAgent() {
       imageUrl: "",
       analysis: "",
       sourceUrl: item.url || "",
-      previewUrl: item.url ? buildWebPreviewUrl(item.url) : "",
+      previewUrl: "",
       meta: [],
       formatLabel: "",
       sourceLabel: langText("网页搜索", "Web Search"),
@@ -6911,8 +6870,34 @@ function getRecommendedRoleGenerationGuidance(summary) {
     ].join(" ");
   }
 
+  if (/(外星|外星人|地外文明|宇宙生命|宇宙|天文|星际|星系|天体|物理宇宙|暗物质|暗能量|黑洞|引力波|量子|粒子物理|相对论|宇宙学)/i.test(normalized)) {
+    return [
+      "这是天文/宇宙科学/物理议题。考虑引入 1-2 位真实科学名人（roleType=exemplar），如：卡尔·萨根（宇宙学与外星生命探索）、斯蒂芬·霍金（宇宙学与理论物理）、尼尔·泰森（天体物理科普）、弗兰克·德雷克（地外文明搜索方程）、恩里科·费米（费米悖论）、克里斯托弗·麦基（行星科学）等，选最贴题的 1-2 位。",
+      "其余位用专家原型补足：天体物理学家、射电天文学家、行星科学家、天体生物学家、SETI研究员、科学哲学家等缺位。",
+      "名人可以拥有现代视角和当代知识，不必受限于其历史时代。",
+      "注意：不要因为话题涉及'探寻''证据''推理'就引入侦探、法医、破案类人物，这类能力与该领域没有直接关联。",
+    ].join(" ");
+  }
+
+  // 生物/进化/自然科学/地球科学/生态/古生物等领域
+  if (/(进化|生物|生态|物种|基因|基因组|遗传|自然选择|达尔文|古生物|化石|地层|生命|演化|生物多样性|生物圈|微生物|病毒|细菌|真菌|植物|动物|海洋生物|神经科学|脑科学|认知科学|心理学)/i.test(normalized)) {
+    return [
+      "这是生物/进化/自然科学领域议题。考虑引入 2-3 位真实科学名人（roleType=exemplar），如：查尔斯·达尔文（进化论奠基）、斯蒂芬·古尔德（间断平衡论）、理查德·道金斯（自私基因/基因中心论）、恩斯特·迈尔（进化生物学系统分类）、罗莎琳德·富兰克林（DNA结构）、爱德华·威尔逊（社会生物学/生物多样性）、路易斯·利基（古人类学）、约翰·梅纳德·史密斯（进化博弈论）等——根据话题最贴题的选 2-3 位。",
+      "其余位用专家原型（roleType=expert）补足：现代分子生物学家、生态系统研究者、地质年代学家、基因组学家等当代缺位。",
+      "名人可以拥有现代视角和当代知识，不必受限于其历史时代。",
+    ].join(" ");
+  }
+
+  // 历史/哲学/社会科学/政治等领域
+  if (/(历史|哲学|政治|经济|社会|文明|文化|思想|国际关系|地缘|民主|专制|权力|战争|外交|法律|制度|革命|殖民)/i.test(normalized)) {
+    return [
+      "这是历史/哲学/社会科学领域议题。考虑引入 2-3 位在该核心问题上有直接建树的思想家或历史人物（roleType=exemplar），并从思想史、现代学术、现实政策三个层次各补 1-2 位专家原型。",
+      "名人必须在该话题的核心领域有直接建树，不允许跨领域借用（例如：讨论地缘政治不能用文学作家）。名人可以拥有现代视角和当代知识，不必受限于其历史时代。",
+    ].join(" ");
+  }
+
   return [
-    "考虑引入 1-2 位与话题最直接相关的真实历史或当代名人（roleType=exemplar）；如果该领域没有特别贴题的名人，可以全部用专家原型（roleType=expert），不要为了凑名人而引入不相关的人。",
+    "先判断这个话题属于哪个核心领域，再主动推荐 1-3 位在该领域有直接建树的历史或当代名人（roleType=exemplar）——整桌应有接近一半是真实名人，不要默认全用专家原型。只有在该领域确实找不到贴题名人时，才全用专家原型。名人必须在该核心领域有直接建树，不能因为方法论相似就跨领域借用。",
     "名人可以拥有现代视角和当代知识，不必受限于其历史时代。",
     "其余位用原型专家补足：让整桌覆盖思想者、实务者、组织者和一线执行者，不要出现 3 个本质相同的抽象专家。",
   ].join(" ");
@@ -7105,7 +7090,7 @@ async function requestGeneratedRecommendedRoles(summary, planningBrief = "") {
     "只要 roleType=expert，就不要用真实姓名或普通人名，统一改用职业或职责称呼，例如公安痕迹鉴定专家、犯罪现场调查专家、电池安全研究员、结构工艺工程师。",
     "不要输出王工、张教授、李总、陈雪梅、周文渊这种名字式称呼，也不要输出“风险边界者”“资源配置者”“长期主义判断者”这类抽象标签。",
     "如果现实里有非常贴题的知名人物、行业代表人物、历史人物、小说人物或影视角色，可以少量混入，但不是必须。",
-    `真实人物或高辨识度代表人物最多只能占四分之一，按 ${targetCount} 人计算最多 ${Math.max(1, Math.floor(targetCount * MAX_EXEMPLAR_ROLE_RATIO))} 个。`,
+    `真实人物或高辨识度代表人物最多只能占一半，按 ${targetCount} 人计算最多 ${Math.max(1, Math.floor(targetCount * MAX_EXEMPLAR_ROLE_RATIO))} 个。名人必须在该话题的核心领域有直接建树，不允许因为方法论相似就跨领域借用（例如：探讨宇宙/外星生命不能用侦探人物，探讨设计不能用历史政治家）。`,
     "不要把人物写成空泛职业堆砌，也不要用一个名字换几种说法来重复同类专家。",
     "对于贴近产品、设计、制造、市场这类任务，要优先想到真实会影响结果的人，而不是先想到抽象学者。",
     "如果任务涉及材料、电池、化学、制造、工艺、结构等领域，可以自然混入少量现实中有名的人物或代表性专家，但整桌仍要以能真正讨论问题的人为主。",
@@ -7179,7 +7164,7 @@ async function requestSingleRecommendedRole(summary, planningBrief, existingRole
     const exemplarQuotaFull = existingExemplarCount >= maxExemplars;
     const exemplarHint = exemplarQuotaFull
       ? `整桌名人（roleType=exemplar）已达到上限 ${maxExemplars} 位，本位请只生成专家原型（roleType=expert）。`
-      : `整桌名人（roleType=exemplar）上限为 ${maxExemplars} 位（不超过总人数一半），当前已有 ${existingExemplarCount} 位。如果该领域有非常贴题的历史或当代名人，本位可以考虑用名人；否则用专家原型（roleType=expert）。名人可以拥有现代视角和当代知识，不必受限于其历史时代。`;
+      : `整桌名人（roleType=exemplar）上限为 ${maxExemplars} 位（不超过总人数一半），当前已有 ${existingExemplarCount} 位。本位优先判断：该话题领域有没有非常贴题的历史或当代名人？有的话就用名人（roleType=exemplar）；如果该领域真的没有高辨识度代表人物，再考虑用专家原型（roleType=expert）。名人可以拥有现代视角和当代知识，不必受限于其历史时代。`;
     const prompt = [
       "你现在不是一次生成整桌，而是只为这次圆桌补出下一个最缺的人物。",
       `当前总目标人数：${targetCount}。当前正在生成第 ${slotIndex + 1} 个。`,
@@ -7201,7 +7186,7 @@ async function requestSingleRecommendedRole(summary, planningBrief, existingRole
     ].filter(Boolean).join("\n\n");
 
     try {
-      const raw = await requestModelText(profile, prompt, 900, null, ROLE_IDENTITY_TIMEOUT_MS);
+      const raw = await requestModelText(profile, prompt, 1400, null, ROLE_IDENTITY_TIMEOUT_MS);
       const jsonText = extractJsonObject(raw);
       if (!jsonText) {
         throw new Error("单个人物生成没有返回可解析的 JSON 对象。");
@@ -7265,7 +7250,7 @@ async function requestEmergencyRecommendedRoles(summary, planningBrief = "") {
     "你现在要紧急生成一组临时角色，用于这次圆桌讨论。",
     "上一次严格生成失败了，所以这一次只要把人选配准，保持简单直接。",
     "只选对任务真的有帮助的人，不要凑抽象标签，不要塞无关人物。",
-    `总数仍然不少于 ${targetCount} 个，行业佼佼者人物最多只能占四分之一。`,
+    `总数仍然不少于 ${targetCount} 个，行业佼佼者人物最多只能占一半。名人必须在该话题核心领域有直接建树，不允许跨领域借用。`,
     "name 和 seat 都必须是用户一眼能看懂的人话名称，不要写成抽象岗位标签。职业名尽量写成材料科学家、材料工程师、电池安全研究员这类更具体的称呼，不要只写王工、张教授、李总。",
     "如果现实里有非常贴题的知名人物或代表专家，也可以少量直接用人名，但不是必须。",
     getPeoplePoolRoleNamesText() ? `当前人物池里已经有这些人物，禁止再生成同名人物：${getPeoplePoolRoleNamesText()}。` : "",
@@ -7994,6 +7979,11 @@ async function saveRole(role) {
     await clearDeletedBaseRole(role.id);
   }
   await dbPut(ROLE_STORE, role);
+  // 如果是推荐角色，也同步更新 state.recommendedRoles（它不存在于 ROLE_STORE 的 hydrateState 路径）
+  if (role.source === "recommended" || state.recommendedRoles.some((r) => r.id === role.id)) {
+    state.recommendedRoles = state.recommendedRoles.map((r) => (r.id === role.id ? { ...r, ...role } : r));
+    await syncCurrentTopicSnapshot();
+  }
   await hydrateState();
   renderPeopleSummary();
   renderPeopleLibrary();
@@ -8915,6 +8905,13 @@ function bindEvents() {
     renderRoundtableEvidenceWorkspace();
   });
 
+  document.getElementById("evidence-translate-toggle")?.addEventListener("click", (e) => {
+    state.autoTranslateEvidence = !state.autoTranslateEvidence;
+    e.currentTarget.textContent = `自动翻译 ${state.autoTranslateEvidence ? "✔" : "✘"}`;
+    e.currentTarget.style.color = state.autoTranslateEvidence ? "var(--cool)" : "var(--text-dim)";
+    e.currentTarget.style.borderColor = state.autoTranslateEvidence ? "rgba(100,180,255,0.3)" : "rgba(255,255,255,0.15)";
+  });
+
   closePeopleLibrary.addEventListener("click", () => {
     if (!roleEditor.classList.contains("hidden")) {
       closeRoleEditorWithReturn();
@@ -9100,11 +9097,6 @@ function bindEvents() {
   });
 
   seatStack.addEventListener("click", (event) => {
-    const previewButton = event.target.closest(".seat-voice-preview");
-    if (previewButton) {
-      playVoiceSampleForRole(getRoleById(previewButton.dataset.roleId));
-      return;
-    }
     const editButton = event.target.closest(".seat-edit");
     if (editButton) {
       const role = getRoleById(editButton.dataset.roleId);
@@ -9118,9 +9110,6 @@ function bindEvents() {
     const button = event.target.closest(".seat-delete");
     if (!button) {
       return;
-    }
-    if (activeVoiceSampleRoleId === button.dataset.roleId) {
-      stopVoiceSamplePlayback({ rerender: false });
     }
     state.selectedIds.delete(button.dataset.roleId);
     delete state.seatAssignments[button.dataset.roleId];
@@ -9348,6 +9337,33 @@ function bindEvents() {
   });
 
   discussionStream.addEventListener("click", (event) => {
+    // 每条讨论消息的朗读控制按钮
+    const msgItem = event.target.closest(".chat-item[data-has-voice]");
+    if (msgItem) {
+      if (event.target.closest(".chat-msg-playpause")) {
+        const msgItem = event.target.closest("[data-has-voice]");
+        if (!msgItem) return;
+        if (activeReadAloudElement === msgItem && activeReadAloudUtterance) {
+          if (readAloudPaused) {
+            window.speechSynthesis.resume();
+            readAloudPaused = false;
+            msgItem.classList.remove("chat-item-voice-paused");
+            msgItem.classList.add("chat-item-reading");
+          } else {
+            window.speechSynthesis.pause();
+            readAloudPaused = true;
+            msgItem.classList.remove("chat-item-reading");
+            msgItem.classList.add("chat-item-voice-paused");
+          }
+          updateMsgVoiceBtnState();
+        } else {
+          playFromElement(msgItem);
+        }
+      }
+      if (event.target.closest(".chat-msg-stop")) {
+        stopReadAloudPlayback();
+      }
+    }
     if (event.target.closest(".js-confirm-topic")) {
       if (hasReusableCurrentRoster()) {
         setSpeakerCard(langText("沿用当前人物", "Reusing Current Roster"), langText("同一话题不再重配", "No regeneration for the same topic"), langText("当前话题的人物已经确定，系统将沿用这批人物继续讨论，不会重新推荐。", "The roster for this topic is already set. The system will reuse it and will not regenerate personas."), "系");
