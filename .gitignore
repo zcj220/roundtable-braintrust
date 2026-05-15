@@ -3,5 +3,7 @@ test-results/
 desktop-exe/
 dist/
 build/
+__pycache__/
+*.pyc
 *.exe
 *.zip
