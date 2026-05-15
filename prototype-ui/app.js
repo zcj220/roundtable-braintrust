@@ -4175,7 +4175,7 @@ async function runSingleDiscussionRound({
       rolePromptBlock(speakerRole),
       `篇幅要求：${isLead ? budget.charHint : "控制在 280 到 520 字内。"}`,
       "绝对不要输出 thinking process、analyze user input、自检步骤、constraint list 或任何内部推理过程。",
-      "要求：直接输出本轮发言正文，不要自我介绍，不要使用 Markdown 标题和列表，也不要使用统一小标题、固定口头禅或把模式约束原样复述出来。",
+      "要求：直接输出本轮发言正文，不要自我介绍，不要使用 Markdown 标题和列表，也不要使用统一小标题、固定口头禅或把模式约束原样复述出来。每个自然段之间用一个换行符分隔，不要把全部内容连成一整段。",
     ].filter(Boolean).join("\n\n");
 
     setSpeakerCardForRole(speakerRole, langText(`第 ${round} 轮 · 正在思考`, `Round ${round} · Thinking`), langText("正在读取任务和前面已发言内容，并准备按顺序接续。", "Reading the task and previous turns, then preparing to continue in order."));
@@ -4256,7 +4256,7 @@ async function generateStageConclusion({ targetRounds, judgeRole, judgeProfile, 
     rolePromptBlock(judgeRole),
     `篇幅要求：${budget.charHint}`,
     "绝对不要输出 thinking process、英文分析草稿、自检步骤、constraint list 或任何内部推理过程。",
-    "要求：直接输出最终裁判发言正文，至少写 4 段，开头必须是清晰的最终判断，结尾必须是具体建议。",
+    "要求：直接输出最终裁判发言正文，至少写 4 段，开头必须是清晰的最终判断，结尾必须是具体建议。每段之间用换行分隔，不要连成一整段。",
   ].join("\n\n");
   setSpeakerCardForRole(judgeRole, langText(`第 ${targetRounds} 轮后 · 正在思考`, `After Round ${targetRounds} · Thinking`), langText("正在综合全部轮次，判断哪些说法更有依据，哪些地方仍然不能下结论。", "Reviewing all rounds to judge which claims are best supported and which points still remain unresolved."));
   updateLiveStatus(langText(`最终总结前：${judgeRole.name} 正在思考`, `Before the final summary: ${judgeRole.name} is thinking`), "pending");
@@ -4383,7 +4383,7 @@ async function runDiscussionFlow() {
       "请先说明今天讨论的主题、基本规则和切入方式，再邀请各位嘉宾按自己的身份先抛出最值得优先展开的问题、证据或解释方向。",
       "不要在开场里预先给每位嘉宾分配固定子题，也不要提前规定谁只能讲哪个角度，更不要用“首先、其次、最后”把整场讨论定死。你只负责打开讨论场，让桌上的人自己往外长。",
       "绝对不要输出 thinking process、英文分析草稿、自检步骤、constraint list 或任何内部推理过程。",
-      "篇幅控制在 180 到 320 字，不要写成提纲。",
+      "篇幅控制在 180 到 320 字，不要写成提纲，每个自然段之间用换行分隔。",
     ].join("\n\n");
     setSpeakerCardForRole(moderatorRole, langText("开场前 · 正在思考", "Before Opening · Thinking"), langText("正在整理今天这场讨论的主题、顺序和焦点。", "Organizing the topic, order, and focal tensions for today's discussion."));
     updateLiveStatus(langText(`开场：${moderatorRole.name} 正在思考`, `Opening: ${moderatorRole.name} is thinking`), "pending");
