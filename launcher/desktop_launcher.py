@@ -2,17 +2,22 @@ import socket
 import sys
 import tempfile
 import threading
+import time
 import traceback
+import urllib.error
+import urllib.parse
+import urllib.request
 import webbrowser
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from tkinter import BOTH, LEFT, RIGHT, Button, Frame, Label, Tk
 
 
-APP_TITLE = "Roundtable Braintrust"
 APP_URL_PATH = "/prototype-ui/index.html"
+HEARTBEAT_TIMEOUT_SECONDS = 90
+HEARTBEAT_CHECK_INTERVAL_SECONDS = 5
 LOG_PATH = Path(tempfile.gettempdir()) / "roundtable-braintrust-launcher.log"
+PROXY_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
 
 def append_log(message: str) -> None:
@@ -38,12 +43,78 @@ def find_free_port(preferred: int = 4175) -> int:
             return int(sock.getsockname()[1])
 
 
-class QuietHandler(SimpleHTTPRequestHandler):
-    def __init__(self, *args, directory: str, **kwargs):
+def get_proxy_target_uri(path: str) -> str | None:
+    parsed = urllib.parse.urlparse(path)
+    query = urllib.parse.parse_qs(parsed.query)
+    kind = (query.get("kind") or [""])[0]
+
+    if kind == "duck":
+        text = (query.get("q") or [""])[0].strip()
+        if not text:
+            return None
+        return f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(text)}&kl=us-en"
+
+    if kind == "wiki":
+        text = (query.get("q") or [""])[0].strip()
+        if not text:
+            return None
+        return (
+            "https://en.wikipedia.org/w/api.php?action=query&list=search"
+            f"&srsearch={urllib.parse.quote(text)}&srlimit=3&format=json&origin=*"
+        )
+
+    if kind == "url":
+        target_url = (query.get("url") or [""])[0].strip()
+        if not target_url or not target_url.startswith(("http://", "https://")):
+            return None
+        normalized = target_url.removeprefix("https://").removeprefix("http://")
+        return f"https://r.jina.ai/http/{normalized}"
+
+    return None
+
+
+def invoke_proxy_request(target_uri: str) -> tuple[int, str, bytes]:
+    request = urllib.request.Request(target_uri, headers={"User-Agent": PROXY_USER_AGENT}, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=25) as response:
+            return int(response.status), response.headers.get("Content-Type", "application/octet-stream"), response.read()
+    except urllib.error.HTTPError as error:
+        return int(error.code), error.headers.get("Content-Type", "application/octet-stream"), error.read()
+
+
+class LauncherRequestHandler(SimpleHTTPRequestHandler):
+    def __init__(self, *args, directory: str, launcher, **kwargs):
+        self.launcher = launcher
         super().__init__(*args, directory=directory, **kwargs)
 
     def log_message(self, format: str, *args) -> None:
         return
+
+    def do_POST(self) -> None:
+        if self.path.startswith("/__roundtable_heartbeat"):
+            self.launcher.touch_heartbeat()
+            self.send_response(204)
+            self.end_headers()
+            return
+        self.send_error(404, "Not Found")
+
+    def do_GET(self) -> None:
+        if self.path.startswith("/__roundtable_proxy"):
+            target_uri = get_proxy_target_uri(self.path)
+            if not target_uri:
+                self.send_error(400, "Bad Request")
+                return
+            try:
+                status_code, content_type, payload = invoke_proxy_request(target_uri)
+                self.send_response(status_code)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+            except Exception as error:
+                self.send_error(502, str(error))
+            return
+        super().do_GET()
 
 
 class DesktopLauncher:
@@ -51,80 +122,57 @@ class DesktopLauncher:
         self.root_dir = get_bundle_root()
         self.port = find_free_port()
         self.url = f"http://127.0.0.1:{self.port}{APP_URL_PATH}"
-        self.server = None
-        self.server_thread = None
-        self.window = Tk()
-        self.window.title(APP_TITLE)
-        self.window.geometry("460x180")
-        self.window.resizable(False, False)
-        self.window.protocol("WM_DELETE_WINDOW", self.stop)
+        self.server: ThreadingHTTPServer | None = None
+        self.monitor_thread: threading.Thread | None = None
+        self.stop_event = threading.Event()
+        self.last_heartbeat = time.monotonic()
 
-        self.status_label = Label(
-            self.window,
-            text="正在启动本地服务...",
-            justify=LEFT,
-            anchor="w",
-            padx=20,
-            pady=18,
-        )
-        self.status_label.pack(fill=BOTH)
-
-        self.tip_label = Label(
-            self.window,
-            text="这个窗口关闭后，圆桌智囊团也会一起退出。",
-            justify=LEFT,
-            anchor="w",
-            padx=20,
-        )
-        self.tip_label.pack(fill=BOTH)
-
-        button_bar = Frame(self.window, padx=20, pady=18)
-        button_bar.pack(fill=BOTH)
-
-        self.open_button = Button(button_bar, text="打开圆桌智囊团", command=self.open_browser, width=18)
-        self.open_button.pack(side=LEFT)
-
-        self.exit_button = Button(button_bar, text="退出", command=self.stop, width=10)
-        self.exit_button.pack(side=RIGHT)
+    def touch_heartbeat(self) -> None:
+        self.last_heartbeat = time.monotonic()
 
     def start(self) -> None:
         append_log(f"launch root={self.root_dir} url={self.url} frozen={getattr(sys, 'frozen', False)}")
         if not self.root_dir.exists():
-            self.status_label.config(text=f"未找到静态资源目录：{self.root_dir}")
             append_log(f"missing root_dir={self.root_dir}")
-            return
+            raise FileNotFoundError(f"未找到静态资源目录：{self.root_dir}")
 
-        try:
-            self.server = ThreadingHTTPServer(
-                ("127.0.0.1", self.port),
-                partial(QuietHandler, directory=str(self.root_dir)),
-            )
-            self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-            self.server_thread.start()
-            append_log(f"server started port={self.port}")
-        except Exception as error:
-            self.status_label.config(text=f"启动失败：{error}\n日志：{LOG_PATH}")
-            append_log("server start failed")
-            append_log(traceback.format_exc())
-            self.window.mainloop()
-            return
-
-        self.status_label.config(text=f"服务已启动\n地址：{self.url}\n资源目录：{self.root_dir}")
-        self.window.after(800, self.open_browser)
-        self.window.mainloop()
-
-    def open_browser(self) -> None:
+        self.server = ThreadingHTTPServer(
+            ("127.0.0.1", self.port),
+            partial(LauncherRequestHandler, directory=str(self.root_dir), launcher=self),
+        )
+        self.monitor_thread = threading.Thread(target=self.monitor_heartbeat, daemon=True)
+        self.monitor_thread.start()
+        append_log(f"server started port={self.port}")
         webbrowser.open(self.url, new=1)
+        self.server.serve_forever(poll_interval=0.5)
+
+    def monitor_heartbeat(self) -> None:
+        while not self.stop_event.is_set():
+            time.sleep(HEARTBEAT_CHECK_INTERVAL_SECONDS)
+            idle_seconds = time.monotonic() - self.last_heartbeat
+            if idle_seconds >= HEARTBEAT_TIMEOUT_SECONDS:
+                append_log(f"heartbeat timeout after {idle_seconds:.1f}s, stopping server")
+                self.stop()
+                return
 
     def stop(self) -> None:
+        if self.stop_event.is_set():
+            return
+        self.stop_event.set()
         try:
             if self.server is not None:
                 self.server.shutdown()
                 self.server.server_close()
                 append_log("server stopped")
-        finally:
-            self.window.destroy()
+        except Exception:
+            append_log(traceback.format_exc())
 
 
 if __name__ == "__main__":
-    DesktopLauncher().start()
+    launcher = DesktopLauncher()
+    try:
+        launcher.start()
+    except Exception:
+        append_log("launcher failed")
+        append_log(traceback.format_exc())
+        raise

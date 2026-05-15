@@ -3,11 +3,11 @@ const DB_VERSION = 1;
 const ROLE_STORE = "peopleRoles";
 const PROFILE_STORE = "modelProfiles";
 const APP_STATE_STORE = "appState";
-const MODEL_REQUEST_TIMEOUT_MS = 70000;
-const ROLE_PLANNING_TIMEOUT_MS = 35000;
+const MODEL_REQUEST_TIMEOUT_MS = 90000;
+const ROLE_PLANNING_TIMEOUT_MS = 45000;
 const ROLE_GENERATION_TIMEOUT_MS = 120000;
 const ROLE_EMERGENCY_TIMEOUT_MS = 120000;
-const ROLE_IDENTITY_TIMEOUT_MS = 90000;
+const ROLE_IDENTITY_TIMEOUT_MS = 120000;
 const MODEL_TEST_TIMEOUT_MS = 18000;
 const MIN_RECOMMENDED_ROLE_COUNT = 8;
 const MAX_EXEMPLAR_ROLE_RATIO = 0.5;
@@ -1114,6 +1114,8 @@ const followToggle = document.getElementById("follow-toggle");
 const appLanguageToggle = document.getElementById("app-language-toggle");
 const currentTopicLabel = document.getElementById("current-topic-label");
 const discussionStream = document.getElementById("discussion-stream");
+const chatShell = document.querySelector(".chat-shell");
+const composerShell = document.querySelector(".composer-shell");
 const attachFilesButton = document.getElementById("attach-files");
 const attachmentInput = document.getElementById("attachment-input");
 const composerAttachments = document.getElementById("composer-attachments");
@@ -1161,6 +1163,7 @@ let readAloudQueue = [];
 let activeReadAloudUtterance = null;
 let activeReadAloudElement = null;
 let readAloudPaused = false;
+let launcherHeartbeatTimer = null;
 
 function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -1667,6 +1670,23 @@ function formatCurrentTopicTitle(title = "") {
 function updateCurrentTopicTitle(title = "目前还没有任务") {
   currentTopicTitle.textContent = formatCurrentTopicTitle(title);
   currentTopicTitle.title = title || "目前还没有任务";
+}
+
+function sendLauncherHeartbeat() {
+  fetch("/__roundtable_heartbeat", {
+    method: "POST",
+    keepalive: true,
+  }).catch(() => {});
+}
+
+function startLauncherHeartbeat() {
+  if (launcherHeartbeatTimer) {
+    window.clearInterval(launcherHeartbeatTimer);
+  }
+  sendLauncherHeartbeat();
+  launcherHeartbeatTimer = window.setInterval(() => {
+    sendLauncherHeartbeat();
+  }, 15000);
 }
 
 function getRoundLabel() {
@@ -2836,11 +2856,28 @@ function scrollToLatest() {
   setAutoFollow(true);
 }
 
+function updateComposerViewportPlacement() {
+  if (!chatShell || !composerShell) {
+    return;
+  }
+
+  composerShell.style.setProperty("--composer-offset", "0px");
+
+  const composerHeight = Math.ceil(composerShell.getBoundingClientRect().height);
+  chatShell.style.setProperty("--composer-reserve", `${Math.max(composerHeight + 12, 96)}px`);
+
+  const viewportHeight = window.visualViewport?.height || window.innerHeight;
+  const composerBottom = composerShell.getBoundingClientRect().bottom;
+  const overflow = Math.max(0, Math.ceil(composerBottom - viewportHeight + 8));
+  composerShell.style.setProperty("--composer-offset", `${overflow}px`);
+}
+
 function autoResizeTextarea() {
   userInput.style.height = "auto";
   const nextHeight = Math.min(userInput.scrollHeight, 140);
   userInput.style.height = `${nextHeight}px`;
   userInput.style.overflowY = userInput.scrollHeight > 140 ? "auto" : "hidden";
+  updateComposerViewportPlacement();
 }
 
 function normalizeRequestText(content) {
@@ -3617,7 +3654,7 @@ function focusReadAloudMessage(element) {
   requestAnimationFrame(() => {
     if (!activeReadAloudElement) return;
     const container = discussionStream;
-    const targetTop = Math.max(0, activeReadAloudElement.offsetTop - 140);
+    const targetTop = Math.max(0, activeReadAloudElement.offsetTop - 50);
     const delta = Math.abs(container.scrollTop - targetTop);
     if (delta > 10) {
       container.scrollTo({ top: targetTop, behavior: "smooth" });
@@ -7145,7 +7182,7 @@ function buildSingleRoleGenerationProgress(slotIndex, targetCount, generatedCoun
   );
 }
 
-async function requestSingleRecommendedRole(summary, planningBrief, existingRoles, slotIndex, targetCount) {
+async function requestSingleRecommendedRole(summary, planningBrief, existingRoles, slotIndex, targetCount, additionalBlockedNames = new Set()) {
   const profile = getPrimarySummaryProfile();
   if (!profile) {
     throw new Error("还没有可用模型，无法生成系统临时角色。");
@@ -7154,21 +7191,32 @@ async function requestSingleRecommendedRole(summary, planningBrief, existingRole
   const existingNames = new Set([
     ...getPeoplePoolRoleNamesText(200).split("、").map((item) => sanitizeGeneratedRoleName(item)).filter(Boolean),
     ...existingRoles.map((role) => sanitizeGeneratedRoleName(role?.name || "")).filter(Boolean),
+    ...[...additionalBlockedNames],
   ]);
 
   let lastError = new Error("单个人物生成失败：未知错误。");
+  let lastDuplicateName = "";
   for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const retryNote = attempt === 1 ? "" : "上一次返回的人物重复、过空或不可解析。这一次请只返回一个新的、可直接上桌的人物 JSON 对象。";
+    const retryNote = attempt === 1
+      ? ""
+      : lastDuplicateName
+        ? `上一次生成的"${lastDuplicateName}"与人物库已有人物同名，这次必须换一个完全不同的人物，不得再生成"${lastDuplicateName}"。`
+        : "上一次返回的人物重复、过空或不可解析。这一次请只返回一个新的、可直接上桌的人物 JSON 对象。";
     const existingExemplarCount = existingRoles.filter((r) => r.roleType === "exemplar").length;
     const maxExemplars = Math.floor(targetCount / 2);
     const exemplarQuotaFull = existingExemplarCount >= maxExemplars;
     const exemplarHint = exemplarQuotaFull
       ? `整桌名人（roleType=exemplar）已达到上限 ${maxExemplars} 位，本位请只生成专家原型（roleType=expert）。`
       : `整桌名人（roleType=exemplar）上限为 ${maxExemplars} 位（不超过总人数一半），当前已有 ${existingExemplarCount} 位。本位优先判断：该话题领域有没有非常贴题的历史或当代名人？有的话就用名人（roleType=exemplar）；如果该领域真的没有高辨识度代表人物，再考虑用专家原型（roleType=expert）。名人可以拥有现代视角和当代知识，不必受限于其历史时代。`;
+    const guidanceText = getRecommendedRoleGenerationGuidance(summary);
+    const guidanceBlockedNames = [...existingNames].filter((n) => n.length > 1 && guidanceText.includes(n));
+    const guidanceWithOverride = guidanceBlockedNames.length > 0
+      ? `${guidanceText}\n【以上指引中的以下名人已在人物库，绝对不能再生成：${guidanceBlockedNames.join("、")}，请改选其他候选名人或换用专家原型。】`
+      : guidanceText;
     const prompt = [
       "你现在不是一次生成整桌，而是只为这次圆桌补出下一个最缺的人物。",
       `当前总目标人数：${targetCount}。当前正在生成第 ${slotIndex + 1} 个。`,
-      getRecommendedRoleGenerationGuidance(summary),
+      guidanceWithOverride,
       exemplarHint,
       existingRoles.length
         ? `桌上已经有这些人物，不要重复，也不要再换一种说法生成同类：\n${existingRoles.map((role, index) => `${index + 1}. ${role.name}｜${role.seat}｜${role.description}`).join("\n")}`
@@ -7198,6 +7246,7 @@ async function requestSingleRecommendedRole(summary, planningBrief, existingRole
         throw new Error("单个人物生成返回了空名称。");
       }
       if (existingNames.has(normalizedName)) {
+        lastDuplicateName = role.name;
         throw new Error(`生成人物与已有人物重名：${role.name}`);
       }
       return upgradeRecommendedRolePrompt({ ...role, promptEnrichmentPending: true });
@@ -7216,16 +7265,24 @@ async function requestGeneratedRecommendedRolesSequential(summary, planningBrief
   const targetCount = getRequestedRecommendedRoleCount(summary);
   const roles = [];
   const failures = [];
+  const rejectedPoolNames = new Set();
 
   callbacks.onStage?.("identity-start", { targetCount, generatedCount: 0, roles: [] });
   for (let slotIndex = 0; slotIndex < targetCount; slotIndex += 1) {
     callbacks.onStage?.("identity-progress", { slotIndex, targetCount, generatedCount: roles.length, roles: [...roles] });
     try {
-      const nextRole = await requestSingleRecommendedRole(summary, planningBrief, roles, slotIndex, targetCount);
+      const nextRole = await requestSingleRecommendedRole(summary, planningBrief, roles, slotIndex, targetCount, rejectedPoolNames);
       roles.push(nextRole);
       callbacks.onRoleGenerated?.([...roles], { slotIndex, targetCount, role: nextRole });
     } catch (error) {
       const failure = error instanceof Error ? error : new Error(String(error));
+      const dupMatch = failure.message.match(/生成人物与已有人物重名：(.+)/);
+      if (dupMatch) {
+        const rejectedName = sanitizeGeneratedRoleName(dupMatch[1].trim());
+        if (rejectedName) {
+          rejectedPoolNames.add(rejectedName);
+        }
+      }
       failures.push({ slotIndex, error: failure.message });
       callbacks.onRoleFailed?.(failure, { slotIndex, targetCount, generatedCount: roles.length, roles: [...roles] });
     }
@@ -9245,6 +9302,7 @@ function bindEvents() {
     attachmentInput.value = "";
     renderAttachmentStrip();
     renderMemoryAgentWorkspace();
+    updateComposerViewportPlacement();
   });
 
   composerAttachments.addEventListener("click", (event) => {
@@ -9253,7 +9311,11 @@ function bindEvents() {
       return;
     }
     removePendingAttachment(Number(chip.dataset.attachmentIndex));
+    updateComposerViewportPlacement();
   });
+
+  window.addEventListener("resize", updateComposerViewportPlacement);
+  window.visualViewport?.addEventListener("resize", updateComposerViewportPlacement);
 
   userInput.addEventListener("input", autoResizeTextarea);
   sharedAgentQueryInput?.addEventListener("input", () => {
@@ -9687,7 +9749,9 @@ async function init() {
     seedConversation();
   }
   autoResizeTextarea();
+  updateComposerViewportPlacement();
   bindEvents();
+  startLauncherHeartbeat();
 }
 
 init().catch((error) => {
