@@ -746,6 +746,10 @@ button {
   gap: 14px;
 }
 
+.discussion-stream.voice-reading-active {
+  padding-bottom: 65vh;
+}
+
 .no-task-hint {
   color: var(--text-muted, #888);
   font-size: 0.85rem;
@@ -897,8 +901,13 @@ button {
 }
 
 .chat-bubble p {
-  margin: 0;
+  margin: 0 0 0.75em 0;
   line-height: 1.82;
+  text-indent: 2em;
+}
+
+.chat-bubble p:last-child {
+  margin-bottom: 0;
 }
 
 .chat-attachments {

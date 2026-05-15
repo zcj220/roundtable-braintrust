@@ -3622,7 +3622,7 @@ function playFromElement(startElement) {
     return;
   }
   for (const el of allItems.slice(startIdx)) {
-    const body = el.querySelector(".chat-bubble p")?.textContent?.trim() || "";
+    const body = [...el.querySelectorAll(".chat-bubble p")].map((p) => p.textContent.trim()).filter(Boolean).join("\n") || "";
     if (!body) {
       continue;
     }
@@ -3642,12 +3642,14 @@ function focusReadAloudMessage(element) {
   }
   if (!element) {
     activeReadAloudElement = null;
+    discussionStream.classList.remove("voice-reading-active");
     setSpeakerCardSpeaking(false);
     updateMsgVoiceBtnState();
     return;
   }
   activeReadAloudElement = element;
   activeReadAloudElement.classList.add("chat-item-reading");
+  discussionStream.classList.add("voice-reading-active");
   readAloudPaused = false;
   setSpeakerCardSpeaking(true);
   updateMsgVoiceBtnState();
@@ -3655,10 +3657,7 @@ function focusReadAloudMessage(element) {
     if (!activeReadAloudElement) return;
     const container = discussionStream;
     const targetTop = Math.max(0, activeReadAloudElement.offsetTop - 50);
-    const delta = Math.abs(container.scrollTop - targetTop);
-    if (delta > 10) {
-      container.scrollTo({ top: targetTop, behavior: "smooth" });
-    }
+    container.scrollTo({ top: targetTop, behavior: "smooth" });
   });
 }
 
@@ -3849,7 +3848,7 @@ function maybeReadAppendedMessage(element) {
   if (!state.voiceReadEnabled || !element || element.classList.contains("user")) {
     return;
   }
-  const body = element.querySelector(".chat-bubble p")?.textContent?.trim() || "";
+  const body = [...element.querySelectorAll(".chat-bubble p")].map((p) => p.textContent.trim()).filter(Boolean).join("\n") || "";
   if (!body) {
     return;
   }
@@ -4711,6 +4710,24 @@ function joinUrl(baseUrl, endpointPath) {
   return `${normalizedBase}${normalizedPath}`;
 }
 
+function formatBodyToHtml(text) {
+  if (!text) return "<p></p>";
+  // 优先按空行分段；若没有空行则按单个换行分段
+  const raw = String(text);
+  const byBlankLine = raw.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  if (byBlankLine.length > 1) {
+    return byBlankLine.map((para) => {
+      const lines = para.split("\n").map((l) => escapeHtml(l)).join("<br>");
+      return `<p>${lines}</p>`;
+    }).join("");
+  }
+  const bySingleLine = raw.split("\n").map((p) => p.trim()).filter(Boolean);
+  if (bySingleLine.length > 1) {
+    return bySingleLine.map((line) => `<p>${escapeHtml(line)}</p>`).join("");
+  }
+  return `<p>${escapeHtml(raw.trim())}</p>`;
+}
+
 function createMessageMarkup({ speakerId, label, sublabel = "", badgeLabel = "", body, avatarLabel, avatarClass = "avatar-system", avatarStyleText = "", tone = "system", actions = "", attachments = [], showVoiceControls = false }) {
   const attachmentMarkup = attachments.length
     ? `<div class="chat-attachments">${attachments
@@ -4741,7 +4758,7 @@ function createMessageMarkup({ speakerId, label, sublabel = "", badgeLabel = "",
           ${voiceControlsMarkup}
         </div>
         <div class="chat-bubble">
-          <p>${escapeHtml(body)}</p>
+          ${formatBodyToHtml(body)}
           ${attachmentMarkup}
           ${actions}
         </div>
