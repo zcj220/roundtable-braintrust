@@ -9,9 +9,9 @@ $specPath = Join-Path $root 'build\pyinstaller-spec'
 $source = Join-Path $root 'launcher\desktop_launcher.py'
 $distIndex = Join-Path $root 'dist\prototype-ui\index.html'
 
-if (-not (Test-Path $distIndex)) {
-  throw 'Missing dist\prototype-ui\index.html. Run scripts\package-static.ps1 first.'
-}
+# 先同步 prototype-ui/ → dist/，保证打包内容是最新的
+Write-Host 'Syncing prototype-ui → dist ...'
+& "$PSScriptRoot\package-static.ps1"
 
 foreach ($path in @($exeDist, $pyiDist, $workPath, $specPath)) {
   if (Test-Path $path) {
