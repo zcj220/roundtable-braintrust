@@ -2850,6 +2850,11 @@ body.theme-light .compact-composer {
     width: 100%;
   }
 
+  .center-stage {
+    height: calc(100dvh - 32px);
+    max-height: calc(100dvh - 32px);
+  }
+
   .sidebar-left,
   .sidebar-right {
     order: 2;
