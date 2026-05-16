@@ -625,6 +625,19 @@ button {
   margin-left: auto;
 }
 
+.seat-ai-row {
+  align-items: center;
+}
+
+.seat-ai-row .seat-voice-toggle {
+  margin-left: auto;
+}
+
+.seat-library-row,
+.seat-control-row {
+  flex-wrap: nowrap;
+}
+
 .seat-inline-toggle {
   display: inline-flex;
   align-items: center;
@@ -1949,6 +1962,12 @@ body.theme-light .seat-assignment-static {
 body.theme-light .round-input,
 body.theme-light .seat-assignment-static {
   background: rgba(255, 252, 247, 0.92);
+}
+
+body.theme-light .settings-form select,
+body.theme-light .role-editor select,
+body.theme-light .settings-inline-field select {
+  color-scheme: light;
 }
 
 body.theme-light .roundtable-filter-field select option,

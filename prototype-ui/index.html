@@ -115,6 +115,14 @@
               <option value="强调落地">强调落地</option>
               <option value="强调风险">强调风险</option>
               <option value="澄清表达">澄清表达</option>
+              <option value="强调约束">强调约束</option>
+              <option value="强调安全">强调安全</option>
+              <option value="追求准确">追求准确</option>
+              <option value="追求严密">追求严密</option>
+              <option value="强调边界">强调边界</option>
+              <option value="强调执行">强调执行</option>
+              <option value="强调取舍">强调取舍</option>
+              <option value="保持中立主持">保持中立主持</option>
               <option value="自定义">自定义</option>
             </select>
           </label>
@@ -152,6 +160,11 @@
               <option value="强硬">强硬</option>
               <option value="灵活">灵活</option>
               <option value="温柔">温柔</option>
+              <option value="直接">直接</option>
+              <option value="严谨">严谨</option>
+              <option value="果断">果断</option>
+              <option value="务实">务实</option>
+              <option value="清晰">清晰</option>
               <option value="自定义">自定义</option>
             </select>
           </label>
@@ -555,19 +568,21 @@
             <h2 id="seat-config-title">配置席位</h2>
             <span class="tiny-badge" id="seat-config-progress">0/6</span>
           </div>
-          <div class="inline-actions">
-            <button class="action-primary compact-primary" id="start-discussion" type="button">开始讨论</button>
-            <button class="action-secondary compact-primary" id="stop-discussion" type="button" disabled>结束讨论</button>
-            <button class="ghost-link add-seat-trigger" id="open-seat-picker" type="button">席位</button>
-          </div>
-          <div class="inline-actions seat-secondary-actions">
+          <div class="inline-actions seat-ai-row">
             <button class="seat-inline-toggle" id="toggle-ai-role-recommendation" type="button" aria-pressed="true"></button>
-            <button class="ghost-link" id="regenerate-personas" type="button" style="display:none">重新生成</button>
             <button class="seat-voice-toggle" id="toggle-voice-read" type="button" aria-pressed="false" aria-label="切换朗读">
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="M5 9h4l5-4v14l-5-4H5V9Zm11.2-1.8a1 1 0 0 1 1.4 0A7.9 7.9 0 0 1 20 12a7.9 7.9 0 0 1-2.4 4.8 1 1 0 1 1-1.4-1.4A5.9 5.9 0 0 0 18 12a5.9 5.9 0 0 0-1.8-3.4 1 1 0 0 1 0-1.4Zm-2.8 2.8a1 1 0 0 1 1.4 0A4 4 0 0 1 16 12a4 4 0 0 1-1.2 2.8 1 1 0 0 1-1.4-1.4A2 2 0 0 0 14 12a2 2 0 0 0-.6-1.4 1 1 0 0 1 0-1.4Z" fill="currentColor"></path>
               </svg>
             </button>
+          </div>
+          <div class="inline-actions seat-library-row">
+            <button class="ghost-link add-seat-trigger" id="open-seat-picker" type="button">席位</button>
+            <button class="ghost-link" id="regenerate-personas" type="button" style="display:none">重新生成</button>
+          </div>
+          <div class="inline-actions seat-control-row">
+            <button class="action-primary compact-primary" id="start-discussion" type="button">开始讨论</button>
+            <button class="action-secondary compact-primary" id="stop-discussion" type="button" disabled>结束讨论</button>
           </div>
           <p class="seat-feedback seat-feedback-hidden" id="seat-feedback" aria-hidden="true">人物尚未生成</p>
           <div class="seat-stack" id="seat-stack"></div>

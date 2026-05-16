@@ -75,7 +75,12 @@ function normalizeRoleGender(value) {
 }
 
 function normalizeRoleAge(value) {
-  return String(value || "").trim().replace(/\s+/g, "");
+  const s = String(value || "").trim();
+  if (!s) return "";
+  // Chinese age strings: collapse all spaces (e.g. "45 岁" → "45岁")
+  if (/[\u4e00-\u9fff]/.test(s)) return s.replace(/\s+/g, "");
+  // English age strings: normalize to single space
+  return s.replace(/\s+/g, " ");
 }
 
 function extractNumericAge(value) {
@@ -762,9 +767,9 @@ function buildRoleTraitsMarkup(role, options = {}) {
   const traitPairs = [
     [langText("性别", "Gender"), getRoleGenderLabel(role)],
     [langText("年龄", "Age"), normalizeRoleAge(role?.age) || inferRoleAge(role)],
-    [langText("立场", "Stance"), role.traits?.stance],
-    [langText("专长", "Method"), role.traits?.method],
-    [langText("性格", "Temper"), role.traits?.temper],
+    [langText("立场", "Stance"), translateTraitValue(role.traits?.stance)],
+    [langText("专长", "Method"), translateTraitValue(role.traits?.method)],
+    [langText("性格", "Temper"), translateTraitValue(role.traits?.temper)],
   ].filter(([, value]) => value);
 
   return traitPairs
@@ -1789,6 +1794,72 @@ function translateRoleSourceLabel(label, source = "") {
   return labelMap[value] || value;
 }
 
+function translateTraitValue(value) {
+  if (!value) return value;
+  if (state.appLanguage !== "en") return value;
+  const map = {
+    // Stance
+    "\u652f\u6301\u539f\u547d\u9898": "Support the claim",
+    "\u5f3a\u529b\u53cd\u9a73": "Strong rebuttal",
+    "\u4e2d\u7acb\u88c1\u51b3": "Neutral judgment",
+    "\u8865\u5145\u80cc\u666f": "Add context",
+    "\u5f3a\u8c03\u843d\u5730": "Stress execution",
+    "\u5f3a\u8c03\u98ce\u9669": "Stress risk",
+    "\u6f84\u6e05\u8868\u8fbe": "Clarify expression",
+    "\u5f3a\u8c03\u7ea6\u675f": "Stress constraints",
+    "\u5f3a\u8c03\u5b89\u5168": "Stress safety",
+    "\u8ffd\u6c42\u51c6\u786e": "Seek accuracy",
+    "\u8ffd\u6c42\u4e25\u5bc6": "Seek rigor",
+    "\u5f3a\u8c03\u8fb9\u754c": "Stress boundaries",
+    "\u5f3a\u8c03\u6267\u884c": "Stress execution",
+    "\u5f3a\u8c03\u53d6\u820d": "Stress trade-offs",
+    "\u4fdd\u6301\u4e2d\u7acb\u4e3b\u6301": "Neutral facilitation",
+    // Method
+    "\u7f16\u7801\u5b9e\u73b0": "Coding",
+    "\u7ed3\u6784\u8bc4\u4f30": "Structural assessment",
+    "\u7cfb\u7edf\u6392\u969c": "System troubleshooting",
+    "\u6210\u672c\u6838\u7b97": "Cost accounting",
+    "\u4e34\u5e8a\u5224\u65ad": "Clinical judgment",
+    "\u53f2\u6599\u6821\u5bf9": "Historical verification",
+    "\u673a\u7406\u63a8\u5bfc": "Mechanism deduction",
+    "\u903b\u8f91\u63a8\u5bfc": "Logical deduction",
+    "\u53cd\u5e94\u5206\u6790": "Reaction analysis",
+    "\u89c4\u5219\u62c6\u89e3": "Rule breakdown",
+    "\u8bc1\u636e\u6838\u9a8c": "Evidence verification",
+    "\u6267\u884c\u62c6\u89e3": "Execution breakdown",
+    "\u9700\u6c42\u89c4\u5212": "Requirements planning",
+    "\u77e5\u8bc6\u8bb2\u89e3": "Knowledge explanation",
+    "\u603b\u7ed3\u538b\u7f29": "Summary compression",
+    "\u9488\u5bf9\u6027\u5206\u6790": "Targeted analysis",
+    // Temper
+    "\u7a33\u5065": "Steady",
+    "\u6e29\u539a": "Warm",
+    "\u5c16\u9510": "Sharp",
+    "\u514b\u5236": "Restrained",
+    "\u5ba1\u614e": "Cautious",
+    "\u575a\u51b3": "Firm",
+    "\u51b7\u9759": "Calm",
+    "\u8c28\u614e": "Prudent",
+    "\u5e73\u8861": "Balanced",
+    "\u4fdd\u5b88": "Conservative",
+    "\u8010\u5fc3": "Patient",
+    "\u7ec6\u817b": "Nuanced",
+    "\u9ad8\u538b": "High-pressure",
+    "\u5f3a\u786c": "Hardline",
+    "\u7075\u6d3b": "Flexible",
+    "\u6e29\u67d4": "Gentle",
+    "\u76f4\u63a5": "Direct",
+    "\u4e25\u8c28": "Meticulous",
+    "\u679c\u65ad": "Decisive",
+    "\u52a1\u5b9e": "Pragmatic",
+    "\u6e05\u6670": "Clear",
+    "\u81ea\u5b9a\u4e49": "Custom",
+  };
+  if (map[value]) return map[value];
+  // Fallback: try English name translation for unknown trait values
+  return buildEnglishRoleNameFallback(value) || value;
+}
+
 function buildEnglishRoleNameFallback(value) {
   const raw = String(value || "").trim();
   if (!raw) {
@@ -1817,17 +1888,35 @@ function buildEnglishRoleNameFallback(value) {
     ["专家", "Expert"],
     ["策划", "Planner"],
     ["古代", "Ancient"],
-    ["考古", "Archaeo"],
+    ["考古", "Archaeology"],
     ["天文", "Astronomy"],
     ["文明", "Civilization"],
+    ["比较", "Comparative"],
+    ["认知", "Cognitive"],
+    ["材料", "Materials"],
+    ["物理", "Physics"],
+    ["化学", "Chemistry"],
+    ["历史", "History"],
+    ["法律", "Legal"],
+    ["医疗", "Medical"],
+    ["运营", "Operations"],
+    ["系统", "Systems"],
+    ["科学", "Science"],
+    ["工程", "Engineering"],
+    ["教育", "Education"],
+    ["数学", "Mathematics"],
   ];
   const localized = replacements.reduce((text, [needle, replacement]) => text.replaceAll(needle, ` ${replacement} `), raw)
+    .replace(/[\u4e00-\u9fff]+/g, " ")  // strip remaining Chinese chars instead of failing
     .replace(/\s+/g, " ")
     .trim();
-  return /[\u4e00-\u9fff]/u.test(localized) ? "" : localized;
+  return /[A-Za-z]/.test(localized) ? localized : "";
 }
 
 function roleAvatar(role) {
+  if (state.appLanguage === "en" && role?.nameEn) {
+    return deriveRoleAvatar(role.nameEn, role.avatar);
+  }
   return deriveRoleAvatar(role.name, role.avatar);
 }
 
@@ -3715,6 +3804,14 @@ function applyLanguageToStaticUi() {
     "强调落地": state.appLanguage === "en" ? "Stress execution" : "强调落地",
     "强调风险": state.appLanguage === "en" ? "Stress risk" : "强调风险",
     "澄清表达": state.appLanguage === "en" ? "Clarify expression" : "澄清表达",
+    "强调约束": state.appLanguage === "en" ? "Stress constraints" : "强调约束",
+    "强调安全": state.appLanguage === "en" ? "Stress safety" : "强调安全",
+    "追求准确": state.appLanguage === "en" ? "Seek accuracy" : "追求准确",
+    "追求严密": state.appLanguage === "en" ? "Seek rigor" : "追求严密",
+    "强调边界": state.appLanguage === "en" ? "Stress boundaries" : "强调边界",
+    "强调执行": state.appLanguage === "en" ? "Stress execution" : "强调执行",
+    "强调取舍": state.appLanguage === "en" ? "Stress trade-offs" : "强调取舍",
+    "保持中立主持": state.appLanguage === "en" ? "Neutral facilitation" : "保持中立主持",
     "自定义": state.appLanguage === "en" ? "Custom" : "自定义",
   });
   localizeSelectOptions(roleEditorTemper, {
@@ -3734,6 +3831,11 @@ function applyLanguageToStaticUi() {
     "强硬": state.appLanguage === "en" ? "Hardline" : "强硬",
     "灵活": state.appLanguage === "en" ? "Flexible" : "灵活",
     "温柔": state.appLanguage === "en" ? "Gentle" : "温柔",
+    "直接": state.appLanguage === "en" ? "Direct" : "直接",
+    "严谨": state.appLanguage === "en" ? "Meticulous" : "严谨",
+    "果断": state.appLanguage === "en" ? "Decisive" : "果断",
+    "务实": state.appLanguage === "en" ? "Pragmatic" : "务实",
+    "清晰": state.appLanguage === "en" ? "Clear" : "清晰",
     "自定义": state.appLanguage === "en" ? "Custom" : "自定义",
   });
 }
