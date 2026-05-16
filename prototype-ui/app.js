@@ -1936,7 +1936,7 @@ function escapeHtml(value) {
 }
 
 function setSpeakerCard(title, role, description, avatar = "系", avatarInlineStyle = "") {
-  speakerAvatar.textContent = avatar;
+  speakerAvatar.textContent = avatar === "系" ? langText("系", "S") : avatar === "我" ? langText("我", "I") : avatar;
   if (avatarInlineStyle) {
     speakerAvatar.setAttribute("style", avatarInlineStyle);
   } else {
@@ -3517,6 +3517,9 @@ function getExpandedTaskSummaryLabels() {
 }
 
 function applyLanguageToStaticUi() {
+  if (speakerAvatar && /^[\u7cfbS]$/.test((speakerAvatar.textContent || "").trim())) {
+    speakerAvatar.textContent = langText("\u7cfb", "S");
+  }
   if (currentTopicLabel) {
     currentTopicLabel.textContent = t("currentTopicLabel");
   }
@@ -9214,10 +9217,10 @@ function appendUserMessage(content, attachments = []) {
   appendMarkup(
     createMessageMarkup({
       speakerId: "user",
-      label: "我",
+      label: langText("我", "I"),
       sublabel: langText("刚发送", "Just Sent"),
       body: content,
-      avatarLabel: "我",
+      avatarLabel: langText("我", "I"),
       avatarClass: "avatar-user",
       tone: "user",
       attachments,
