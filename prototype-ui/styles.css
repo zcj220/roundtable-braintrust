@@ -68,6 +68,10 @@ body {
   font-family: "Microsoft YaHei UI", "Noto Sans SC", "PingFang SC", sans-serif;
 }
 
+body.app-initializing {
+  visibility: hidden;
+}
+
 body.theme-light {
   background:
     radial-gradient(circle at top center, rgba(216, 139, 68, 0.1), transparent 26%),
