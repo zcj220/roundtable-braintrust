@@ -1969,14 +1969,14 @@ function updateLiveStatus(message, tone = "") {
 function formatCurrentTopicTitle(title = "") {
   const chars = Array.from(String(title || "").trim());
   if (!chars.length) {
-    return "目前还没有任务";
+    return langText("目前还没有任务", "No task yet");
   }
   return chars.length > 14 ? `${chars.slice(0, 14).join("")}...` : chars.join("");
 }
 
-function updateCurrentTopicTitle(title = "目前还没有任务") {
+function updateCurrentTopicTitle(title = "") {
   currentTopicTitle.textContent = formatCurrentTopicTitle(title);
-  currentTopicTitle.title = title || "目前还没有任务";
+  currentTopicTitle.title = title || langText("目前还没有任务", "No task yet");
 }
 
 function sendLauncherHeartbeat() {
@@ -3083,14 +3083,15 @@ async function deleteTopic(topicId) {
   }
 
   const confirmed = await openConfirmDialog({
-    title: "删除任务",
-    message: `删除任务“${topic.title}”？这会同时移除这条任务里的讨论记录和导出结果。`,
-    confirmText: "删除",
+    title: langText("删除任务", "Delete Task"),
+    message: langText(`删除任务“${topic.title}”？这会同时移除这条任务里的讨论记录和导出结果。`, `Delete task “${topic.title}”? This will also remove the discussion history and exported results.`),
+    confirmText: langText("删除", "Delete"),
   });
   if (!confirmed) {
     return;
   }
 
+  state.discussionAbortController?.abort();
   await deleteProjectArtifacts(topicId);
   state.topics = state.topics.filter((item) => item.id !== topicId);
 
@@ -5233,7 +5234,8 @@ function formatBodyToHtml(text) {
   return `<p>${escapeHtml(raw.trim())}</p>`;
 }
 
-function createMessageMarkup({ speakerId, label, sublabel = "", badgeLabel = "", body, avatarLabel, avatarClass = "avatar-system", avatarStyleText = "", tone = "system", actions = "", attachments = [], showVoiceControls = false }) {
+function createMessageMarkup({ speakerId, label, sublabel = "", badgeLabel = "", body, avatarLabel: rawAvatarLabel, avatarClass = "avatar-system", avatarStyleText = "", tone = "system", actions = "", attachments = [], showVoiceControls = false }) {
+  const avatarLabel = rawAvatarLabel === "系" ? langText("系", "S") : rawAvatarLabel;
   const attachmentMarkup = attachments.length
     ? `<div class="chat-attachments">${attachments
         .map((file) => `<span class="attachment-pill">${escapeHtml(file.name)} · ${Math.max(1, Math.round((file.size || 0) / 1024))} KB</span>`)
