@@ -1988,6 +1988,13 @@ body.theme-light .settings-inline-field select {
   color-scheme: light;
 }
 
+body.theme-light .settings-form select option,
+body.theme-light .role-editor select option,
+body.theme-light .settings-inline-field select option {
+  background: #fbf6ef;
+  color: #2f2418;
+}
+
 body.theme-light .roundtable-filter-field select option,
 body.theme-light select.round-input option,
 body.theme-light .seat-assignment-select option,

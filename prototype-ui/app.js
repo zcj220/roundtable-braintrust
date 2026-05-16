@@ -57,6 +57,32 @@ const HOST_VOICE_ROLE = {
   traitsEn: { stance: "Neutral facilitation", method: "Summary compression", temper: "Clear" },
 };
 
+const BUILTIN_PROFILE_DISPLAY_NAMES = {
+  "profile-openai-official": { zh: "OpenAI 官方", en: "OpenAI Official" },
+  "profile-openrouter": { zh: "OpenRouter", en: "OpenRouter" },
+  "profile-siliconflow": { zh: "硅基流动", en: "SiliconFlow" },
+  "profile-deepseek": { zh: "DeepSeek 官方", en: "DeepSeek Official" },
+  "profile-zhipu": { zh: "智谱 AI", en: "Zhipu AI" },
+  "profile-bailian": { zh: "阿里百炼", en: "Alibaba Bailian" },
+  "profile-claude": { zh: "Claude 官方", en: "Claude Official" },
+  "profile-volcengine": { zh: "火山方舟", en: "Volcengine Ark" },
+  "profile-google-ai-studio": { zh: "Google AI Studio", en: "Google AI Studio" },
+  "profile-moonshot": { zh: "Moonshot AI", en: "Moonshot AI" },
+  "profile-minimax": { zh: "MiniMax", en: "MiniMax" },
+  "profile-together": { zh: "Together AI", en: "Together AI" },
+};
+
+function getLocalizedProfileDisplayName(profile) {
+  if (!profile) {
+    return "";
+  }
+  const builtinLabel = BUILTIN_PROFILE_DISPLAY_NAMES[profile.id];
+  if (builtinLabel) {
+    return langText(builtinLabel.zh, builtinLabel.en);
+  }
+  return profile.displayName || "";
+}
+
 function getStableStringHash(value) {
   return Array.from(String(value || "")).reduce((total, char) => ((total << 5) - total + char.charCodeAt(0)) | 0, 0);
 }
@@ -2359,9 +2385,8 @@ function closeConfirmDialog(confirmed) {
 function getReportExportActionsMarkup() {
   return `
     <div class="message-actions">
-      <button class="ghost-link js-export-txt" type="button">导出 TXT</button>
-      <button class="ghost-link js-export-docx" type="button">导出 DOCX</button>
-      <button class="ghost-link js-export-pdf" type="button">导出 PDF</button>
+      <button class="ghost-link js-export-txt" type="button">${escapeHtml(langText("导出 TXT", "Export TXT"))}</button>
+      <button class="ghost-link js-export-docx" type="button">${escapeHtml(langText("导出 DOCX", "Export DOCX"))}</button>
     </div>
   `;
 }
@@ -6396,13 +6421,13 @@ function renderModelMappings() {
     state.mappings.multimodal = "";
   }
   hostModelSelect.innerHTML = configuredProfiles
-    .map((profile) => `<option value="${profile.id}" ${profile.id === state.mappings.main ? "selected" : ""}>${escapeHtml(profile.displayName)} · ${escapeHtml(formatProfileLatency(profile))}</option>`)
+    .map((profile) => `<option value="${profile.id}" ${profile.id === state.mappings.main ? "selected" : ""}>${escapeHtml(getLocalizedProfileDisplayName(profile))} · ${escapeHtml(formatProfileLatency(profile))}</option>`)
     .join("");
   if (multimodalModelSelect) {
     if (visionProfiles.length) {
       multimodalModelSelect.innerHTML = [
         `<option value="">${escapeHtml(t("multimodalModelFollowHost"))}</option>`,
-        ...visionProfiles.map((profile) => `<option value="${profile.id}" ${profile.id === state.mappings.multimodal ? "selected" : ""}>${escapeHtml(profile.displayName)} · ${escapeHtml(formatVisionCapabilityLabel(profile))}</option>`),
+        ...visionProfiles.map((profile) => `<option value="${profile.id}" ${profile.id === state.mappings.multimodal ? "selected" : ""}>${escapeHtml(getLocalizedProfileDisplayName(profile))} · ${escapeHtml(formatVisionCapabilityLabel(profile))}</option>`),
       ].join("");
       multimodalModelSelect.disabled = state.discussionRunning;
     } else {
@@ -6451,7 +6476,7 @@ function renderConnectedModelList() {
 
 function renderProviderTemplateSelect() {
   const builtinOptions = getSelectableBuiltinProfiles()
-    .map((profile) => `<option value="${profile.id}">${escapeHtml(profile.displayName)}</option>`);
+    .map((profile) => `<option value="${profile.id}">${escapeHtml(getLocalizedProfileDisplayName(profile))}</option>`);
   providerTemplateSelect.innerHTML = [`<option value="">${escapeHtml(t("providerTemplatePlaceholder"))}</option>`, ...builtinOptions, `<option value="custom-new">${escapeHtml(t("providerTemplateCreate"))}</option>`].join("");
   providerTemplateSelect.value = modelProfileTemplateId || "";
   updateProfileTemplateHint(defaultProfileMap.get(providerTemplateSelect.value) || null);
@@ -10470,15 +10495,11 @@ function bindEvents() {
       return;
     }
     if (event.target.closest(".js-export-txt") || event.target.closest(".js-download-report")) {
-      downloadTextFile(`${buildExportBaseName()}-完整讨论.txt`, buildFullExportText());
+      downloadTextFile(`${buildExportBaseName()}-${langText("完整讨论", "full-discussion")}.txt`, buildFullExportText());
       return;
     }
     if (event.target.closest(".js-export-docx")) {
-      downloadDocxFile(`${buildExportBaseName()}-完整讨论.docx`, buildFullExportHtml());
-      return;
-    }
-    if (event.target.closest(".js-export-pdf")) {
-      exportPdfDocument(`${buildExportBaseName()}-完整讨论`, buildFullExportHtml());
+      downloadDocxFile(`${buildExportBaseName()}-${langText("完整讨论", "full-discussion")}.docx`, buildFullExportHtml());
       return;
     }
     if (event.target.closest(".js-supplement-topic")) {
