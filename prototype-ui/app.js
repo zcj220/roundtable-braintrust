@@ -7310,66 +7310,70 @@ async function requestMultimodalModelText(profile, prompt, artifacts, maxTokens 
 
 async function fetchDuckDuckGoSearchDigest(query) {
   if (canUseLocalWebSearchProxy()) {
-    // 代理模式：抓取 DuckDuckGo HTML 网页搜索结果（比 Instant Answers API 返回真实网页）
-    const response = await fetch(buildLocalWebSearchProxyUrl("duck", query));
-    if (!response.ok) {
-      throw new Error(`DuckDuckGo 搜索失败：${response.status}`);
-    }
-    const html = await response.text();
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    const items = [];
-
-    // 打印诊断：前500字符帮助识别是否为验证码/拦截页
-    const htmlSnippet = html.replace(/\s+/g, " ").slice(0, 500);
-    const isCaptcha = /captcha|unusual traffic|robot|blocked/i.test(html);
-    console.log("[duck-html-parse]", {
-      query,
-      rawLength: html.length,
-      isCaptcha,
-      htmlSnippet,
-    });
-
-    if (isCaptcha) {
-      throw new Error("DuckDuckGo 返回了人机验证页，无法解析（可能是 VPN 出口被限制）");
-    }
-
-    // 方案A: .result__a（标准 HTML 结果页）
-    doc.querySelectorAll(".result__a").forEach((anchor) => {
-      if (items.length >= 5) return;
-      const title = anchor.textContent.trim();
-      const url = anchor.getAttribute("href") || "";
-      const container = anchor.closest(".result") || anchor.parentElement?.parentElement?.parentElement;
-      const snippetEl = container?.querySelector(".result__snippet");
-      const snippet = snippetEl?.textContent?.trim() || "";
-      if (title && url && !url.includes("duckduckgo.com")) {
-        items.push({ title, snippet: snippet || title, url });
+    try {
+      // 代理模式：抓取 DuckDuckGo HTML 网页搜索结果（比 Instant Answers API 返回真实网页）
+      const response = await fetch(buildLocalWebSearchProxyUrl("duck", query));
+      if (!response.ok) {
+        throw new Error(`DuckDuckGo 搜索失败：${response.status}`);
       }
-    });
+      const html = await response.text();
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      const items = [];
 
-    // 方案B: .links_main a（lite 版结果页）
-    if (!items.length) {
-      doc.querySelectorAll(".links_main a[href]").forEach((anchor) => {
+      // 打印诊断：前500字符帮助识别是否为验证码/拦截页
+      const htmlSnippet = html.replace(/\s+/g, " ").slice(0, 500);
+      const isCaptcha = /captcha|unusual traffic|robot|blocked/i.test(html);
+      console.log("[duck-html-parse]", {
+        query,
+        rawLength: html.length,
+        isCaptcha,
+        htmlSnippet,
+      });
+
+      if (isCaptcha) {
+        throw new Error("DuckDuckGo 返回了人机验证页，无法解析（可能是 VPN 出口被限制）");
+      }
+
+      // 方案A: .result__a（标准 HTML 结果页）
+      doc.querySelectorAll(".result__a").forEach((anchor) => {
         if (items.length >= 5) return;
-        const href = anchor.getAttribute("href") || "";
-        if (!href.startsWith("http")) return;
         const title = anchor.textContent.trim();
-        if (title.length > 5) items.push({ title, snippet: title, url: href });
+        const url = anchor.getAttribute("href") || "";
+        const container = anchor.closest(".result") || anchor.parentElement?.parentElement?.parentElement;
+        const snippetEl = container?.querySelector(".result__snippet");
+        const snippet = snippetEl?.textContent?.trim() || "";
+        if (title && url && !url.includes("duckduckgo.com")) {
+          items.push({ title, snippet: snippet || title, url });
+        }
       });
-    }
 
-    // 方案C：所有 http 外链（最后兜底）
-    if (!items.length) {
-      doc.querySelectorAll("a[href^='http']").forEach((anchor) => {
-        if (items.length >= 4) return;
-        const href = anchor.getAttribute("href") || "";
-        if (href.includes("duckduckgo.com")) return;
-        const title = anchor.textContent.trim();
-        if (title.length > 10) items.push({ title, snippet: title, url: href });
-      });
-    }
+      // 方案B: .links_main a（lite 版结果页）
+      if (!items.length) {
+        doc.querySelectorAll(".links_main a[href]").forEach((anchor) => {
+          if (items.length >= 5) return;
+          const href = anchor.getAttribute("href") || "";
+          if (!href.startsWith("http")) return;
+          const title = anchor.textContent.trim();
+          if (title.length > 5) items.push({ title, snippet: title, url: href });
+        });
+      }
 
-    console.log("[duck-html-parse:result]", { parsedCount: items.length, firstItem: items[0] || null });
-    return items;
+      // 方案C：所有 http 外链（最后兜底）
+      if (!items.length) {
+        doc.querySelectorAll("a[href^='http']").forEach((anchor) => {
+          if (items.length >= 4) return;
+          const href = anchor.getAttribute("href") || "";
+          if (href.includes("duckduckgo.com")) return;
+          const title = anchor.textContent.trim();
+          if (title.length > 10) items.push({ title, snippet: title, url: href });
+        });
+      }
+
+      console.log("[duck-html-parse:result]", { parsedCount: items.length, firstItem: items[0] || null });
+      return items;
+    } catch (error) {
+      console.warn("local duck proxy unavailable, falling back to public API", error);
+    }
   }
 
   // 非代理模式：依然用 Instant Answers JSON API
@@ -7410,11 +7414,20 @@ async function fetchDuckDuckGoSearchDigest(query) {
 }
 
 async function fetchWikipediaSearchDigest(query) {
-  const response = await fetch(
-    canUseLocalWebSearchProxy()
-      ? buildLocalWebSearchProxyUrl("wiki", query)
-      : `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=3&format=json&origin=*`
-  );
+  let response;
+  if (canUseLocalWebSearchProxy()) {
+    try {
+      response = await fetch(buildLocalWebSearchProxyUrl("wiki", query));
+      if (!response.ok) {
+        throw new Error(`Wikipedia 搜索失败：${response.status}`);
+      }
+    } catch (error) {
+      console.warn("local wikipedia proxy unavailable, falling back to public API", error);
+    }
+  }
+  if (!response) {
+    response = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=3&format=json&origin=*`);
+  }
   if (!response.ok) {
     throw new Error(`Wikipedia 搜索失败：${response.status}`);
   }
@@ -7432,9 +7445,24 @@ async function fetchUrlDigest(url) {
   if (!normalized) {
     return null;
   }
-  const mirrorUrl = canUseLocalWebSearchProxy()
-    ? buildLocalWebSearchProxyUrl("url", normalized)
-    : `https://r.jina.ai/http/${normalized.replace(/^https?:\/\//i, "")}`;
+  let mirrorUrl = `https://r.jina.ai/http/${normalized.replace(/^https?:\/\//i, "")}`;
+  if (canUseLocalWebSearchProxy()) {
+    const proxyUrl = buildLocalWebSearchProxyUrl("url", normalized);
+    try {
+      const proxyResponse = await fetch(proxyUrl);
+      if (!proxyResponse.ok) {
+        throw new Error(`网页抓取失败：${normalized}`);
+      }
+      const text = await proxyResponse.text();
+      return {
+        title: normalized,
+        snippet: summarizeText(text, 500),
+        url: normalized,
+      };
+    } catch (error) {
+      console.warn("local url proxy unavailable, falling back to jina mirror", error);
+    }
+  }
   const response = await fetch(mirrorUrl);
   if (!response.ok) {
     throw new Error(`网页抓取失败：${normalized}`);
