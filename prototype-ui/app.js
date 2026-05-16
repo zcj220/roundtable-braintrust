@@ -1308,6 +1308,8 @@ const state = {
   sharedAgentQuery: "",
   sharedAgentSources: "",
   sharedAgentStatus: { text: "", tone: "" },
+  knowledgeScope: "global",
+  projectUsesGlobalKnowledge: true,
 };
 
 let pendingConfirmResolver = null;
@@ -3833,7 +3835,9 @@ function applyLanguageToStaticUi() {
     evidenceTranslateToggle.title = langText("开启后，搜索结果采用 AI 自动翻译为中文", "When enabled, search results are automatically translated for the current language.");
   }
   if (knowledgeGlobalToggle) {
-    knowledgeGlobalToggle.textContent = langText("本项目调用全局知识库 ✔", "Use Global KB in This Project ✔");
+    knowledgeGlobalToggle.textContent = state.projectUsesGlobalKnowledge
+      ? langText("本项目调用全局知识库 ✔", "Use Global KB in This Project ✔")
+      : langText("本项目不调用全局知识库 ✘", "Do Not Use Global KB in This Project ✘");
   }
   if (knowledgeNoteStrip) {
     knowledgeNoteStrip.textContent = langText("第一版支持 TXT、Markdown、JSON、CSV、PDF、DOCX、XLSX、XLS；旧版 DOC 建议先转为 DOCX。", "This first version supports TXT, Markdown, JSON, CSV, PDF, DOCX, XLSX, and XLS. Convert legacy DOC files to DOCX first.");
@@ -3868,6 +3872,8 @@ function applyLanguageToStaticUi() {
   localizeSelectOptions(document.getElementById("knowledge-tag-filter"), {
     all: langText("全部标签", "All Tags"),
   });
+  renderKnowledgeScopeUi();
+  updateProfileTemplateHint(defaultProfileMap.get(providerTemplateSelect?.value) || null);
   setElementText("people-library-section-label", "peopleLibrarySectionLabel");
   setElementText("people-library-title", "peopleLibraryTitle");
   setElementText("open-role-editor", "newPersona");
@@ -5841,18 +5847,33 @@ function getSelectableBuiltinProfiles(currentTemplateId = modelProfileTemplateId
 
 function getProfileTemplateHint(profile = null) {
   if (profile?.id === "profile-volcengine" || isVolcengineProfile(profile || {})) {
-    return "火山方舟的 Base URL 是官方公共入口模板值，通常不用改。真正要核对的是精确 Model ID：请复制详情区那串全小写、带版本号的值，例如 doubao-seed-1-8-251228，不要填页面大标题 Doubao-Seed-1.8。";
+    return langText(
+      "火山方舟的 Base URL 是官方公共入口模板值，通常不用改。真正要核对的是精确 Model ID：请复制详情区那串全小写、带版本号的值，例如 doubao-seed-1-8-251228，不要填页面大标题 Doubao-Seed-1.8。",
+      "Volcengine Ark usually keeps the default Base URL. The key field to verify is the exact Model ID from the official details, such as doubao-seed-1-8-251228. Do not use a display title like Doubao-Seed-1.8."
+    );
   }
   if (profile?.id === "profile-siliconflow" || /siliconflow/i.test(profile?.providerName || "")) {
-    return "硅基流动本身就是聚合入口，很多 DeepSeek、Qwen、GLM、Llama 都能先在这里接。优先只换 Model ID，其他字段通常不用动。";
+    return langText(
+      "硅基流动本身就是聚合入口，很多 DeepSeek、Qwen、GLM、Llama 都能先在这里接。优先只换 Model ID，其他字段通常不用动。",
+      "SiliconFlow is already an aggregated gateway for many model families such as DeepSeek, Qwen, GLM, and Llama. In most cases you only need to change the Model ID."
+    );
   }
   if (profile?.id === "profile-openai-official") {
-    return "OpenAI 官方模板适合直接接官方接口，也适合作为很多 OpenAI 兼容中转的参考格式。若你买的是转发服务，通常复制它给你的 Base URL、Model ID、API Key 即可。";
+    return langText(
+      "OpenAI 官方模板适合直接接官方接口，也适合作为很多 OpenAI 兼容中转的参考格式。若你买的是转发服务，通常复制它给你的 Base URL、Model ID、API Key 即可。",
+      "The OpenAI official template works for the direct official API and is also a good reference for many OpenAI-compatible relays. In most relay cases you only need the provided Base URL, Model ID, and API Key."
+    );
   }
   if (profile?.id === "profile-claude" || profile?.compatibility === "anthropic") {
-    return "Claude 官方走 Anthropic Messages 协议，不和 OpenAI Compatible 混用。只有卖家明确写着支持 Anthropic Messages 时，才选这一类。";
+    return langText(
+      "Claude 官方走 Anthropic Messages 协议，不和 OpenAI Compatible 混用。只有卖家明确写着支持 Anthropic Messages 时，才选这一类。",
+      "Claude official endpoints use the Anthropic Messages protocol and should not be mixed with OpenAI-compatible settings. Use this only when the provider explicitly supports Anthropic Messages."
+    );
   }
-  return "内置模板只保留四类常用入口：硅基流动、火山方舟、OpenAI 官方、Claude 官方。其他淘宝中转大多走自定义接入 + OpenAI Compatible；如果对方要求额外签名、特殊 body 或自定义 header，这版前端还不够。";
+  return langText(
+    "内置模板只保留四类常用入口：硅基流动、火山方舟、OpenAI 官方、Claude 官方。其他淘宝中转大多走自定义接入 + OpenAI Compatible；如果对方要求额外签名、特殊 body 或自定义 header，这版前端还不够。",
+    "Built-in templates currently keep only four common gateways: SiliconFlow, Volcengine Ark, OpenAI Official, and Claude Official. Most relay vendors should use a custom connection with OpenAI-compatible settings. If a vendor requires extra signatures, special request bodies, or custom headers, this frontend is not enough yet."
+  );
 }
 
 function updateProfileTemplateHint(profile = null) {
@@ -5860,6 +5881,27 @@ function updateProfileTemplateHint(profile = null) {
     return;
   }
   profileTemplateHint.textContent = getProfileTemplateHint(profile);
+}
+
+function renderKnowledgeScopeUi() {
+  const knowledgeScopeGlobal = document.getElementById("knowledge-scope-global");
+  const knowledgeScopeProject = document.getElementById("knowledge-scope-project");
+  const knowledgeGlobalToggle = document.getElementById("knowledge-global-toggle");
+  if (knowledgeScopeGlobal) {
+    const isActive = state.knowledgeScope === "global";
+    knowledgeScopeGlobal.classList.toggle("active", isActive);
+    knowledgeScopeGlobal.setAttribute("aria-pressed", String(isActive));
+  }
+  if (knowledgeScopeProject) {
+    const isActive = state.knowledgeScope === "project";
+    knowledgeScopeProject.classList.toggle("active", isActive);
+    knowledgeScopeProject.setAttribute("aria-pressed", String(isActive));
+  }
+  if (knowledgeGlobalToggle) {
+    knowledgeGlobalToggle.textContent = state.projectUsesGlobalKnowledge
+      ? langText("本项目调用全局知识库 ✔", "Use Global KB in This Project ✔")
+      : langText("本项目不调用全局知识库 ✘", "Do Not Use Global KB in This Project ✘");
+  }
 }
 
 function getConfiguredProfiles() {
@@ -8962,6 +9004,8 @@ async function hydrateState() {
   state.appLanguage = await loadAppState("appLanguage", "zh");
   state.appTheme = await loadAppState("appTheme", "dark");
   state.voiceReadEnabled = await loadAppState("voiceReadEnabled", false);
+  state.knowledgeScope = await loadAppState("knowledgeScope", "global");
+  state.projectUsesGlobalKnowledge = await loadAppState("projectUsesGlobalKnowledge", true);
   state.userMemory = normalizeUserMemory(await loadAppState(USER_MEMORY_KEY, buildEmptyUserMemory()));
   state.mappings = normalizeModelMappings(await loadAppState("modelMappings", {
     main: defaultProfiles[0].id,
@@ -9354,7 +9398,7 @@ async function handleModelProfileSave(event) {
   const apiKey = profileApiKey.value.trim();
 
   if (!displayName || !providerName || !baseUrl || !modelIdValue) {
-    setProfileTestStatus("基础字段还没填完整", "error");
+    setProfileTestStatus(langText("基础字段还没填完整", "Required fields are still incomplete"), "error");
     return;
   }
 
@@ -9380,7 +9424,12 @@ async function handleModelProfileSave(event) {
     modelProfileEditMode = false;
     deleteModelProfileButton.disabled = true;
   }
-  setProfileTestStatus(profile.locked ? "已保存，这个接入现在会出现在下面的已接入模型列表" : "已保存到已接入模型列表，可继续用于角色映射", "success");
+  setProfileTestStatus(
+    profile.locked
+      ? langText("已保存，这个接入现在会出现在下面的已接入模型列表", "Saved. This connection now appears in the connected model list below.")
+      : langText("已保存到已接入模型列表，可继续用于角色映射", "Saved to the connected model list and ready for role mapping."),
+    "success"
+  );
 }
 
 async function testProfileConnectivity() {
@@ -9399,11 +9448,11 @@ async function testProfileConnectivity() {
   };
 
   if (!profile.baseUrl || !profile.modelId) {
-    setProfileTestStatus("先填 Base URL 和模型 ID", "error");
+    setProfileTestStatus(langText("先填 Base URL 和模型 ID", "Fill in Base URL and Model ID first"), "error");
     return;
   }
 
-  setProfileTestStatus("测试中...", "");
+  setProfileTestStatus(langText("测试中...", "Testing..."), "");
 
   try {
     let response;
@@ -9443,7 +9492,7 @@ async function testProfileConnectivity() {
       if (existing) {
         await saveModelProfile({ ...existing, ...profile, lastTestStatus: "error", lastTestLatencyMs: latencyMs, supportsVision: false, visionTestStatus: "error", lastVisionTestLatencyMs: 0 });
       }
-      setProfileTestStatus(`测试失败 ${response.status}`, "error");
+      setProfileTestStatus(langText(`测试失败 ${response.status}`, `Test failed ${response.status}`), "error");
       return;
     }
 
@@ -9456,7 +9505,12 @@ async function testProfileConnectivity() {
     if (existing) {
       await saveModelProfile({ ...existing, ...profile, lastTestStatus: "error", supportsVision: false, visionTestStatus: "error", lastVisionTestLatencyMs: 0 });
     }
-    setProfileTestStatus(error?.name === "AbortError" ? "测试超时，模型接通了但长时间没有返回" : "测试失败，可能被 CORS 或网络拦截", "error");
+    setProfileTestStatus(
+      error?.name === "AbortError"
+        ? langText("测试超时，模型接通了但长时间没有返回", "Test timed out. The model is reachable but did not return in time.")
+        : langText("测试失败，可能被 CORS 或网络拦截", "Test failed. The request may be blocked by CORS or the network."),
+      "error"
+    );
   }
 }
 
@@ -9584,8 +9638,6 @@ function appendAiSummary(content) {
   removeTaskSummaryActionPrompts();
   state.lastSummary = summary;
   state.sharedAgentQuery = summary;
-  state.sharedResearchBrief = "";
-  state.sharedEvidenceEntries = [];
   state.rolePlanningBrief = "";
   state.pendingRoleClarification = [];
   state.taskSupplementMode = false;
@@ -9980,6 +10032,21 @@ function bindEvents() {
   openKnowledgeBaseButton?.addEventListener("click", () => {
     openKnowledgeBaseModal();
   });
+  document.getElementById("knowledge-scope-global")?.addEventListener("click", async () => {
+    state.knowledgeScope = "global";
+    renderKnowledgeScopeUi();
+    await saveAppState("knowledgeScope", state.knowledgeScope);
+  });
+  document.getElementById("knowledge-scope-project")?.addEventListener("click", async () => {
+    state.knowledgeScope = "project";
+    renderKnowledgeScopeUi();
+    await saveAppState("knowledgeScope", state.knowledgeScope);
+  });
+  document.getElementById("knowledge-global-toggle")?.addEventListener("click", async () => {
+    state.projectUsesGlobalKnowledge = !state.projectUsesGlobalKnowledge;
+    renderKnowledgeScopeUi();
+    await saveAppState("projectUsesGlobalKnowledge", state.projectUsesGlobalKnowledge);
+  });
   closeKnowledgeBaseButton?.addEventListener("click", closeKnowledgeBaseModal);
   knowledgeBaseBackdrop?.addEventListener("click", closeKnowledgeBaseModal);
   knowledgeUploadTrigger?.addEventListener("click", () => {
@@ -10288,32 +10355,32 @@ function bindEvents() {
   modelProfileForm.addEventListener("submit", handleModelProfileSave);
   resetModelProfile.addEventListener("click", () => {
     resetModelProfileForm("custom-new");
-    setProfileTestStatus("已清空表单", "");
+    setProfileTestStatus(langText("已清空表单", "Form cleared"), "");
   });
   deleteModelProfileButton.addEventListener("click", () => {
     if (!profileId.value) {
-      setProfileTestStatus("当前还没有选中已保存配置", "error");
+      setProfileTestStatus(langText("当前还没有选中已保存配置", "No saved configuration is currently selected"), "error");
       return;
     }
     deleteModelProfile(profileId.value);
     resetModelProfileForm();
-    setProfileTestStatus("配置已删除", "");
+    setProfileTestStatus(langText("配置已删除", "Configuration deleted"), "");
   });
   providerTemplateSelect.addEventListener("change", () => {
     if (providerTemplateSelect.value === "custom-new" || !providerTemplateSelect.value) {
       resetModelProfileForm(providerTemplateSelect.value || "custom-new");
-      setProfileTestStatus("正在新建自定义接入", "");
+      setProfileTestStatus(langText("正在新建自定义接入", "Creating a new custom connection"), "");
       return;
     }
 
     const profile = defaultProfileMap.get(providerTemplateSelect.value);
     if (!profile) {
       resetModelProfileForm("custom-new");
-      setProfileTestStatus("正在新建自定义接入", "");
+      setProfileTestStatus(langText("正在新建自定义接入", "Creating a new custom connection"), "");
       return;
     }
     fillModelProfileTemplate(profile);
-    setProfileTestStatus("已载入厂商模板。点击保存会新增一条接入，不会覆盖已有配置。", "");
+    setProfileTestStatus(langText("已载入厂商模板。点击保存会新增一条接入，不会覆盖已有配置。", "Template loaded. Saving will create a new connection and will not overwrite an existing one."), "");
   });
 
   connectedModelList.addEventListener("click", (event) => {
@@ -10327,7 +10394,7 @@ function bindEvents() {
     }
     if (button.dataset.action === "edit-profile") {
       fillModelProfileForm(profile);
-      setProfileTestStatus("已载入这个接入配置，可继续修改", "");
+      setProfileTestStatus(langText("已载入这个接入配置，可继续修改", "This saved connection has been loaded and can now be edited."), "");
       openModelProfileModal("edit");
       return;
     }
@@ -10340,7 +10407,12 @@ function bindEvents() {
       if (profileId.value === profile.id) {
         resetModelProfileForm();
       }
-      setProfileTestStatus(profile.locked ? "已从已接入列表移除，可随时重新配置" : "配置已删除", "");
+      setProfileTestStatus(
+        profile.locked
+          ? langText("已从已接入列表移除，可随时重新配置", "Removed from the connected list. You can configure it again at any time.")
+          : langText("配置已删除", "Configuration deleted"),
+        ""
+      );
     }
   });
 

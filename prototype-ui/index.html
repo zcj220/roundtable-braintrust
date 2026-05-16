@@ -356,7 +356,7 @@
         </div>
         <button class="ghost-link" id="close-model-profile-modal" type="button">关闭</button>
       </div>
-      <form class="settings-form" id="model-profile-form">
+      <form class="settings-form" id="model-profile-form" autocomplete="off">
         <input id="profile-id" type="hidden" />
         <div class="settings-inline-tools">
           <label class="settings-inline-field">
@@ -368,11 +368,11 @@
         <div class="form-grid two-col">
           <label>
             <span id="profile-display-name-label">自定义名称</span>
-            <input id="profile-display-name" type="text" placeholder="比如：主程序 / 系统 / 副手一" />
+            <input id="profile-display-name" type="text" placeholder="比如：主程序 / 系统 / 副手一" autocomplete="off" spellcheck="false" />
           </label>
           <label>
             <span id="profile-provider-name-label">Provider 名称</span>
-            <input id="profile-provider-name" type="text" placeholder="比如：OpenRouter / 本地中转站" />
+            <input id="profile-provider-name" type="text" placeholder="比如：OpenRouter / 本地中转站" autocomplete="off" spellcheck="false" />
           </label>
         </div>
         <div class="form-grid two-col">
@@ -385,19 +385,19 @@
           </label>
           <label>
             <span id="profile-model-id-label">模型 ID</span>
-            <input id="profile-model-id" type="text" placeholder="gpt-5.4 / deepseek-ai/DeepSeek-V3.2 / glm-4.5" />
+            <input id="profile-model-id" type="text" placeholder="gpt-5.4 / deepseek-ai/DeepSeek-V3.2 / glm-4.5" autocomplete="off" spellcheck="false" />
           </label>
         </div>
         <div class="form-grid single-col">
           <label>
             <span id="profile-base-url-label">Base URL</span>
-            <input id="profile-base-url" type="text" placeholder="https://api.openai.com/v1" />
+            <input id="profile-base-url" type="text" placeholder="https://api.openai.com/v1" autocomplete="off" spellcheck="false" />
           </label>
         </div>
         <div class="form-grid two-col">
           <label>
             <span id="profile-endpoint-path-label">接口路径</span>
-            <input id="profile-endpoint-path" type="text" placeholder="/chat/completions" />
+            <input id="profile-endpoint-path" type="text" placeholder="/chat/completions" autocomplete="off" spellcheck="false" />
           </label>
           <label>
             <span id="profile-api-key-label">API Key</span>

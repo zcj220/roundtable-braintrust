@@ -1129,6 +1129,33 @@ button {
   font-size: 12px;
 }
 
+.roundtable-filter-field span {
+  white-space: nowrap;
+}
+
+.knowledge-toolbar {
+  display: grid;
+  gap: 12px;
+}
+
+.knowledge-toolbar-fields {
+  display: grid;
+  grid-template-columns: minmax(240px, 1.45fr) repeat(3, minmax(120px, 0.78fr)) auto;
+  gap: 12px;
+  align-items: end;
+  padding-left: 26px;
+}
+
+.knowledge-toolbar-fields .roundtable-filter-field {
+  margin-left: 0;
+  min-width: 0;
+}
+
+.knowledge-toolbar-fields .search-input,
+.knowledge-toolbar-fields select {
+  min-width: 0;
+}
+
 .roundtable-filter-field select {
   width: auto;
   min-width: 88px;
@@ -2005,6 +2032,10 @@ body.theme-light .seat-readaloud-voice-select option {
   color: #2f2418;
 }
 
+body.theme-light .knowledge-toolbar-fields .roundtable-filter-field {
+  color: #7a654d;
+}
+
 .seat-empty,
 .empty-panel {
   padding: 18px;
@@ -2407,6 +2438,25 @@ body.theme-light .seat-readaloud-voice-select option {
   display: grid;
   gap: 8px;
   width: 100%;
+}
+
+@media (max-width: 1200px) {
+  .knowledge-toolbar-fields {
+    grid-template-columns: minmax(220px, 1.25fr) repeat(3, minmax(110px, 0.9fr));
+    padding-left: 18px;
+  }
+
+  .knowledge-toolbar-fields > :last-child {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+
+@media (max-width: 920px) {
+  .knowledge-toolbar-fields {
+    grid-template-columns: 1fr;
+    padding-left: 0;
+  }
 }
 
 .connected-model-host {
