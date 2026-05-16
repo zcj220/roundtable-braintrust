@@ -2855,7 +2855,7 @@ body.theme-light .compact-composer {
   }
 }
 
-@media (max-width: 1120px) {
+@media (max-width: 960px) {
   .app-frame {
     grid-template-columns: 1fr;
     width: 100%;
