@@ -219,8 +219,14 @@ function ensureRoleIdentityMeta(role) {
   if (!role) {
     return role;
   }
+  const englishMeta = BUILT_IN_ROLE_ENGLISH[role.id] || null;
   return {
     ...role,
+    nameEn: role?.nameEn || role?.i18n?.en?.name || englishMeta?.name || buildEnglishRoleNameFallback(role?.name || "") || "",
+    seatEn: role?.seatEn || role?.i18n?.en?.seat || englishMeta?.seat || buildEnglishRoleNameFallback(role?.seat || "") || "",
+    descriptionEn: role?.descriptionEn || role?.i18n?.en?.description || englishMeta?.description || "",
+    systemPromptEn: role?.systemPromptEn || role?.i18n?.en?.systemPrompt || englishMeta?.systemPrompt || "",
+    sourceLabelEn: role?.sourceLabelEn || role?.i18n?.en?.sourceLabel || translateRoleSourceLabel(role?.sourceLabel || role?.originalSourceLabel || "", role?.source),
     gender: normalizeRoleGender(role?.gender) || inferRoleGender(role),
     age: normalizeRoleAge(role?.age) || inferRoleAge(role),
   };
@@ -237,6 +243,103 @@ function buildBaseRoleSystemPrompt({ name, seat, description, stance, method, te
     "遇到不确定之处要直说，不要装作什么都懂；遇到别人明显跳步或想当然的地方，要直接指出。",
   ].join(" ");
 }
+
+function buildBaseRoleSystemPromptEn({ name, seat, description }) {
+  return [
+    `You are now playing the role of a ${name}. Your most stable observation focus is ${seat}.`,
+    `Your professional background and long-term experience are: ${description}`,
+    "You are not an abstract label. You are someone who has handled this kind of problem repeatedly in real practice, research, or delivery.",
+    "When you speak, start from what this identity would notice first, what matters most, and what concerns you most before giving judgment.",
+    "Be direct about uncertainty. If someone is making a leap or relying on wishful thinking, point it out clearly.",
+  ].join(" ");
+}
+
+const BUILT_IN_ROLE_ENGLISH = {
+  programmer: {
+    name: "Programmer",
+    seat: "Technical Implementer",
+    description: "Breaks requirements into code delivery, interface structure, debugging paths, and execution rhythm.",
+    systemPrompt: buildBaseRoleSystemPromptEn({ name: "Programmer", seat: "Technical Implementer", description: "An engineer who regularly turns vague requirements into code delivery, interface structure, debugging paths, and execution rhythm." }),
+  },
+  "building-engineer": {
+    name: "Building Engineer",
+    seat: "On-site Engineering Judge",
+    description: "Evaluates plans through structural safety, construction conditions, material limits, and on-site implementation.",
+    systemPrompt: buildBaseRoleSystemPromptEn({ name: "Building Engineer", seat: "On-site Engineering Judge", description: "An engineering practitioner who balances structural safety, construction conditions, material constraints, and on-site execution." }),
+  },
+  "electrical-engineer": {
+    name: "Electrical Engineer",
+    seat: "Power Systems Advisor",
+    description: "Complements technical judgment through power supply, wiring, safety redundancy, load, and equipment fit.",
+    systemPrompt: buildBaseRoleSystemPromptEn({ name: "Electrical Engineer", seat: "Power Systems Advisor", description: "A power systems engineer who regularly handles supply systems, wiring loads, electrical safety, and equipment matching." }),
+  },
+  auditor: {
+    name: "Auditor",
+    seat: "Financial Review",
+    description: "Checks cost, return on investment, budget leakage, and financial sustainability.",
+    systemPrompt: buildBaseRoleSystemPromptEn({ name: "Auditor", seat: "Financial Review", description: "An audit and accounting professional focused on cost review, budgets, return on investment, and financial sustainability." }),
+  },
+  doctor: {
+    name: "Doctor",
+    seat: "Medical Risk Review",
+    description: "Judges health, safety, recovery, accidental harm, and professional boundaries to avoid reckless decisions.",
+    systemPrompt: buildBaseRoleSystemPromptEn({ name: "Doctor", seat: "Medical Risk Review", description: "A clinician who routinely weighs health risk, contraindications, recovery windows, and the cost of harm." }),
+  },
+  historian: {
+    name: "Historian",
+    seat: "Historical Context",
+    description: "Supplies causes, background, institutional context, and path evolution to avoid decontextualized conclusions.",
+    systemPrompt: buildBaseRoleSystemPromptEn({ name: "Historian", seat: "Historical Context", description: "A researcher who studies timelines, background conditions, institutions, and path evolution, and uses sources to correct present-day judgment." }),
+  },
+  physicist: {
+    name: "Physicist",
+    seat: "Mechanism Analyst",
+    description: "Tests whether something holds through mechanics, energy, motion, and physical constraints.",
+    systemPrompt: buildBaseRoleSystemPromptEn({ name: "Physicist", seat: "Mechanism Analyst", description: "An analyst who explains real-world problems through mechanics, energy, materials, and boundary conditions." }),
+  },
+  mathematician: {
+    name: "Mathematician",
+    seat: "Logical Reasoning",
+    description: "Checks quantity, logical structure, probability, and rigor of inference.",
+    systemPrompt: buildBaseRoleSystemPromptEn({ name: "Mathematician", seat: "Logical Reasoning", description: "A professional who works on quantitative relations, logical structure, probability assumptions, and rigorous inference." }),
+  },
+  chemist: {
+    name: "Chemist",
+    seat: "Material Reaction Analysis",
+    description: "Judges through material properties, chemical reactions, corrosion risk, and formulation stability.",
+    systemPrompt: buildBaseRoleSystemPromptEn({ name: "Chemist", seat: "Material Reaction Analysis", description: "A chemistry professional who studies material properties, reaction conditions, corrosion risk, toxicity, and stability." }),
+  },
+  lawyer: {
+    name: "Legal Advisor",
+    seat: "Legal Boundary Review",
+    description: "Holds the line on legal liability, contract constraints, evidence chains, and execution risk.",
+    systemPrompt: buildBaseRoleSystemPromptEn({ name: "Legal Advisor", seat: "Legal Boundary Review", description: "A legal advisor who regularly handles liability, contract constraints, evidence chains, and execution risk by clarifying boundaries first." }),
+  },
+  "police-advisor": {
+    name: "Police Officer",
+    seat: "Field Investigation Executor",
+    description: "Covers scene control, investigation, evidence collection, execution, and worst-case response.",
+    systemPrompt: buildBaseRoleSystemPromptEn({ name: "Police Officer", seat: "Field Investigation Executor", description: "An operator experienced in scene control, investigation, evidence handling, execution, and worst-case response." }),
+  },
+  "operations-manager": {
+    name: "Operations Lead",
+    seat: "Execution Driver",
+    description: "Breaks plans into cadence, actions, resource allocation, and operating loops so the work actually runs.",
+    systemPrompt: buildBaseRoleSystemPromptEn({ name: "Operations Lead", seat: "Execution Driver", description: "An operations lead who turns plans into cadence, actions, resource allocation, and execution loops." }),
+  },
+  "product-manager": {
+    name: "Product Manager",
+    seat: "Trade-off Coordinator",
+    description: "Judges user value, priority, release boundaries, and resource investment so discussion does not stay abstract.",
+    systemPrompt: buildBaseRoleSystemPromptEn({ name: "Product Manager", seat: "Trade-off Coordinator", description: "A product manager who makes trade-offs across user value, priorities, release boundaries, and resource investment." }),
+  },
+  teacher: {
+    name: "Teacher",
+    seat: "Structured Explainer",
+    description: "Breaks complex issues into structures that ordinary people can understand, repeat, and act on.",
+    systemPrompt: buildBaseRoleSystemPromptEn({ name: "Teacher", seat: "Structured Explainer", description: "An educator who turns complex issues into structures people can understand, repeat, and execute." }),
+  },
+};
 
 const baseRoles = [
   {
@@ -393,7 +496,7 @@ const baseRoles = [
     sourceLabel: "教育",
     systemPrompt: buildBaseRoleSystemPrompt({ name: "教师", seat: "结构讲解者", description: "长期把复杂问题拆成普通人能理解、能复述、能执行结构的教学型表达者。", stance: "澄清表达", method: "知识讲解", temper: "耐心" }),
   },
-];
+].map((role) => ensureRoleIdentityMeta(role));
 
 function isFavoriteRole(role) {
   return role.source === "favorite";
@@ -402,20 +505,22 @@ function isFavoriteRole(role) {
 function getRoleSourceText(role) {
   if (role.source === "favorite") {
     if (role.originalSourceLabel) {
-      return role.originalSourceLabel;
+      return state.appLanguage === "en" ? translateRoleSourceLabel(role.originalSourceLabel, role.originalSource || "favorite") : role.originalSourceLabel;
     }
     if (role.sourceLabel && role.sourceLabel !== "收藏人物") {
-      return role.sourceLabel;
+      return state.appLanguage === "en" ? (role.sourceLabelEn || translateRoleSourceLabel(role.sourceLabel, role.source)) : role.sourceLabel;
     }
     return "";
   }
   if (role.source === "custom") {
-    return "自定义";
+    return state.appLanguage === "en" ? "Custom" : "自定义";
   }
   if (role.source === "recommended") {
-    return "临时生成";
+    return state.appLanguage === "en" ? "Generated" : "临时生成";
   }
-  return role.sourceLabel || "常用职业";
+  return state.appLanguage === "en"
+    ? (role.sourceLabelEn || translateRoleSourceLabel(role.sourceLabel || "", role.source))
+    : (role.sourceLabel || "常用职业");
 }
 
 function createRequestSignal(externalSignal, timeoutMs) {
@@ -600,7 +705,13 @@ function validateGeneratedRoleCandidates(candidates, targetCount = MIN_RECOMMEND
 }
 
 function getDisplayRoleName(role) {
-  return role?.source === "recommended" ? getRecommendedRolePublicName(role) : role?.name || "";
+  if (!role) {
+    return "";
+  }
+  if (role?.source === "recommended") {
+    return getLocalizedRoleText(role, "name") || getRecommendedRolePublicName(role);
+  }
+  return getLocalizedRoleText(role, "name");
 }
 
 function getRoleCardTitle(role) {
@@ -614,12 +725,28 @@ function getRoleCardTitle(role) {
 }
 
 function getCompactRoleDescription(role) {
-  const raw = String(role?.description || "").replace(/\s+/g, " ").trim();
+  const raw = String(getLocalizedRoleText(role, "description") || "").replace(/\s+/g, " ").trim();
   if (!raw) {
     return "";
   }
   const firstClause = raw.split(/[。！？]/)[0]?.trim() || raw;
   return shortenText(firstClause, 30);
+}
+
+function getRoleLocaleField(role, field) {
+  if (!role) {
+    return "";
+  }
+  const fallback = String(role?.[field] || "").trim();
+  const english = String(role?.[`${field}En`] || role?.i18n?.en?.[field] || "").trim();
+  if (state.appLanguage === "en") {
+    return english || fallback;
+  }
+  return fallback || english;
+}
+
+function getLocalizedRoleText(role, field) {
+  return getRoleLocaleField(role, field);
 }
 
 function canEditRole(role) {
@@ -674,7 +801,7 @@ function buildRoleLibraryCardMarkup(role, options = {}) {
           </div>
         </div>
       </div>
-      <p class="card-description">${escapeHtml(role.description || "")}</p>
+      <p class="card-description">${escapeHtml(getLocalizedRoleText(role, "description") || "")}</p>
       <div class="mini-tags">${traits}</div>
       <div class="role-card-footer">
         ${footerMarkup}
@@ -967,6 +1094,7 @@ function buildEmptyProjectMemory() {
 
 const state = {
   appLanguage: "zh",
+  appTheme: "dark",
   modeIndex: 0,
   participationIndex: 0,
   densityIndex: 1,
@@ -1046,16 +1174,20 @@ const cancelRoleEditor = document.getElementById("cancel-role-editor");
 const saveRoleEditorButton = document.getElementById("save-role-editor");
 const roleEditorId = document.getElementById("role-editor-id");
 const roleEditorName = document.getElementById("role-editor-name");
+const roleEditorNameEn = document.getElementById("role-editor-name-en");
 const roleEditorSeat = document.getElementById("role-editor-seat");
 const roleEditorGender = document.getElementById("role-editor-gender");
 const roleEditorAge = document.getElementById("role-editor-age");
 const roleEditorDescription = document.getElementById("role-editor-description");
+const roleEditorDescriptionEn = document.getElementById("role-editor-description-en");
 const roleEditorPrompt = document.getElementById("role-editor-prompt");
+const roleEditorPromptEn = document.getElementById("role-editor-prompt-en");
 const roleEditorStance = document.getElementById("role-editor-stance");
 const roleEditorTemper = document.getElementById("role-editor-temper");
 const roleEditorColor = document.getElementById("role-editor-color");
 const roleEditorColorPicker = document.getElementById("role-editor-color-picker");
 const roleEditorSourceLabel = document.getElementById("role-editor-source-label");
+const roleEditorSourceLabelEn = document.getElementById("role-editor-source-label-en");
 const roleEditorAiRequirements = document.getElementById("role-editor-ai-requirements");
 const roleEditorAiFeedback = document.getElementById("role-editor-ai-feedback");
 const generateRoleWithAiButton = document.getElementById("generate-role-with-ai");
@@ -1112,6 +1244,7 @@ const peopleCount = document.getElementById("people-count");
 const peopleSummary = document.getElementById("people-summary");
 const followToggle = document.getElementById("follow-toggle");
 const appLanguageToggle = document.getElementById("app-language-toggle");
+const appThemeToggle = document.getElementById("app-theme-toggle");
 const currentTopicLabel = document.getElementById("current-topic-label");
 const discussionStream = document.getElementById("discussion-stream");
 const chatShell = document.querySelector(".chat-shell");
@@ -1153,6 +1286,12 @@ const runSharedResearchAgentButton = document.getElementById("run-shared-researc
 const runWebSearchAgentButton = document.getElementById("run-web-search-agent");
 const runMultimodalAgentButton = document.getElementById("run-multimodal-agent");
 const sharedAgentStatus = document.getElementById("shared-agent-status");
+const knowledgeBaseBackdrop = document.getElementById("knowledge-base-backdrop");
+const knowledgeBaseModal = document.getElementById("knowledge-base-modal");
+const openKnowledgeBaseButton = document.getElementById("open-knowledge-base");
+const closeKnowledgeBaseButton = document.getElementById("close-knowledge-base");
+const knowledgeUploadTrigger = document.getElementById("knowledge-upload-trigger");
+const knowledgeUploadInput = document.getElementById("knowledge-upload-input");
 
 let dbPromise;
 let roleEditorContext = null;
@@ -1613,6 +1752,79 @@ function deriveRoleAvatar(name, preferredAvatar = "") {
   }
 
   return "人";
+}
+
+function translateRoleSourceLabel(label, source = "") {
+  const normalized = String(label || "").trim();
+  const fallback = source === "recommended"
+    ? "临时生成"
+    : source === "favorite"
+      ? "收藏人物"
+      : source === "custom"
+        ? "自定义"
+        : "常用职业";
+  const value = normalized || fallback;
+  const labelMap = {
+    "技术": "Technology",
+    "工程": "Engineering",
+    "电气": "Electrical",
+    "财务": "Finance",
+    "医疗": "Medical",
+    "历史": "History",
+    "物理": "Physics",
+    "数学": "Mathematics",
+    "化学": "Chemistry",
+    "法律": "Legal",
+    "警务": "Police",
+    "运营": "Operations",
+    "产品": "Product",
+    "教育": "Education",
+    "收藏人物": "Saved Persona",
+    "自定义": "Custom",
+    "临时生成": "Generated",
+    "AI 草稿": "AI Draft",
+    "自定义补位": "Custom Fill-in",
+    "常用职业": "Built-in Role",
+  };
+  return labelMap[value] || value;
+}
+
+function buildEnglishRoleNameFallback(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const replacements = [
+    ["产品经理", "Product Manager"],
+    ["程序员", "Programmer"],
+    ["审计师", "Auditor"],
+    ["工程师", "Engineer"],
+    ["设计师", "Designer"],
+    ["研究员", "Researcher"],
+    ["研究者", "Researcher"],
+    ["学者", "Scholar"],
+    ["顾问", "Advisor"],
+    ["负责人", "Lead"],
+    ["经理", "Manager"],
+    ["医生", "Doctor"],
+    ["教师", "Teacher"],
+    ["律师", "Lawyer"],
+    ["警察", "Police Officer"],
+    ["分析师", "Analyst"],
+    ["架构师", "Architect"],
+    ["讲解者", "Explainer"],
+    ["观察者", "Observer"],
+    ["专家", "Expert"],
+    ["策划", "Planner"],
+    ["古代", "Ancient"],
+    ["考古", "Archaeo"],
+    ["天文", "Astronomy"],
+    ["文明", "Civilization"],
+  ];
+  const localized = replacements.reduce((text, [needle, replacement]) => text.replaceAll(needle, ` ${replacement} `), raw)
+    .replace(/\s+/g, " ")
+    .trim();
+  return /[\u4e00-\u9fff]/u.test(localized) ? "" : localized;
 }
 
 function roleAvatar(role) {
@@ -2936,7 +3148,8 @@ const UI_TEXT = {
     seedBody: "现在有什么需求请直接发送。我会先在这里帮你整理、追问、确认，然后再开始生成人物。",
     startDiscussion: "开始讨论",
     stopDiscussion: "结束讨论",
-    openSeatPicker: "打开选角器",
+    openSeatPicker: "席位",
+    regeneratePersonas: "重新生成角色",
     returnToList: "返回列表",
     exitLibrary: "退出人物库",
     peopleLibrarySectionLabel: "人物库",
@@ -3002,9 +3215,16 @@ const UI_TEXT = {
     multimodalModelNote: "如果主持模型本身支持视觉，可以跟随主持。若主持模型偏快但不支持图片，请在这里单独指定一个支持多模态的模型。",
     multimodalAiTag: "多模态",
     peopleLibraryCurrentTag: "当前库",
+    newTopic: "+ 新建话题",
+    topicListTitle: "话题列表",
+    quickAccessTitle: "快捷入口",
     peopleLibraryOpen: "人物库",
     roundtableWorkbenchOpen: "圆桌台",
+    knowledgeBaseOpen: "知识库",
     discussionSettingsTitle: "讨论设置",
+    seatConfigTitle: "配置席位",
+    toggleTopicsMore: "更多",
+    toggleTopicsLess: "收起",
     cycleModeLabel: "讨论目标",
     cycleParticipationLabel: "用户参与",
     cycleDensityLabel: "回答力度",
@@ -3051,7 +3271,8 @@ const UI_TEXT = {
     seedBody: "Send your request directly. The primary AI will first organize, question, and confirm it here before generating participants.",
     startDiscussion: "Start",
     stopDiscussion: "Stop",
-    openSeatPicker: "Pick Seats",
+    openSeatPicker: "Seats",
+    regeneratePersonas: "Regen Roles",
     returnToList: "Back to List",
     exitLibrary: "Exit Library",
     peopleLibrarySectionLabel: "Persona Library",
@@ -3117,9 +3338,16 @@ const UI_TEXT = {
     multimodalModelNote: "If the host model already supports vision, let multimodal follow the host. If you want a faster host that does not support images, assign a separate vision-capable model here.",
     multimodalAiTag: "Multimodal",
     peopleLibraryCurrentTag: "Current Library",
+    newTopic: "+ New Topic",
+    topicListTitle: "Topic List",
+    quickAccessTitle: "Quick Access",
     peopleLibraryOpen: "Open Library",
     roundtableWorkbenchOpen: "Open Roundtable",
+    knowledgeBaseOpen: "Knowledge Base",
     discussionSettingsTitle: "Discussion Settings",
+    seatConfigTitle: "Seat Setup",
+    toggleTopicsMore: "More",
+    toggleTopicsLess: "Less",
     cycleModeLabel: "Goal",
     cycleParticipationLabel: "User Input",
     cycleDensityLabel: "Answer Depth",
@@ -3224,11 +3452,136 @@ function applyLanguageToStaticUi() {
   if (openSeatPickerButton) {
     openSeatPickerButton.textContent = t("openSeatPicker");
   }
+  if (regeneratePersonasButton) {
+    regeneratePersonasButton.textContent = t("regeneratePersonas");
+  }
   renderAiRoleRecommendationToggle();
   renderVoiceReadToggle();
   if (closePeopleLibrary) {
     closePeopleLibrary.textContent = roleEditor.classList.contains("hidden") ? t("exitLibrary") : t("returnToList");
   }
+  const knowledgeSectionLabel = document.getElementById("knowledge-base-section-label");
+  const knowledgeTitle = document.getElementById("knowledge-base-title");
+  const knowledgeScopeGlobal = document.getElementById("knowledge-scope-global");
+  const knowledgeScopeProject = document.getElementById("knowledge-scope-project");
+  const knowledgeSearchLabel = document.getElementById("knowledge-search-label");
+  const knowledgeCategoryFilterLabel = document.getElementById("knowledge-category-filter-label");
+  const knowledgeTagFilterLabel = document.getElementById("knowledge-tag-filter-label");
+  const knowledgeUploadCategoryLabel = document.getElementById("knowledge-upload-category-label");
+  const knowledgeListTitle = document.getElementById("knowledge-list-title");
+  const knowledgeDetailTitle = document.getElementById("knowledge-detail-title");
+  const knowledgeSearchInput = document.getElementById("knowledge-search");
+  if (knowledgeSectionLabel) {
+    knowledgeSectionLabel.textContent = langText("知识库", "Knowledge Base");
+  }
+  if (knowledgeTitle) {
+    knowledgeTitle.textContent = langText("全局知识库与项目知识包", "Global Knowledge and Project Pack");
+  }
+  if (knowledgeUploadTrigger) {
+    knowledgeUploadTrigger.textContent = langText("上传文档", "Upload Docs");
+  }
+  if (closeKnowledgeBaseButton) {
+    closeKnowledgeBaseButton.textContent = t("close");
+  }
+  if (knowledgeScopeGlobal) {
+    knowledgeScopeGlobal.textContent = langText("全局知识库", "Global Knowledge");
+  }
+  if (knowledgeScopeProject) {
+    knowledgeScopeProject.textContent = langText("项目知识包", "Project Pack");
+  }
+  if (knowledgeSearchLabel) {
+    knowledgeSearchLabel.textContent = langText("检索", "Search");
+  }
+  if (knowledgeCategoryFilterLabel) {
+    knowledgeCategoryFilterLabel.textContent = langText("目录", "Folder");
+  }
+  if (knowledgeTagFilterLabel) {
+    knowledgeTagFilterLabel.textContent = langText("标签", "Tags");
+  }
+  if (knowledgeUploadCategoryLabel) {
+    knowledgeUploadCategoryLabel.textContent = langText("上传到目录", "Upload to folder");
+  }
+  if (knowledgeListTitle) {
+    knowledgeListTitle.textContent = langText("知识目录", "Knowledge Catalog");
+  }
+  if (knowledgeDetailTitle) {
+    knowledgeDetailTitle.textContent = langText("详情", "Detail");
+  }
+  if (knowledgeSearchInput) {
+    knowledgeSearchInput.placeholder = langText("搜索标题、摘要、标签、正文", "Search title, summary, tags, or content");
+  }
+  const roundtableSectionLabel = document.getElementById("roundtable-workbench-section-label");
+  const roundtableTitle = document.getElementById("roundtable-workbench-title");
+  const runWebSearchLabel = document.getElementById("run-web-search-agent");
+  const runImageAnalysisLabel = document.getElementById("run-multimodal-agent");
+  const roundtableEvidenceListTitle = document.getElementById("roundtable-evidence-list-title");
+  const roundtableEvidenceFilterLabel = document.getElementById("roundtable-evidence-filter-label");
+  const roundtableEvidenceDetailTitle = document.getElementById("roundtable-evidence-detail-title");
+  const evidenceTranslateToggle = document.getElementById("evidence-translate-toggle");
+  const knowledgeGlobalToggle = document.getElementById("knowledge-global-toggle");
+  const knowledgeNoteStrip = document.getElementById("knowledge-note-strip");
+  const knowledgeCountBadge = document.getElementById("knowledge-count-badge");
+  if (roundtableSectionLabel) {
+    roundtableSectionLabel.textContent = langText("圆桌台", "Roundtable");
+  }
+  if (roundtableTitle) {
+    roundtableTitle.textContent = langText("证据链", "Evidence Chain");
+  }
+  if (runWebSearchLabel) {
+    runWebSearchLabel.textContent = langText("搜索网页", "Web Search");
+  }
+  if (runImageAnalysisLabel) {
+    runImageAnalysisLabel.textContent = langText("图片解析", "Image Analysis");
+  }
+  if (roundtableEvidenceListTitle) {
+    roundtableEvidenceListTitle.textContent = langText("证据链", "Evidence Chain");
+  }
+  if (roundtableEvidenceFilterLabel) {
+    roundtableEvidenceFilterLabel.textContent = langText("筛选", "Filter");
+  }
+  if (roundtableEvidenceDetailTitle) {
+    roundtableEvidenceDetailTitle.textContent = langText("详情", "Detail");
+  }
+  if (evidenceTranslateToggle) {
+    evidenceTranslateToggle.textContent = langText(`自动翻译 ${state.autoTranslateEvidence ? "✔" : "✘"}`, `Auto Translate ${state.autoTranslateEvidence ? "✔" : "✘"}`);
+    evidenceTranslateToggle.title = langText("开启后，搜索结果采用 AI 自动翻译为中文", "When enabled, search results are automatically translated for the current language.");
+  }
+  if (knowledgeGlobalToggle) {
+    knowledgeGlobalToggle.textContent = langText("本项目调用全局知识库 ✔", "Use Global KB in This Project ✔");
+  }
+  if (knowledgeNoteStrip) {
+    knowledgeNoteStrip.textContent = langText("第一版支持 TXT、Markdown、JSON、CSV、PDF、DOCX、XLSX、XLS；旧版 DOC 建议先转为 DOCX。", "This first version supports TXT, Markdown, JSON, CSV, PDF, DOCX, XLSX, and XLS. Convert legacy DOC files to DOCX first.");
+  }
+  if (knowledgeCountBadge) {
+    const count = Number.parseInt(knowledgeCountBadge.textContent, 10);
+    knowledgeCountBadge.textContent = Number.isFinite(count) ? langText(`${count} 条`, `${count} items`) : langText("0 条", "0 items");
+  }
+  localizeSelectOptions(roundtableEvidenceFilterSelect, {
+    all: langText("全部", "All"),
+    web: langText("网页", "Web"),
+    image: langText("图片", "Images"),
+    video: langText("视频", "Video"),
+    file: langText("文件", "Files"),
+    text: langText("文本", "Text"),
+  });
+  localizeSelectOptions(document.getElementById("knowledge-category-filter"), {
+    all: langText("全部", "All"),
+    company: langText("公司", "Company"),
+    product: langText("产品", "Product"),
+    process: langText("流程", "Process"),
+    reference: langText("参考", "Reference"),
+    project: langText("项目", "Project"),
+  });
+  localizeSelectOptions(document.getElementById("knowledge-upload-category"), {
+    company: langText("公司", "Company"),
+    product: langText("产品", "Product"),
+    process: langText("流程", "Process"),
+    reference: langText("参考", "Reference"),
+    project: langText("项目", "Project"),
+  });
+  localizeSelectOptions(document.getElementById("knowledge-tag-filter"), {
+    all: langText("全部标签", "All Tags"),
+  });
   setElementText("people-library-section-label", "peopleLibrarySectionLabel");
   setElementText("people-library-title", "peopleLibraryTitle");
   setElementText("open-role-editor", "newPersona");
@@ -3237,22 +3590,55 @@ function applyLanguageToStaticUi() {
   setElementText("people-filter-custom", "filterCustom");
   setElementPlaceholder("people-search", "peopleSearchPlaceholder");
   setElementText("role-editor-name-label", "roleNameLabel");
+  const roleEditorNameEnLabel = document.getElementById("role-editor-name-en-label");
+  const roleEditorDescriptionEnLabel = document.getElementById("role-editor-description-en-label");
+  const roleEditorPromptEnLabel = document.getElementById("role-editor-prompt-en-label");
+  const roleEditorSourceLabelEnText = document.getElementById("role-editor-source-label-en-text");
+  if (roleEditorNameEnLabel) {
+    roleEditorNameEnLabel.textContent = langText("人物名称（英文）", "Persona Name");
+  }
+  if (roleEditorDescriptionEnLabel) {
+    roleEditorDescriptionEnLabel.textContent = langText("人物说明（英文）", "Persona Background");
+  }
+  if (roleEditorPromptEnLabel) {
+    roleEditorPromptEnLabel.textContent = langText("专有提示词（英文）", "Persona Prompt");
+  }
+  if (roleEditorSourceLabelEnText) {
+    roleEditorSourceLabelEnText.textContent = langText("来源标签（英文）", "Source Tag");
+  }
   setElementText("role-editor-ai-label", "roleAiAssistLabel");
   setElementPlaceholder("role-editor-ai-requirements", "roleAiAssistPlaceholder");
   setElementText("generate-role-with-ai", "roleAiGenerateButton");
   setElementPlaceholder("role-editor-name", "roleNamePlaceholder");
+  if (roleEditorNameEn) {
+    roleEditorNameEn.placeholder = langText("比如：Literal Reading Advocate", "For example: Literal Reading Advocate");
+  }
   setElementText("role-editor-gender-label", "roleGenderLabel");
+  localizeSelectOptions(roleEditorGender, {
+    female: langText("女", "Female"),
+    male: langText("男", "Male"),
+    nonbinary: langText("中性", "Non-binary"),
+  });
   setElementText("role-editor-age-label", "roleAgeLabel");
   setElementPlaceholder("role-editor-age", "roleAgePlaceholder");
   setElementText("role-editor-description-label", "roleDescriptionLabel");
   setElementPlaceholder("role-editor-description", "roleDescriptionPlaceholder");
+  if (roleEditorDescriptionEn) {
+    roleEditorDescriptionEn.placeholder = langText("用英文描述这个人物", "Describe this persona in English");
+  }
   setElementText("role-editor-prompt-label", "rolePromptLabel");
   setElementPlaceholder("role-editor-prompt", "rolePromptPlaceholder");
+  if (roleEditorPromptEn) {
+    roleEditorPromptEn.placeholder = langText("写给 AI 的英文人物提示词", "Write the English persona prompt for the AI");
+  }
   setElementText("role-editor-stance-label", "roleStanceLabel");
   setElementText("role-editor-color-label", "roleColorLabel");
   setElementText("role-editor-temper-label", "roleTemperLabel");
   setElementText("role-editor-source-label-text", "roleSourceLabel");
   setElementPlaceholder("role-editor-source-label", "roleSourcePlaceholder");
+  if (roleEditorSourceLabelEn) {
+    roleEditorSourceLabelEn.placeholder = langText("比如：Sermon / Legal / Medical", "For example: Sermon / Legal / Medical");
+  }
   if (roleEditorAiFeedback) {
     roleEditorAiFeedback.textContent = t("roleAiGenerateHint");
     roleEditorAiFeedback.className = "drawer-feedback compact-feedback";
@@ -3301,17 +3687,25 @@ function applyLanguageToStaticUi() {
   setElementText("multimodal-model-select-label", "multimodalModelSelectLabel");
   setElementText("multimodal-model-note", "multimodalModelNote");
   setElementText("sidebar-people-library-title", "peopleLibrarySectionLabel");
+  setElementText("new-topic", "newTopic");
+  setElementText("topic-list-title", "topicListTitle");
+  setElementText("quick-access-title", "quickAccessTitle");
   setElementText("open-people-library", "peopleLibraryOpen");
   setElementText("open-roundtable-workbench", "roundtableWorkbenchOpen");
+  setElementText("open-knowledge-base", "knowledgeBaseOpen");
   setElementText("close-roundtable-workbench", "close");
   setElementText("people-library-current-tag", "peopleLibraryCurrentTag");
   setElementText("discussion-settings-title", "discussionSettingsTitle");
+  setElementText("seat-config-title", "seatConfigTitle");
   setElementText("cycle-mode-label", "cycleModeLabel");
   setElementText("cycle-participation-label", "cycleParticipationLabel");
   setElementText("cycle-density-label", "cycleDensityLabel");
   setElementText("cycle-model-label", "cycleModelLabel");
   setElementText("discussion-rounds-label", "discussionRoundsLabel");
   setElementText("discussion-size-label", "discussionSizeLabel");
+  if (toggleTopicsButton) {
+    toggleTopicsButton.textContent = topicList.classList.contains("expanded") ? t("toggleTopicsLess") : t("toggleTopicsMore");
+  }
 
   localizeSelectOptions(roleEditorStance, {
     "支持原命题": state.appLanguage === "en" ? "Support the claim" : "支持原命题",
@@ -5095,7 +5489,19 @@ function filterRoles(list, query) {
     return list;
   }
 
-  return list.filter((role) => [role.name, role.seat, role.description, role.systemPrompt || "", role.sourceLabel || "", role.age || "", getRoleGenderLabel(role), ...Object.values(role.traits)].join(" ").toLowerCase().includes(normalized));
+  return list.filter((role) => [
+    role.name,
+    role.nameEn,
+    role.seat,
+    role.description,
+    role.descriptionEn,
+    role.systemPrompt || "",
+    role.systemPromptEn || "",
+    role.sourceLabel || "",
+    role.age || "",
+    getRoleGenderLabel(role),
+    ...Object.values(role.traits || {}),
+  ].join(" ").toLowerCase().includes(normalized));
 }
 
 function renderPeopleSummary() {
@@ -5135,7 +5541,7 @@ function renderSeatStack() {
   if (!state.discussionRunning) {
     const completedRounds = getCompletedRoundCount();
     if (completedRounds > 0 && state.seatsReady) {
-      startDiscussionButton.textContent = langText(`继续讨论（已 ${completedRounds} 轮）`, `Continue Discussion (${completedRounds} done)`);
+      startDiscussionButton.textContent = langText(`继续讨论（已 ${completedRounds} 轮）`, `Resume (${completedRounds})`);
     } else {
       startDiscussionButton.textContent = t("startDiscussion");
     }
@@ -5685,6 +6091,16 @@ function closePeopleLibraryModal() {
   toggleRoleEditor(false);
 }
 
+function openKnowledgeBaseModal() {
+  knowledgeBaseBackdrop?.classList.add("open");
+  knowledgeBaseModal?.classList.add("open");
+}
+
+function closeKnowledgeBaseModal() {
+  knowledgeBaseBackdrop?.classList.remove("open");
+  knowledgeBaseModal?.classList.remove("open");
+}
+
 function openRoundtableWorkbench() {
   activeRoundtableEvidenceId = "";
   roundtableWorkbenchBackdrop?.classList.add("open");
@@ -5735,6 +6151,8 @@ function closeModelProfileModal() {
 async function setAppLanguage(nextLanguage) {
   state.appLanguage = nextLanguage === "en" ? "en" : "zh";
   applyLanguageToStaticUi();
+  setRoleEditorFieldVisibility();
+  renderThemeToggle();
   updateCompactSummary();
   setModelProfileModalMode(modelProfileEditMode ? "edit" : "create");
   renderProviderTemplateSelect();
@@ -5748,6 +6166,26 @@ async function setAppLanguage(nextLanguage) {
   await saveAppState("appLanguage", state.appLanguage);
 }
 
+function applyThemeToBody() {
+  document.body.classList.toggle("theme-light", state.appTheme === "light");
+}
+
+function renderThemeToggle() {
+  if (!appThemeToggle) {
+    return;
+  }
+  appThemeToggle.textContent = state.appTheme === "light"
+    ? langText("深色", "Dark")
+    : langText("浅色", "Light");
+}
+
+async function setAppTheme(nextTheme) {
+  state.appTheme = nextTheme === "light" ? "light" : "dark";
+  applyThemeToBody();
+  renderThemeToggle();
+  await saveAppState("appTheme", state.appTheme);
+}
+
 function resetRoleEditor() {
   roleEditorContext = null;
   roleEditorId.value = "";
@@ -5755,24 +6193,56 @@ function resetRoleEditor() {
     roleEditorAiRequirements.value = "";
   }
   roleEditorName.value = "";
+  if (roleEditorNameEn) {
+    roleEditorNameEn.value = "";
+  }
   roleEditorSeat.value = "讨论参与者";
   roleEditorGender.value = "female";
   roleEditorAge.value = "45岁";
   roleEditorDescription.value = "";
+  if (roleEditorDescriptionEn) {
+    roleEditorDescriptionEn.value = "";
+  }
   roleEditorPrompt.value = "";
+  if (roleEditorPromptEn) {
+    roleEditorPromptEn.value = "";
+  }
   roleEditorStance.value = "支持原命题";
   roleEditorTemper.value = "稳健";
   roleEditorColor.value = "sky";
   syncRoleColorPicker("sky");
   roleEditorSourceLabel.value = "";
+  if (roleEditorSourceLabelEn) {
+    roleEditorSourceLabelEn.value = "";
+  }
   if (roleEditorAiFeedback) {
     roleEditorAiFeedback.textContent = t("roleAiGenerateHint");
     roleEditorAiFeedback.className = "drawer-feedback compact-feedback";
   }
 }
 
+function setRoleEditorFieldVisibility() {
+  const fieldPairs = [
+    [roleEditorName, roleEditorNameEn],
+    [roleEditorDescription, roleEditorDescriptionEn],
+    [roleEditorPrompt, roleEditorPromptEn],
+    [roleEditorSourceLabel, roleEditorSourceLabelEn],
+  ];
+  fieldPairs.forEach(([zhField, enField]) => {
+    const zhLabel = zhField?.closest("label");
+    const enLabel = enField?.closest("label");
+    if (zhLabel) {
+      zhLabel.classList.toggle("hidden", state.appLanguage === "en");
+    }
+    if (enLabel) {
+      enLabel.classList.toggle("hidden", state.appLanguage !== "en");
+    }
+  });
+}
+
 function toggleRoleEditor(visible) {
   roleEditor.classList.toggle("hidden", !visible);
+  setRoleEditorFieldVisibility();
   closePeopleLibrary.textContent = visible ? t("returnToList") : t("exitLibrary");
 }
 
@@ -5780,11 +6250,20 @@ function fillRoleEditor(role) {
   const preparedRole = normalizeRecommendedRolePersona(role);
   roleEditorId.value = preparedRole.id;
   roleEditorName.value = preparedRole.name;
+  if (roleEditorNameEn) {
+    roleEditorNameEn.value = preparedRole.nameEn || preparedRole.i18n?.en?.name || "";
+  }
   roleEditorSeat.value = preparedRole.seat || "讨论参与者";
   roleEditorGender.value = normalizeRoleGender(preparedRole.gender) || inferRoleGender(preparedRole);
   roleEditorAge.value = normalizeRoleAge(preparedRole.age) || inferRoleAge(preparedRole);
   roleEditorDescription.value = preparedRole.description;
+  if (roleEditorDescriptionEn) {
+    roleEditorDescriptionEn.value = preparedRole.descriptionEn || preparedRole.i18n?.en?.description || "";
+  }
   roleEditorPrompt.value = preparedRole.systemPrompt || "";
+  if (roleEditorPromptEn) {
+    roleEditorPromptEn.value = preparedRole.systemPromptEn || preparedRole.i18n?.en?.systemPrompt || "";
+  }
   ensureSelectValue(roleEditorStance, preparedRole.traits?.stance || "自定义");
   ensureSelectValue(roleEditorTemper, preparedRole.traits?.temper || "自定义");
   roleEditorStance.value = preparedRole.traits?.stance || "自定义";
@@ -5792,12 +6271,18 @@ function fillRoleEditor(role) {
   roleEditorColor.value = roleColor(preparedRole);
   syncRoleColorPicker(roleColor(preparedRole));
   roleEditorSourceLabel.value = preparedRole.sourceLabel || "";
+  if (roleEditorSourceLabelEn) {
+    roleEditorSourceLabelEn.value = preparedRole.sourceLabelEn || translateRoleSourceLabel(preparedRole.sourceLabel || "", preparedRole.source);
+  }
 }
 
 function openRoleEditorForCreate(sourceLabel = "") {
   resetRoleEditor();
   roleEditorContext = { sourceCollection: "custom", roleId: "", replaceSelectedId: "" };
   roleEditorSourceLabel.value = sourceLabel;
+  if (roleEditorSourceLabelEn) {
+    roleEditorSourceLabelEn.value = translateRoleSourceLabel(sourceLabel, "custom");
+  }
   toggleRoleEditor(true);
 }
 
@@ -5950,6 +6435,7 @@ function makeRecommendedRole(roleId, createdAt, description) {
     description: description || sourceRole.description,
     source: "recommended",
     sourceLabel: "临时生成",
+    sourceLabelEn: "Generated",
   };
 }
 
@@ -7093,24 +7579,34 @@ async function refreshRecommendedRolePrompts(summary = state.lastSummary, option
 function normalizeGeneratedRole(generatedRole, index, createdAt) {
   const roleType = normalizeGeneratedRoleType(generatedRole.roleType || generatedRole.roleKind || generatedRole.personaType);
   const seat = String(generatedRole.seat || generatedRole.role || "专题分析者").trim();
+  const seatEn = String(generatedRole.seatEn || generatedRole.roleEn || "").trim();
   const name = getRecommendedRolePublicName({
     name: sanitizeGeneratedRoleName(generatedRole.name || generatedRole.title || `临时角色${index + 1}`),
     seat,
     roleType,
   });
+  const nameEn = String(generatedRole.nameEn || generatedRole.titleEn || "").trim()
+    || buildEnglishRoleNameFallback(generatedRole.name || generatedRole.title || "")
+    || seatEn
+    || buildEnglishRoleNameFallback(seat);
   const description = String(generatedRole.background || generatedRole.bio || generatedRole.identity || generatedRole.description || generatedRole.focus || generatedRole.why || `${name} 长期从 ${seat} 这个观察重心出发参与讨论，习惯依靠自己的专业训练与长期经验做判断。`).trim();
+  const descriptionEn = String(generatedRole.descriptionEn || generatedRole.backgroundEn || generatedRole.bioEn || generatedRole.identityEn || generatedRole.focusEn || generatedRole.whyEn || "").trim();
   const method = String(generatedRole.method || generatedRole.style || generatedRole.approach || "针对性分析").trim();
   const stance = String(generatedRole.stance || generatedRole.position || "补充关键视角").trim();
   const temper = String(generatedRole.temper || generatedRole.tone || "冷静").trim();
   const prompt = String(generatedRole.systemPrompt || generatedRole.prompt || "").trim();
+  const promptEn = String(generatedRole.systemPromptEn || generatedRole.promptEn || "").trim();
   const color = ROLE_COLORS.includes(generatedRole.color) ? generatedRole.color : ROLE_COLORS[index % ROLE_COLORS.length];
   const avatar = deriveRoleAvatar(name, generatedRole.avatar);
 
   return normalizeRecommendedRolePersona({
     id: `recommended-${createdAt}-${index}`,
     name,
+    nameEn,
     seat,
+    seatEn,
     description,
+    descriptionEn,
     traits: {
       stance,
       method,
@@ -7122,8 +7618,10 @@ function normalizeGeneratedRole(generatedRole, index, createdAt) {
     age: normalizeRoleAge(generatedRole.age || generatedRole.ageText || generatedRole.ageLabel || generatedRole.ageRange),
     source: "recommended",
     sourceLabel: "临时生成",
+    sourceLabelEn: String(generatedRole.sourceLabelEn || "").trim() || "Generated",
     roleType,
     systemPrompt: prompt,
+    systemPromptEn: promptEn,
   });
 }
 
@@ -7152,7 +7650,8 @@ async function requestGeneratedRecommendedRoles(summary, planningBrief = "") {
     getPeoplePoolRoleNamesText() ? `当前人物池里已经有这些人物，禁止再生成同名人物：${getPeoplePoolRoleNamesText()}。` : "",
     "seat 字段也写人话，简单概括这个人上桌主要负责看什么，不要再造抽象黑话。",
     "严格输出 JSON 数组，不要解释，不要 Markdown。",
-    "每个元素必须包含字段：name, seat, description, stance, method, temper, systemPrompt, roleType, gender, age。可选字段：color, avatar。这里的 seat 表示人物长期观察重心，不是外部的本轮扮演角色。",
+    "每个元素必须包含字段：name, nameEn, seat, seatEn, description, descriptionEn, stance, method, temper, systemPrompt, systemPromptEn, roleType, gender, age。可选字段：color, avatar。这里的 seat 表示人物长期观察重心，不是外部的本轮扮演角色。",
+    "其中 name/seat/description/systemPrompt 用中文，nameEn/seatEn/descriptionEn/systemPromptEn 用英文。不要把英文塞回中文字段，也不要省略英文字段。",
     "roleType 只能填 exemplar 或 expert。exemplar 表示真实人物、历史人物或高辨识度代表角色；expert 表示现实专家或原型角色。",
     "gender 只填 male 或 female。age 直接写这个人物最贴切的年龄，比如 11岁、28岁、45岁、68岁。",
     "如果是历史人物，优先写他最广为人知阶段的大致年龄；如果是虚构人物，优先写大众最熟悉设定里的年龄；如果是原型专家，请你直接编一个合理年龄。",
@@ -8031,6 +8530,7 @@ async function hydrateState() {
   state.peopleRoles = (await dbGetAll(ROLE_STORE)).map(ensureRoleDefaults);
   state.modelProfiles = (await dbGetAll(PROFILE_STORE)).map(normalizeProfile);
   state.appLanguage = await loadAppState("appLanguage", "zh");
+  state.appTheme = await loadAppState("appTheme", "dark");
   state.voiceReadEnabled = await loadAppState("voiceReadEnabled", false);
   state.userMemory = normalizeUserMemory(await loadAppState(USER_MEMORY_KEY, buildEmptyUserMemory()));
   state.mappings = normalizeModelMappings(await loadAppState("modelMappings", {
@@ -8234,7 +8734,9 @@ function toggleSeatSelection(roleId) {
 
 async function handleRoleEditorSave() {
   const name = roleEditorName.value.trim();
+  const nameEn = roleEditorNameEn?.value.trim() || "";
   const description = roleEditorDescription.value.trim();
+  const descriptionEn = roleEditorDescriptionEn?.value.trim() || "";
   const existing = roleEditorId.value ? getPeopleRoleById(roleEditorId.value) : null;
   const recommendedSource = roleEditorContext?.sourceCollection === "recommended"
     ? getRecommendedRoleById(roleEditorContext.roleId)
@@ -8248,15 +8750,24 @@ async function handleRoleEditorSave() {
     return;
   }
   const baseRole = existing || savedFavorite || recommendedSource;
+  const source = existing?.source || savedFavorite?.source || (recommendedSource ? "favorite" : "custom");
+  const sourceLabel = roleEditorSourceLabel.value.trim() || baseRole?.sourceLabel || (recommendedSource ? "收藏人物" : "自定义");
+  const sourceLabelEn = roleEditorSourceLabelEn?.value.trim()
+    || existing?.sourceLabelEn
+    || savedFavorite?.sourceLabelEn
+    || recommendedSource?.sourceLabelEn
+    || translateRoleSourceLabel(sourceLabel, source);
 
   const role = {
     ...(existing || savedFavorite || {}),
     id: existing?.id || savedFavorite?.id || `${recommendedSource ? "favorite" : "custom"}-${Date.now()}`,
     name,
+    nameEn,
     seat,
     gender: normalizeRoleGender(roleEditorGender.value) || inferRoleGender(baseRole || { name, seat, description }),
     age: normalizeRoleAge(roleEditorAge.value) || inferRoleAge(baseRole || { name, seat, description }),
     description,
+    descriptionEn,
     systemPrompt: roleEditorPrompt.value.trim() || buildFallbackGeneratedRoleSystemPrompt({
       name,
       seat,
@@ -8265,6 +8776,7 @@ async function handleRoleEditorSave() {
       method: baseRole?.traits?.method || "综合求证",
       temper: roleEditorTemper.value || "自定义",
     }),
+    systemPromptEn: roleEditorPromptEn?.value.trim() || existing?.systemPromptEn || savedFavorite?.systemPromptEn || recommendedSource?.systemPromptEn || "",
     traits: {
       ...(baseRole?.traits || {}),
       stance: roleEditorStance.value || "自定义",
@@ -8272,8 +8784,9 @@ async function handleRoleEditorSave() {
       temper: roleEditorTemper.value || "自定义",
     },
     color: roleEditorColor.value,
-    source: existing?.source || savedFavorite?.source || (recommendedSource ? "favorite" : "custom"),
-    sourceLabel: roleEditorSourceLabel.value.trim() || baseRole?.sourceLabel || (recommendedSource ? "收藏人物" : "自定义"),
+    source,
+    sourceLabel,
+    sourceLabelEn,
     originalSource: existing?.originalSource || savedFavorite?.originalSource || (recommendedSource ? "recommended" : ""),
     originalSourceLabel: existing?.originalSourceLabel || savedFavorite?.originalSourceLabel || recommendedSource?.sourceLabel || "",
     recommendedFrom: existing?.recommendedFrom || savedFavorite?.recommendedFrom || recommendedSource?.id || "",
@@ -8295,15 +8808,25 @@ function applyAiDraftToRoleEditor(draft) {
     ...draft,
     roleType: draft?.roleType || "expert",
     sourceLabel: draft?.sourceLabel || langText("AI 草稿", "AI Draft"),
+    sourceLabelEn: draft?.sourceLabelEn || "AI Draft",
   }, 0, Date.now());
 
   roleEditorId.value = "";
   roleEditorName.value = preparedRole.name;
+  if (roleEditorNameEn) {
+    roleEditorNameEn.value = preparedRole.nameEn || "";
+  }
   roleEditorSeat.value = preparedRole.seat || "讨论参与者";
   roleEditorGender.value = normalizeRoleGender(preparedRole.gender) || inferRoleGender(preparedRole);
   roleEditorAge.value = normalizeRoleAge(preparedRole.age) || inferRoleAge(preparedRole);
   roleEditorDescription.value = preparedRole.description;
+  if (roleEditorDescriptionEn) {
+    roleEditorDescriptionEn.value = preparedRole.descriptionEn || "";
+  }
   roleEditorPrompt.value = preparedRole.systemPrompt || "";
+  if (roleEditorPromptEn) {
+    roleEditorPromptEn.value = preparedRole.systemPromptEn || "";
+  }
   ensureSelectValue(roleEditorStance, preparedRole.traits?.stance || "自定义");
   ensureSelectValue(roleEditorTemper, preparedRole.traits?.temper || "自定义");
   roleEditorStance.value = preparedRole.traits?.stance || "自定义";
@@ -8311,6 +8834,9 @@ function applyAiDraftToRoleEditor(draft) {
   roleEditorColor.value = roleColor(preparedRole);
   syncRoleColorPicker(roleColor(preparedRole));
   roleEditorSourceLabel.value = draft?.sourceLabel || langText("AI 草稿", "AI Draft");
+  if (roleEditorSourceLabelEn) {
+    roleEditorSourceLabelEn.value = draft?.sourceLabelEn || preparedRole.sourceLabelEn || "AI Draft";
+  }
 }
 
 async function requestAiRoleEditorDraft(requirements) {
@@ -8960,6 +9486,23 @@ function bindEvents() {
     openPeopleLibrary();
   });
 
+  openKnowledgeBaseButton?.addEventListener("click", () => {
+    openKnowledgeBaseModal();
+  });
+  closeKnowledgeBaseButton?.addEventListener("click", closeKnowledgeBaseModal);
+  knowledgeBaseBackdrop?.addEventListener("click", closeKnowledgeBaseModal);
+  knowledgeUploadTrigger?.addEventListener("click", () => {
+    try {
+      if (typeof knowledgeUploadInput?.showPicker === "function") {
+        knowledgeUploadInput.showPicker();
+        return;
+      }
+    } catch (error) {
+      console.warn("knowledge showPicker failed", error);
+    }
+    knowledgeUploadInput?.click();
+  });
+
   openRoundtableWorkbenchButton?.addEventListener("click", () => {
     openRoundtableWorkbench();
   });
@@ -8981,7 +9524,7 @@ function bindEvents() {
 
   document.getElementById("evidence-translate-toggle")?.addEventListener("click", (e) => {
     state.autoTranslateEvidence = !state.autoTranslateEvidence;
-    e.currentTarget.textContent = `自动翻译 ${state.autoTranslateEvidence ? "✔" : "✘"}`;
+    e.currentTarget.textContent = langText(`自动翻译 ${state.autoTranslateEvidence ? "✔" : "✘"}`, `Auto Translate ${state.autoTranslateEvidence ? "✔" : "✘"}`);
     e.currentTarget.style.color = state.autoTranslateEvidence ? "var(--cool)" : "var(--text-dim)";
     e.currentTarget.style.borderColor = state.autoTranslateEvidence ? "rgba(100,180,255,0.3)" : "rgba(255,255,255,0.15)";
   });
@@ -9068,6 +9611,9 @@ function bindEvents() {
   modelProfileBackdrop.addEventListener("click", closeModelProfileModal);
   appLanguageToggle?.addEventListener("click", () => {
     void setAppLanguage(state.appLanguage === "zh" ? "en" : "zh");
+  });
+  appThemeToggle?.addEventListener("click", () => {
+    void setAppTheme(state.appTheme === "light" ? "dark" : "light");
   });
 
   openRoleEditorButton.addEventListener("click", () => {
@@ -9637,7 +10183,9 @@ function bindEvents() {
 
   toggleTopicsButton.addEventListener("click", () => {
     topicList.classList.toggle("expanded");
-    toggleTopicsButton.textContent = topicList.classList.contains("expanded") ? "收起" : "更多";
+    toggleTopicsButton.textContent = topicList.classList.contains("expanded")
+      ? t("toggleTopicsLess")
+      : t("toggleTopicsMore");
   });
 
   topicList.addEventListener("click", (event) => {
@@ -9744,8 +10292,10 @@ async function init() {
     }
     window.speechSynthesis.getVoices();
   }
-  document.body.classList.remove("theme-light");
+  applyThemeToBody();
   applyLanguageToStaticUi();
+  setRoleEditorFieldVisibility();
+  renderThemeToggle();
   updateCompactSummary();
   renderTopicList();
   renderPeopleSummary();

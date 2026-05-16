@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>圆桌智囊团 - 讨论工作台原型</title>
-    <link rel="stylesheet" href="./styles.css?v=3" />
+    <link rel="stylesheet" href="./styles.css?v=4" />
   </head>
   <body>
     <div class="backdrop-orbit orbit-a"></div>
@@ -555,13 +555,13 @@
             <h2 id="seat-config-title">配置席位</h2>
             <span class="tiny-badge" id="seat-config-progress">0/6</span>
           </div>
-          <div class="inline-actions">
+          <div class="inline-actions primary-discussion-actions">
             <button class="action-primary compact-primary" id="start-discussion" type="button">开始讨论</button>
             <button class="action-secondary compact-primary" id="stop-discussion" type="button" disabled>结束讨论</button>
-            <button class="ghost-link add-seat-trigger" id="open-seat-picker" type="button">选角器</button>
           </div>
           <div class="inline-actions seat-secondary-actions">
             <button class="seat-inline-toggle" id="toggle-ai-role-recommendation" type="button" aria-pressed="true"></button>
+            <button class="ghost-link add-seat-trigger" id="open-seat-picker" type="button">选角器</button>
             <button class="ghost-link" id="regenerate-personas" type="button" style="display:none">重新生成</button>
             <button class="seat-voice-toggle" id="toggle-voice-read" type="button" aria-pressed="false" aria-label="切换朗读">
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -579,6 +579,6 @@
     <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://unpkg.com/html-docx-js/dist/html-docx.js"></script>
-    <script src="./app.js?v=3"></script>
+    <script src="./app.js?v=4"></script>
   </body>
 </html>

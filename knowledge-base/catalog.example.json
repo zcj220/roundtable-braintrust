@@ -1,0 +1,28 @@
+[
+  {
+    "id": "company-positioning",
+    "title": "公司定位与对外介绍",
+    "scope": "global",
+    "category": "company",
+    "format": "md",
+    "sourceName": "company-positioning.md",
+    "excerpt": "一句话说明公司做什么、服务谁、为什么可信。",
+    "content": "# 公司定位\n\n这里放公司长期复用的介绍、定位、品牌口径和典型说法。",
+    "textLength": 41,
+    "createdAt": 1778889600000,
+    "updatedAt": 1778889600000
+  },
+  {
+    "id": "project-brief-template",
+    "title": "项目知识包模板",
+    "scope": "project",
+    "category": "project",
+    "format": "md",
+    "sourceName": "project-brief-template.md",
+    "excerpt": "用于某个项目临时挂载的客户背景、目标、限制条件和现有资料。",
+    "content": "# 项目知识包模板\n\n- 客户背景\n- 项目目标\n- 关键限制\n- 现有材料\n- 本轮特别关注点",
+    "textLength": 52,
+    "createdAt": 1778889600000,
+    "updatedAt": 1778889600000
+  }
+]
