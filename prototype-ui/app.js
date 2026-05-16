@@ -1209,6 +1209,8 @@ const defaultProfileMap = new Map(defaultProfiles.map((profile) => [profile.id, 
 
 const USER_MEMORY_KEY = "userMemory";
 const PROJECT_ARTIFACTS_KEY_PREFIX = "projectArtifacts:";
+const GLOBAL_KNOWLEDGE_KEY = "knowledgeEntries:global";
+const PROJECT_KNOWLEDGE_KEY_PREFIX = "knowledgeEntries:project:";
 const SHARED_AGENT_IDS = [
   "user-memory-agent",
   "project-memory-agent",
@@ -1305,6 +1307,8 @@ const state = {
   userMemory: buildEmptyUserMemory(),
   projectMemory: buildEmptyProjectMemory(),
   projectArtifacts: [],
+  globalKnowledgeEntries: [],
+  projectKnowledgeEntries: [],
   sharedAgentQuery: "",
   sharedAgentSources: "",
   sharedAgentStatus: { text: "", tone: "" },
@@ -1317,6 +1321,7 @@ let pendingUserParticipationResolver = null;
 let pendingDiscussionContinuationResolver = null;
 let activeRoundtableEvidenceId = "";
 let activeRoundtableEvidenceFilter = "all";
+let activeKnowledgeEntryId = "";
 const pendingEvidenceAnalysisIds = new Set();
 
 const peopleLibraryBackdrop = document.getElementById("people-library-backdrop");
@@ -1458,6 +1463,15 @@ const openKnowledgeBaseButton = document.getElementById("open-knowledge-base");
 const closeKnowledgeBaseButton = document.getElementById("close-knowledge-base");
 const knowledgeUploadTrigger = document.getElementById("knowledge-upload-trigger");
 const knowledgeUploadInput = document.getElementById("knowledge-upload-input");
+const knowledgeList = document.getElementById("knowledge-list");
+const knowledgeDetail = document.getElementById("knowledge-detail");
+const knowledgeSummaryStrip = document.getElementById("knowledge-summary-strip");
+const knowledgeSelectionPanel = document.getElementById("knowledge-selection-panel");
+const knowledgeEditorPanel = document.getElementById("knowledge-editor-panel");
+const knowledgeSearchInputField = document.getElementById("knowledge-search");
+const knowledgeCategoryFilterSelect = document.getElementById("knowledge-category-filter");
+const knowledgeTagFilterSelect = document.getElementById("knowledge-tag-filter");
+const knowledgeUploadCategorySelect = document.getElementById("knowledge-upload-category");
 
 let dbPromise;
 let roleEditorContext = null;
@@ -1612,6 +1626,10 @@ function getProjectArtifactsKey(topicId) {
   return `${PROJECT_ARTIFACTS_KEY_PREFIX}${topicId}`;
 }
 
+function getProjectKnowledgeKey(topicId) {
+  return `${PROJECT_KNOWLEDGE_KEY_PREFIX}${topicId}`;
+}
+
 async function loadProjectArtifacts(topicId) {
   if (!topicId) {
     return [];
@@ -1631,6 +1649,55 @@ async function deleteProjectArtifacts(topicId) {
     return;
   }
   await dbDelete(APP_STATE_STORE, getProjectArtifactsKey(topicId));
+}
+
+function normalizeKnowledgeEntries(records) {
+  return Array.isArray(records)
+    ? records.filter(Boolean).map((record) => ({
+        id: record.id || `knowledge-${Date.now()}`,
+        topicId: record.topicId || "",
+        scope: record.scope === "project" ? "project" : "global",
+        title: record.title || record.name || langText("未命名文档", "Untitled Document"),
+        name: record.name || record.title || langText("未命名文档", "Untitled Document"),
+        type: record.type || "application/octet-stream",
+        size: Number(record.size || 0),
+        category: record.category || "reference",
+        tags: Array.isArray(record.tags) ? record.tags.filter(Boolean) : [],
+        summary: record.summary || "",
+        textPreview: record.textPreview || "",
+        sourceUrl: record.sourceUrl || "",
+        createdAt: Number(record.createdAt || Date.now()),
+      }))
+    : [];
+}
+
+async function loadGlobalKnowledgeEntries() {
+  return normalizeKnowledgeEntries(await loadAppState(GLOBAL_KNOWLEDGE_KEY, []));
+}
+
+async function saveGlobalKnowledgeEntries(entries) {
+  await saveAppState(GLOBAL_KNOWLEDGE_KEY, normalizeKnowledgeEntries(entries));
+}
+
+async function loadProjectKnowledgeEntries(topicId) {
+  if (!topicId) {
+    return [];
+  }
+  return normalizeKnowledgeEntries(await loadAppState(getProjectKnowledgeKey(topicId), []));
+}
+
+async function saveProjectKnowledgeEntries(topicId, entries) {
+  if (!topicId) {
+    return;
+  }
+  await saveAppState(getProjectKnowledgeKey(topicId), normalizeKnowledgeEntries(entries));
+}
+
+async function deleteProjectKnowledgeEntries(topicId) {
+  if (!topicId) {
+    return;
+  }
+  await dbDelete(APP_STATE_STORE, getProjectKnowledgeKey(topicId));
 }
 
 function summarizeText(value, maxLength = 180) {
@@ -1789,6 +1856,7 @@ function appendProjectAgentNote(label, content) {
 
 async function hydrateProjectScopedState(topicId = state.activeTopicId) {
   state.projectArtifacts = await loadProjectArtifacts(topicId);
+  state.projectKnowledgeEntries = await loadProjectKnowledgeEntries(topicId);
   const activeTopic = state.topics.find((topic) => topic.id === topicId);
   state.projectMemory = normalizeProjectMemory(activeTopic?.snapshot?.projectMemory || deriveProjectMemoryFromState());
 }
@@ -1804,6 +1872,15 @@ function syncSharedAgentInputsFromState() {
 
 function parseSourceUrls(text) {
   return uniqueStrings(String(text || "").split(/[\n\s]+/).filter((item) => /^https?:\/\//i.test(item)));
+}
+
+function readFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("文件读取失败"));
+    reader.readAsArrayBuffer(file);
+  });
 }
 
 function readFileAsDataUrl(file) {
@@ -1822,6 +1899,278 @@ function readFileAsText(file) {
     reader.onerror = () => reject(reader.error || new Error("文件读取失败"));
     reader.readAsText(file);
   });
+}
+
+async function extractPdfTextPreview(file) {
+  if (!window.pdfjsLib) {
+    return "";
+  }
+  if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  }
+  const buffer = await readFileAsArrayBuffer(file);
+  const pdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
+  const pages = [];
+  const pageCount = Math.min(pdf.numPages || 0, 5);
+  for (let index = 1; index <= pageCount; index += 1) {
+    const page = await pdf.getPage(index);
+    const content = await page.getTextContent();
+    const text = (content.items || []).map((item) => item?.str || "").join(" ").replace(/\s+/g, " ").trim();
+    if (text) {
+      pages.push(text);
+    }
+  }
+  return pages.join("\n\n");
+}
+
+async function extractDocxTextPreview(file) {
+  const arrayBuffer = await readFileAsArrayBuffer(file);
+  if (window.JSZip?.loadAsync) {
+    try {
+      const zip = await window.JSZip.loadAsync(arrayBuffer);
+      const xmlParts = await Promise.all(
+        ["word/document.xml", "word/footnotes.xml", "word/endnotes.xml", "word/header1.xml", "word/footer1.xml"]
+          .filter((path) => zip.file(path))
+          .map((path) => zip.file(path).async("string"))
+      );
+      const extractedText = xmlParts
+        .map((xmlText) => {
+          const doc = new DOMParser().parseFromString(xmlText, "application/xml");
+          return [...doc.getElementsByTagName("*")]
+            .filter((node) => String(node.localName || "").toLowerCase() === "t")
+            .map((node) => node.textContent || "")
+            .join(" ");
+        })
+        .join("\n\n")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (extractedText) {
+        return extractedText;
+      }
+    } catch (error) {
+      console.warn("JSZip DOCX extraction failed", file?.name || "docx", error);
+    }
+  }
+  if (!window.mammoth?.extractRawText) {
+    return "";
+  }
+  try {
+    const result = await window.mammoth.extractRawText({ arrayBuffer });
+    return String(result?.value || "").trim();
+  } catch (error) {
+    console.warn("Mammoth DOCX extraction failed", file?.name || "docx", error);
+    return "";
+  }
+}
+
+async function extractSpreadsheetTextPreview(file) {
+  if (!window.XLSX?.read) {
+    return "";
+  }
+  const arrayBuffer = await readFileAsArrayBuffer(file);
+  const workbook = window.XLSX.read(arrayBuffer, { type: "array" });
+  return (workbook.SheetNames || [])
+    .slice(0, 3)
+    .map((sheetName) => {
+      const sheet = workbook.Sheets?.[sheetName];
+      if (!sheet) {
+        return "";
+      }
+      const csv = window.XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
+      return [`[${sheetName}]`, csv].filter(Boolean).join("\n");
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+async function extractTextPreviewForFile(file) {
+  const fileName = String(file?.name || "");
+  const fileType = String(file?.type || "");
+  try {
+    if (/^(text\/|application\/(json|xml))/i.test(fileType) || /\.(txt|md|markdown|json|csv|xml|html?)$/i.test(fileName)) {
+      return summarizeText(await readFileAsText(file), 4000);
+    }
+    if (fileType === "application/pdf" || /\.pdf$/i.test(fileName)) {
+      return summarizeText(await extractPdfTextPreview(file), 4000);
+    }
+    if (fileType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || /\.docx$/i.test(fileName)) {
+      return summarizeText(await extractDocxTextPreview(file), 4000);
+    }
+    if (/spreadsheetml|ms-excel/i.test(fileType) || /\.(xlsx|xls)$/i.test(fileName)) {
+      return summarizeText(await extractSpreadsheetTextPreview(file), 4000);
+    }
+  } catch (error) {
+    console.warn("extractTextPreviewForFile failed", fileName, error);
+  }
+  return "";
+}
+
+function getKnowledgeEntryFormatLabel(entry) {
+  const extMatch = String(entry.name || "").match(/\.([A-Za-z0-9]+)$/);
+  if (extMatch?.[1]) {
+    return extMatch[1].toUpperCase();
+  }
+  return summarizeText(entry.type || langText("文件", "File"), 18);
+}
+
+function getKnowledgeScopeEntries() {
+  if (state.knowledgeScope === "project") {
+    return normalizeKnowledgeEntries([
+      ...state.projectKnowledgeEntries,
+      ...(state.projectUsesGlobalKnowledge ? state.globalKnowledgeEntries : []),
+    ]);
+  }
+  return normalizeKnowledgeEntries(state.globalKnowledgeEntries);
+}
+
+function buildKnowledgeTagOptions(entries) {
+  return uniqueStrings(entries.flatMap((entry) => Array.isArray(entry.tags) ? entry.tags : []));
+}
+
+function renderKnowledgeTagFilterOptions(entries) {
+  if (!knowledgeTagFilterSelect) {
+    return;
+  }
+  const selectedValue = knowledgeTagFilterSelect.value || "all";
+  const tags = buildKnowledgeTagOptions(entries);
+  knowledgeTagFilterSelect.innerHTML = [
+    `<option value="all">${escapeHtml(langText("全部标签", "All Tags"))}</option>`,
+    ...tags.map((tag) => `<option value="${escapeHtml(tag)}">${escapeHtml(tag)}</option>`),
+  ].join("");
+  knowledgeTagFilterSelect.value = tags.includes(selectedValue) ? selectedValue : "all";
+}
+
+function filterKnowledgeEntries(entries) {
+  const searchTerm = String(knowledgeSearchInputField?.value || "").trim().toLowerCase();
+  const category = knowledgeCategoryFilterSelect?.value || "all";
+  const tag = knowledgeTagFilterSelect?.value || "all";
+  return entries.filter((entry) => {
+    if (category !== "all" && entry.category !== category) {
+      return false;
+    }
+    if (tag !== "all" && !(entry.tags || []).includes(tag)) {
+      return false;
+    }
+    if (!searchTerm) {
+      return true;
+    }
+    const haystack = [entry.title, entry.summary, entry.textPreview, ...(entry.tags || [])].join(" ").toLowerCase();
+    return haystack.includes(searchTerm);
+  });
+}
+
+function renderKnowledgeBaseWorkspace() {
+  if (!knowledgeList || !knowledgeDetail || !knowledgeSummaryStrip) {
+    return;
+  }
+
+  const allEntries = getKnowledgeScopeEntries();
+  renderKnowledgeTagFilterOptions(allEntries);
+  const entries = filterKnowledgeEntries(allEntries).sort((left, right) => (right.createdAt || 0) - (left.createdAt || 0));
+  const knowledgeCountBadge = document.getElementById("knowledge-count-badge");
+  if (knowledgeCountBadge) {
+    knowledgeCountBadge.textContent = langText(`${entries.length} 条`, `${entries.length} items`);
+  }
+
+  knowledgeSummaryStrip.innerHTML = `
+    <div class="knowledge-summary-line">${escapeHtml(state.knowledgeScope === "project" ? langText("当前查看：项目知识包", "Viewing: Project Pack") : langText("当前查看：全局知识库", "Viewing: Global Knowledge"))}</div>
+    <div class="knowledge-summary-line">${escapeHtml(langText(`全局 ${state.globalKnowledgeEntries.length} 条 · 项目 ${state.projectKnowledgeEntries.length} 条`, `Global ${state.globalKnowledgeEntries.length} · Project ${state.projectKnowledgeEntries.length}`))}</div>
+  `;
+
+  if (!entries.some((entry) => entry.id === activeKnowledgeEntryId)) {
+    activeKnowledgeEntryId = entries[0]?.id || "";
+  }
+
+  if (!entries.length) {
+    activeKnowledgeEntryId = "";
+    knowledgeList.innerHTML = `<div class="empty-panel">${escapeHtml(langText("当前知识库还是空的。先上传文档，或切换到另一个范围。", "The knowledge base is empty. Upload documents or switch scope."))}</div>`;
+    knowledgeDetail.innerHTML = `<div class="evidence-detail-empty">${escapeHtml(langText("右侧会显示文档摘要、提取文本和基础信息。", "Document summary, extracted text, and metadata will appear here."))}</div>`;
+    if (knowledgeSelectionPanel) {
+      knowledgeSelectionPanel.innerHTML = "";
+    }
+    if (knowledgeEditorPanel) {
+      knowledgeEditorPanel.innerHTML = "";
+    }
+    return;
+  }
+
+  knowledgeList.innerHTML = entries.map((entry, index) => `
+    <button class="evidence-list-item ${entry.id === activeKnowledgeEntryId ? "active" : ""}" data-knowledge-id="${entry.id}" type="button">
+      <span class="evidence-list-index">${index + 1}.</span>
+      <span class="evidence-list-label">${escapeHtml(entry.title)}</span>
+      <span class="evidence-list-kind">${escapeHtml(getKnowledgeEntryFormatLabel(entry))}</span>
+    </button>
+  `).join("");
+
+  const activeEntry = entries.find((entry) => entry.id === activeKnowledgeEntryId) || entries[0];
+  if (!activeEntry) {
+    return;
+  }
+  activeKnowledgeEntryId = activeEntry.id;
+  if (knowledgeSelectionPanel) {
+    knowledgeSelectionPanel.innerHTML = `<div class="knowledge-summary-line">${escapeHtml(langText(`目录：${activeEntry.category || "reference"}`, `Folder: ${activeEntry.category || "reference"}`))}</div>`;
+  }
+  if (knowledgeEditorPanel) {
+    knowledgeEditorPanel.innerHTML = `<div class="knowledge-summary-line">${escapeHtml(langText(`标签：${(activeEntry.tags || []).join(" / ") || "无"}`, `Tags: ${(activeEntry.tags || []).join(" / ") || "none"}`))}</div>`;
+  }
+  knowledgeDetail.innerHTML = `
+    <div class="evidence-detail-panel">
+      <div class="evidence-detail-title">${escapeHtml(activeEntry.title)}</div>
+      <div class="evidence-detail-meta">${escapeHtml([
+        activeEntry.scope === "project" ? langText("项目知识包", "Project Pack") : langText("全局知识库", "Global Knowledge"),
+        activeEntry.category || "reference",
+        activeEntry.size ? `${Math.max(1, Math.round(activeEntry.size / 1024))} KB` : "",
+      ].filter(Boolean).join("  ·  "))}</div>
+      <div class="evidence-detail-surface">
+        <div class="evidence-detail-copy">${escapeHtml(activeEntry.summary || langText("当前文件还没有提取到可展示的摘要。", "No summary has been extracted yet."))}</div>
+        ${activeEntry.textPreview ? `<div class="evidence-detail-copy">${escapeHtml(activeEntry.textPreview)}</div>` : `<div class="evidence-detail-placeholder">${escapeHtml(langText("这个文件已入库，但当前还没有提取出可展示的正文。", "This file has been stored, but no readable text preview is available yet."))}</div>`}
+      </div>
+    </div>
+  `;
+}
+
+async function buildKnowledgeEntryFromFile(file, options = {}) {
+  const { scope = "global", category = "reference", topicId = "" } = options;
+  const textPreview = await extractTextPreviewForFile(file);
+  const extension = (String(file.name || "").match(/\.([A-Za-z0-9]+)$/)?.[1] || "").toUpperCase();
+  return {
+    id: `knowledge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    topicId: scope === "project" ? topicId : "",
+    scope,
+    title: file.name || langText("未命名文档", "Untitled Document"),
+    name: file.name || langText("未命名文档", "Untitled Document"),
+    type: file.type || "application/octet-stream",
+    size: file.size || 0,
+    category,
+    tags: uniqueStrings([category, extension].filter(Boolean)),
+    summary: summarizeText(textPreview || `${file.name || langText("文件", "File")} · ${langText("已上传入库", "stored in knowledge base")}`, 180),
+    textPreview,
+    sourceUrl: "",
+    createdAt: Date.now(),
+  };
+}
+
+async function handleKnowledgeUploads(files) {
+  const attachments = Array.from(files || []).filter(Boolean);
+  if (!attachments.length) {
+    return;
+  }
+  if (state.knowledgeScope === "project" && !state.activeTopicId) {
+    ensureActiveTopicSession();
+  }
+  const scope = state.knowledgeScope === "project" ? "project" : "global";
+  const category = knowledgeUploadCategorySelect?.value || "reference";
+  const topicId = scope === "project" ? state.activeTopicId : "";
+  const newEntries = await Promise.all(attachments.map((file) => buildKnowledgeEntryFromFile(file, { scope, category, topicId })));
+  if (scope === "project") {
+    state.projectKnowledgeEntries = normalizeKnowledgeEntries([...state.projectKnowledgeEntries, ...newEntries]);
+    await saveProjectKnowledgeEntries(topicId, state.projectKnowledgeEntries);
+  } else {
+    state.globalKnowledgeEntries = normalizeKnowledgeEntries([...state.globalKnowledgeEntries, ...newEntries]);
+    await saveGlobalKnowledgeEntries(state.globalKnowledgeEntries);
+  }
+  activeKnowledgeEntryId = newEntries[newEntries.length - 1]?.id || activeKnowledgeEntryId;
+  renderKnowledgeBaseWorkspace();
 }
 
 async function resizeImageForAnalysis(dataUrl, maxDim = 1024, quality = 0.82) {
@@ -1861,8 +2210,8 @@ async function serializeAttachment(file) {
     record.dataUrl = await resizeImageForAnalysis(raw, 1024, 0.82);
   } else if (file.type?.startsWith("video/")) {
     record.dataUrl = await readFileAsDataUrl(file);
-  } else if (/^(text\/|application\/(json|xml))/i.test(file.type || "") || /\.(txt|md|json|csv)$/i.test(file.name || "")) {
-    record.textPreview = summarizeText(await readFileAsText(file), 1200);
+  } else {
+    record.textPreview = summarizeText(await extractTextPreviewForFile(file), 1200);
   }
 
   return record;
@@ -3224,6 +3573,8 @@ async function handleNewTopic() {
   seedConversation();
   state.projectMemory = buildEmptyProjectMemory();
   state.projectArtifacts = [];
+  state.projectKnowledgeEntries = [];
+  activeKnowledgeEntryId = "";
   await syncCurrentTopicSnapshot();
 }
 
@@ -3246,6 +3597,7 @@ async function activateTopic(topicId) {
   await persistTopics();
   renderMemoryAgentWorkspace();
   renderRoundtableEvidenceWorkspace();
+  renderKnowledgeBaseWorkspace();
   renderTopicList();
 }
 
@@ -3266,6 +3618,7 @@ async function deleteTopic(topicId) {
 
   state.discussionAbortController?.abort();
   await deleteProjectArtifacts(topicId);
+  await deleteProjectKnowledgeEntries(topicId);
   state.topics = state.topics.filter((item) => item.id !== topicId);
 
   if (!state.topics.length) {
@@ -6545,6 +6898,7 @@ function closePeopleLibraryModal() {
 function openKnowledgeBaseModal() {
   knowledgeBaseBackdrop?.classList.add("open");
   knowledgeBaseModal?.classList.add("open");
+  renderKnowledgeBaseWorkspace();
 }
 
 function closeKnowledgeBaseModal() {
@@ -9046,6 +9400,7 @@ async function hydrateState() {
   }));
   state.topics = await loadAppState("topicSessions", []);
   state.activeTopicId = await loadAppState("activeTopicId", "");
+  state.globalKnowledgeEntries = await loadGlobalKnowledgeEntries();
   if (!state.topics.length) {
     state.topics = [];
     state.activeTopicId = "";
@@ -10066,16 +10421,19 @@ function bindEvents() {
   document.getElementById("knowledge-scope-global")?.addEventListener("click", async () => {
     state.knowledgeScope = "global";
     renderKnowledgeScopeUi();
+    renderKnowledgeBaseWorkspace();
     await saveAppState("knowledgeScope", state.knowledgeScope);
   });
   document.getElementById("knowledge-scope-project")?.addEventListener("click", async () => {
     state.knowledgeScope = "project";
     renderKnowledgeScopeUi();
+    renderKnowledgeBaseWorkspace();
     await saveAppState("knowledgeScope", state.knowledgeScope);
   });
   document.getElementById("knowledge-global-toggle")?.addEventListener("click", async () => {
     state.projectUsesGlobalKnowledge = !state.projectUsesGlobalKnowledge;
     renderKnowledgeScopeUi();
+    renderKnowledgeBaseWorkspace();
     await saveAppState("projectUsesGlobalKnowledge", state.projectUsesGlobalKnowledge);
   });
   closeKnowledgeBaseButton?.addEventListener("click", closeKnowledgeBaseModal);
@@ -10090,6 +10448,31 @@ function bindEvents() {
       console.warn("knowledge showPicker failed", error);
     }
     knowledgeUploadInput?.click();
+  });
+  knowledgeUploadInput?.addEventListener("change", async () => {
+    const files = Array.from(knowledgeUploadInput.files || []);
+    if (!files.length) {
+      return;
+    }
+    try {
+      await handleKnowledgeUploads(files);
+      updateSharedAgentStatus(langText(`知识库已入库 ${files.length} 个文件。`, `Stored ${files.length} knowledge file(s).`), "success");
+    } catch (error) {
+      updateSharedAgentStatus(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      knowledgeUploadInput.value = "";
+    }
+  });
+  knowledgeSearchInputField?.addEventListener("input", renderKnowledgeBaseWorkspace);
+  knowledgeCategoryFilterSelect?.addEventListener("change", renderKnowledgeBaseWorkspace);
+  knowledgeTagFilterSelect?.addEventListener("change", renderKnowledgeBaseWorkspace);
+  knowledgeList?.addEventListener("click", (event) => {
+    const trigger = event.target.closest("[data-knowledge-id]");
+    if (!trigger) {
+      return;
+    }
+    activeKnowledgeEntryId = trigger.dataset.knowledgeId || "";
+    renderKnowledgeBaseWorkspace();
   });
 
   openRoundtableWorkbenchButton?.addEventListener("click", () => {
@@ -10897,11 +11280,13 @@ async function init() {
   renderProviderTemplateSelect();
   renderAttachmentStrip();
   renderMemoryAgentWorkspace();
+  renderKnowledgeBaseWorkspace();
   const activeTopic = state.topics.find((topic) => topic.id === state.activeTopicId);
   if (activeTopic?.snapshot?.topicConfirmed) {
     applyTopicSnapshot(activeTopic.snapshot);
     await hydrateProjectScopedState(activeTopic.id);
     renderMemoryAgentWorkspace();
+    renderKnowledgeBaseWorkspace();
   } else {
     seedConversation();
   }
