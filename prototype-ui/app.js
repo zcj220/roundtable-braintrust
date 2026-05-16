@@ -7650,9 +7650,12 @@ async function runSpeakerWebSearch(speakerRole, summary, signal) {
       const profile = getPrimarySummaryProfile();
       if (!profile) return text;
       try {
+        const translationPrompt = state.appLanguage === "en"
+          ? `Translate the following web snippet into concise English. Return only the translated text without any explanation:\n${text}`
+          : `把下面这段英文翻译成简洁中文，直接输出翻译结果，不要加任何说明：\n${text}`;
         const translated = await requestModelText(
           profile,
-          `把下面这段英文翻译成简洁中文，直接输出翻译结果，不要加任何说明：\n${text}`,
+          translationPrompt,
           120, null, 8000
         );
         return translated.trim() || text;
