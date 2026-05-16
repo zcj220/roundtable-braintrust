@@ -762,11 +762,17 @@ function canDeleteRole(role) {
   return !!role && role.source !== "recommended";
 }
 
+function localizeAge(age) {
+  if (!age) return age;
+  if (state.appLanguage !== "en") return age;
+  return String(age).replace(/(\d+)\s*\u5c81/, "$1 yrs");
+}
+
 function buildRoleTraitsMarkup(role, options = {}) {
   const { compact = false } = options;
   const traitPairs = [
     [langText("性别", "Gender"), getRoleGenderLabel(role)],
-    [langText("年龄", "Age"), normalizeRoleAge(role?.age) || inferRoleAge(role)],
+    [langText("年龄", "Age"), localizeAge(normalizeRoleAge(role?.age) || inferRoleAge(role))],
     [langText("立场", "Stance"), translateTraitValue(role.traits?.stance)],
     [langText("专长", "Method"), translateTraitValue(role.traits?.method)],
     [langText("性格", "Temper"), translateTraitValue(role.traits?.temper)],

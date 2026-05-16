@@ -627,6 +627,7 @@ button {
 
 .seat-ai-row {
   align-items: center;
+  margin-top: 10px;
 }
 
 .seat-ai-row .seat-voice-toggle {
@@ -637,6 +638,16 @@ button {
 .seat-control-row {
   flex-wrap: nowrap;
   gap: 20px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.seat-control-row .action-primary,
+.seat-control-row .action-secondary {
+  padding: 4px 12px;
+  font-size: 13px;
+  border-radius: 8px;
+  box-shadow: none;
 }
 
 .seat-inline-toggle {
