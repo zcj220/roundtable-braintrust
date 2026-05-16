@@ -619,28 +619,10 @@ button {
 
 .seat-secondary-actions {
   align-items: center;
-  justify-content: flex-start;
-  gap: 12px;
 }
 
 .seat-secondary-actions .seat-voice-toggle {
   margin-left: auto;
-}
-
-.primary-discussion-actions {
-  flex-wrap: nowrap;
-  align-items: center;
-}
-
-.primary-discussion-actions .compact-primary,
-.seat-secondary-actions .ghost-link,
-.seat-secondary-actions .seat-inline-toggle {
-  white-space: nowrap;
-}
-
-.seat-secondary-actions .add-seat-trigger,
-.seat-secondary-actions #regenerate-personas {
-  font-size: 12px;
 }
 
 .seat-inline-toggle {
