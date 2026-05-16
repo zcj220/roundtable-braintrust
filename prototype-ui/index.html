@@ -11,12 +11,13 @@
     <div class="backdrop-orbit orbit-b"></div>
 
     <input id="attachment-input" type="file" multiple hidden />
+    <input id="knowledge-upload-input" type="file" accept=".txt,.md,.markdown,.json,.csv,.pdf,.docx,.xlsx,.xls,.xml,.html" multiple hidden />
 
     <div class="modal-backdrop" id="confirm-backdrop"></div>
     <section class="confirm-modal panel" id="confirm-modal" aria-hidden="true">
       <div class="modal-header compact-modal-header">
         <div>
-          <p class="section-label">确认操作</p>
+          <p class="section-label" id="confirm-section-label">确认操作</p>
           <h2 id="confirm-title">请确认这次操作</h2>
         </div>
       </div>
@@ -60,8 +61,12 @@
         </div>
         <div class="form-grid two-col">
           <label>
-            <span id="role-editor-name-label">人物名称</span>
+            <span id="role-editor-name-label">人物名称（中文）</span>
             <input id="role-editor-name" type="text" placeholder="比如：文本原义派" />
+          </label>
+          <label>
+            <span id="role-editor-name-en-label">人物名称（英文）</span>
+            <input id="role-editor-name-en" type="text" placeholder="For example: Literal Reading Advocate" />
           </label>
           <input id="role-editor-seat" type="hidden" value="讨论参与者" />
         </div>
@@ -79,14 +84,26 @@
             <input id="role-editor-age" type="text" placeholder="比如：45岁 / 16岁 / 68岁" />
           </label>
         </div>
-        <label>
-          <span id="role-editor-description-label">人物说明</span>
-          <textarea id="role-editor-description" rows="2" placeholder="写这个人物的讨论风格、关注点和用途"></textarea>
-        </label>
-        <label>
-          <span id="role-editor-prompt-label">专有提示词</span>
-          <textarea id="role-editor-prompt" rows="3" placeholder="写给 AI 的专属提示词，说明这个人物要如何观察、分析、发言和反驳"></textarea>
-        </label>
+        <div class="form-grid two-col">
+          <label>
+            <span id="role-editor-description-label">人物说明（中文）</span>
+            <textarea id="role-editor-description" rows="3" placeholder="写这个人物的讨论风格、关注点和用途"></textarea>
+          </label>
+          <label>
+            <span id="role-editor-description-en-label">人物说明（英文）</span>
+            <textarea id="role-editor-description-en" rows="3" placeholder="Describe this persona in English"></textarea>
+          </label>
+        </div>
+        <div class="form-grid two-col">
+          <label>
+            <span id="role-editor-prompt-label">专有提示词（中文）</span>
+            <textarea id="role-editor-prompt" rows="4" placeholder="写给 AI 的专属提示词，说明这个人物要如何观察、分析、发言和反驳"></textarea>
+          </label>
+          <label>
+            <span id="role-editor-prompt-en-label">专有提示词（英文）</span>
+            <textarea id="role-editor-prompt-en" rows="4" placeholder="Write the English persona prompt for the AI"></textarea>
+          </label>
+        </div>
         <div class="form-grid three-col">
           <label>
             <span id="role-editor-stance-label">立场</span>
@@ -139,10 +156,14 @@
             </select>
           </label>
         </div>
-        <div class="form-grid single-col">
+        <div class="form-grid two-col">
           <label>
-            <span id="role-editor-source-label-text">来源标签</span>
+            <span id="role-editor-source-label-text">来源标签（中文）</span>
             <input id="role-editor-source-label" type="text" placeholder="比如：讲道常用 / 司法 / 医疗" />
+          </label>
+          <label>
+            <span id="role-editor-source-label-en-text">来源标签（英文）</span>
+            <input id="role-editor-source-label-en" type="text" placeholder="For example: Sermon / Legal / Medical" />
           </label>
         </div>
         <div class="header-actions">
@@ -157,8 +178,8 @@
     <section class="workspace-modal panel" id="roundtable-workbench-modal">
       <div class="modal-header">
         <div>
-          <p class="section-label">圆桌台</p>
-          <h2>证据链</h2>
+          <p class="section-label" id="roundtable-workbench-section-label">圆桌台</p>
+          <h2 id="roundtable-workbench-title">证据链</h2>
         </div>
         <div class="header-actions roundtable-toolbar-actions">
           <button class="ghost-link" id="run-web-search-agent" type="button">搜索网页</button>
@@ -170,10 +191,10 @@
         <div class="roundtable-workbench-column">
           <article class="memory-card">
             <div class="memory-card-head roundtable-list-head">
-              <p class="topic-tag">证据链</p>
+              <p class="topic-tag" id="roundtable-evidence-list-title">证据链</p>
               <div style="display:flex;align-items:center;gap:8px;">
               <label class="roundtable-filter-field" for="roundtable-evidence-filter">
-                <span>筛选</span>
+                <span id="roundtable-evidence-filter-label">筛选</span>
                 <select id="roundtable-evidence-filter">
                   <option value="all">全部</option>
                   <option value="web">网页</option>
@@ -193,7 +214,7 @@
         <div class="roundtable-workbench-column">
           <article class="memory-card">
             <div class="memory-card-head">
-              <p class="topic-tag">详情</p>
+              <p class="topic-tag" id="roundtable-evidence-detail-title">详情</p>
             </div>
             <div class="memory-card-body evidence-detail" id="roundtable-evidence-detail"></div>
           </article>
@@ -209,6 +230,83 @@
         <button id="run-shared-research-agent" type="button"></button>
         <p id="shared-agent-status"></p>
         </div>
+    </section>
+
+    <div class="modal-backdrop" id="knowledge-base-backdrop"></div>
+    <section class="workspace-modal panel" id="knowledge-base-modal">
+      <div class="modal-header">
+        <div>
+          <p class="section-label" id="knowledge-base-section-label">知识库</p>
+          <h2 id="knowledge-base-title">全局知识库与项目知识包</h2>
+        </div>
+        <div class="header-actions roundtable-toolbar-actions">
+          <button class="ghost-link" id="knowledge-upload-trigger" type="button">上传文档</button>
+          <button class="ghost-link" id="close-knowledge-base" type="button">关闭</button>
+        </div>
+      </div>
+      <div class="modal-toolbar knowledge-toolbar">
+        <div class="tab-row" id="knowledge-scope-tabs">
+          <button class="tab-pill active" id="knowledge-scope-global" data-scope="global" type="button">全局知识库</button>
+          <button class="tab-pill" id="knowledge-scope-project" data-scope="project" type="button">项目知识包</button>
+        </div>
+        <div class="knowledge-toolbar-fields">
+          <label class="roundtable-filter-field" for="knowledge-search">
+            <span id="knowledge-search-label">检索</span>
+            <input id="knowledge-search" class="search-input" type="text" placeholder="搜索标题、摘要、标签、正文" />
+          </label>
+          <label class="roundtable-filter-field" for="knowledge-category-filter">
+            <span id="knowledge-category-filter-label">目录</span>
+            <select id="knowledge-category-filter">
+              <option value="all">全部</option>
+              <option value="company">公司</option>
+              <option value="product">产品</option>
+              <option value="process">流程</option>
+              <option value="reference">参考</option>
+              <option value="project">项目</option>
+            </select>
+          </label>
+          <label class="roundtable-filter-field" for="knowledge-tag-filter">
+            <span id="knowledge-tag-filter-label">标签</span>
+            <select id="knowledge-tag-filter">
+              <option value="all">全部标签</option>
+            </select>
+          </label>
+          <label class="roundtable-filter-field" for="knowledge-upload-category">
+            <span id="knowledge-upload-category-label">上传到目录</span>
+            <select id="knowledge-upload-category">
+              <option value="company">公司</option>
+              <option value="product">产品</option>
+              <option value="process">流程</option>
+              <option value="reference" selected>参考</option>
+              <option value="project">项目</option>
+            </select>
+          </label>
+          <button class="tiny-badge button-badge" id="knowledge-global-toggle" type="button">本项目调用全局知识库 ✔</button>
+        </div>
+      </div>
+      <div class="knowledge-note-strip" id="knowledge-note-strip">第一版支持 TXT、Markdown、JSON、CSV、PDF、DOCX、XLSX、XLS；旧版 DOC 建议先转为 DOCX。</div>
+      <div class="roundtable-workbench-grid knowledge-workspace-grid">
+        <div class="roundtable-workbench-column">
+          <article class="memory-card knowledge-list-card">
+            <div class="memory-card-head roundtable-list-head">
+              <p class="topic-tag" id="knowledge-list-title">知识目录</p>
+              <span class="tiny-badge" id="knowledge-count-badge">0 条</span>
+            </div>
+            <div class="memory-card-body knowledge-summary-strip" id="knowledge-summary-strip"></div>
+            <div class="memory-card-body evidence-list knowledge-list" id="knowledge-list"></div>
+          </article>
+        </div>
+        <div class="roundtable-workbench-column">
+          <article class="memory-card">
+            <div class="memory-card-head">
+              <p class="topic-tag" id="knowledge-detail-title">详情</p>
+            </div>
+            <div class="memory-card-body knowledge-selection-panel" id="knowledge-selection-panel"></div>
+            <div class="memory-card-body knowledge-editor-panel" id="knowledge-editor-panel"></div>
+            <div class="memory-card-body evidence-detail knowledge-detail" id="knowledge-detail"></div>
+          </article>
+        </div>
+      </div>
     </section>
 
     <div class="modal-backdrop" id="seat-picker-backdrop"></div>
@@ -358,7 +456,7 @@
 
         <section class="side-section">
           <div class="side-title-row">
-            <h2>话题列表</h2>
+            <h2 id="topic-list-title">话题列表</h2>
             <button class="ghost-link compact-link" id="toggle-topics" type="button">更多</button>
           </div>
           <div class="topic-list" id="topic-list"></div>
@@ -366,11 +464,12 @@
 
         <section class="side-section compact">
           <div class="side-title-row">
-            <h2>快捷入口</h2>
+            <h2 id="quick-access-title">快捷入口</h2>
           </div>
           <div class="sidebar-shortcut-stack">
             <button class="action-secondary sidebar-shortcut-button" id="open-people-library" type="button">人物库</button>
             <button class="action-secondary sidebar-shortcut-button" id="open-roundtable-workbench" type="button">圆桌台</button>
+            <button class="action-secondary sidebar-shortcut-button" id="open-knowledge-base" type="button">知识库</button>
           </div>
         </section>
       </aside>
@@ -384,6 +483,7 @@
           <div class="header-pills compact-tools">
             <button class="tiny-badge button-badge" id="follow-toggle" type="button">跟随新消息</button>
             <button class="tiny-badge button-badge" id="app-language-toggle" type="button">中文</button>
+            <button class="tiny-badge button-badge" id="app-theme-toggle" type="button">浅色</button>
           </div>
         </header>
 
@@ -452,7 +552,7 @@
 
         <section class="side-section">
           <div class="side-title-row">
-            <h2>配置席位</h2>
+            <h2 id="seat-config-title">配置席位</h2>
             <span class="tiny-badge" id="seat-config-progress">0/6</span>
           </div>
           <div class="inline-actions">
@@ -475,6 +575,9 @@
       </aside>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://unpkg.com/html-docx-js/dist/html-docx.js"></script>
     <script src="./app.js?v=3"></script>
   </body>
