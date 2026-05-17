@@ -1378,6 +1378,7 @@ let pendingDiscussionContinuationResolver = null;
 let activeRoundtableEvidenceId = "";
 let activeRoundtableEvidenceFilter = "all";
 let activeKnowledgeEntryId = "";
+let activeKnowledgePreviewMode = "normalized";
 const pendingEvidenceAnalysisIds = new Set();
 
 const peopleLibraryBackdrop = document.getElementById("people-library-backdrop");
@@ -1776,6 +1777,54 @@ function cleanKnowledgeLine(line) {
     .trim();
 }
 
+function buildKnowledgeLineComparisonKey(line) {
+  return cleanKnowledgeLine(String(line || "")
+    .replace(/^##\s*/, "")
+    .replace(/^\|\s*/, ""))
+    .toLowerCase()
+    .replace(/["'`]/g, "")
+    .replace(/[：:;；,.，。!！?？、()（）\[\]【】<>《》]/g, "")
+    .trim();
+}
+
+function shouldSkipRepeatedStructuredLine(structuredLines, candidateLine, isTableLine = false) {
+  if (!candidateLine) {
+    return false;
+  }
+  const recentLines = structuredLines.filter(Boolean).slice(-6);
+  if (!recentLines.length) {
+    return false;
+  }
+  if (recentLines[recentLines.length - 1] === candidateLine) {
+    return true;
+  }
+  const candidateKey = buildKnowledgeLineComparisonKey(candidateLine);
+  if (!candidateKey) {
+    return false;
+  }
+  const recentKeys = recentLines.map((line) => buildKnowledgeLineComparisonKey(line));
+  if (candidateLine.startsWith("## ") && recentKeys.slice(-3).includes(candidateKey)) {
+    return true;
+  }
+  if (!isTableLine && candidateKey.length >= 10 && recentKeys.includes(candidateKey)) {
+    return true;
+  }
+  return false;
+}
+
+function normalizeSpreadsheetRowCells(row) {
+  const cells = Array.isArray(row) ? row.map((cell) => cleanKnowledgeLine(cell)) : [];
+  const firstNonEmpty = cells.findIndex(Boolean);
+  if (firstNonEmpty === -1) {
+    return [];
+  }
+  let lastNonEmpty = cells.length - 1;
+  while (lastNonEmpty >= firstNonEmpty && !cells[lastNonEmpty]) {
+    lastNonEmpty -= 1;
+  }
+  return cells.slice(firstNonEmpty, lastNonEmpty + 1).map((cell) => cell || " ");
+}
+
 function isKnowledgeHeadingLine(line) {
   const cleaned = cleanKnowledgeLine(line);
   if (!cleaned || cleaned.length > 48) {
@@ -1810,11 +1859,15 @@ function buildStructuredKnowledgeText(rawText) {
       return;
     }
     const tableLike = looksLikeKnowledgeTableLine(line);
-    const prefixed = isKnowledgeHeadingLine(cleaned)
-      ? `## ${cleaned.replace(/^#+\s*/, "")}`
-      : tableLike
-        ? `| ${cleaned}`
+    const prefixed = tableLike
+      ? `| ${cleaned}`
+      : isKnowledgeHeadingLine(cleaned)
+        ? `## ${cleaned.replace(/^#+\s*/, "")}`
         : cleaned;
+    if (shouldSkipRepeatedStructuredLine(structuredLines, prefixed, tableLike)) {
+      previousWasTable = tableLike;
+      return;
+    }
     if (tableLike && previousWasTable) {
       structuredLines.push(prefixed);
     } else if (structuredLines[structuredLines.length - 1] && !isKnowledgeHeadingLine(cleaned) && !tableLike) {
@@ -2346,6 +2399,77 @@ async function saveProjectKnowledgeEntries(topicId, entries) {
   await saveAppState(getProjectKnowledgeKey(topicId), normalizeKnowledgeEntries(entries));
 }
 
+async function saveKnowledgeEntriesByEntryScope(entry, nextEntries) {
+  if (entry?.scope === "project") {
+    state.projectKnowledgeEntries = normalizeKnowledgeEntries(nextEntries);
+    await saveProjectKnowledgeEntries(entry.topicId || state.activeTopicId, state.projectKnowledgeEntries);
+    return;
+  }
+  state.globalKnowledgeEntries = normalizeKnowledgeEntries(nextEntries);
+  await saveGlobalKnowledgeEntries(state.globalKnowledgeEntries);
+}
+
+async function removeKnowledgeEntry(entryId) {
+  const allEntries = getKnowledgeScopeEntries();
+  const targetEntry = allEntries.find((entry) => entry.id === entryId);
+  if (!targetEntry) {
+    return false;
+  }
+  const confirmed = await openConfirmDialog({
+    title: langText("删除知识条目", "Delete Knowledge Entry"),
+    message: langText(`删除“${targetEntry.title}”后，这条资料在知识库中的原文件副本、标准化结果、chunks 和命中记录都会一起从当前浏览器存储中移除。已经导出到你磁盘上的 JSON 文件不会被自动删除。`, `Deleting "${targetEntry.title}" will remove its stored original file copy, normalized payload, chunks, and retrieval history from this browser storage. Any JSON files already exported to disk will not be deleted automatically.`),
+    confirmText: langText("删除", "Delete"),
+  });
+  if (!confirmed) {
+    return false;
+  }
+  const nextEntries = allEntries.filter((entry) => entry.id !== entryId);
+  await saveKnowledgeEntriesByEntryScope(targetEntry, nextEntries);
+  activeKnowledgeEntryId = nextEntries[0]?.id || "";
+  renderKnowledgeBaseWorkspace();
+  updateSharedAgentStatus(langText(`已删除知识条目“${targetEntry.title}”。`, `Deleted knowledge entry "${targetEntry.title}".`), "success");
+  return true;
+}
+
+async function buildKnowledgeFileFromEntry(entry) {
+  if (entry.originalDataUrl) {
+    const response = await fetch(entry.originalDataUrl);
+    const blob = await response.blob();
+    return new File([blob], entry.name || entry.title || "knowledge-file", { type: entry.type || blob.type || "application/octet-stream" });
+  }
+  const fallbackPayload = entry.textPreview || entry.summary || "";
+  return new File([fallbackPayload], entry.name || `${sanitizeKnowledgeFileBaseName(entry)}.txt`, { type: "text/plain;charset=utf-8" });
+}
+
+async function rebuildKnowledgeEntry(entryId) {
+  const allEntries = getKnowledgeScopeEntries();
+  const targetEntry = allEntries.find((entry) => entry.id === entryId);
+  if (!targetEntry) {
+    return false;
+  }
+  updateSharedAgentStatus(langText(`正在重建“${targetEntry.title}”的标准化结果...`, `Rebuilding normalized payload for "${targetEntry.title}"...`), "pending");
+  const rebuiltFile = await buildKnowledgeFileFromEntry(targetEntry);
+  const rebuiltEntry = await buildKnowledgeEntryFromFile(rebuiltFile, {
+    scope: targetEntry.scope,
+    category: targetEntry.category,
+    topicId: targetEntry.topicId || "",
+  });
+  const nextEntries = allEntries.map((entry) => entry.id === entryId ? {
+    ...rebuiltEntry,
+    id: targetEntry.id,
+    createdAt: targetEntry.createdAt,
+    storedAt: Date.now(),
+    retrievalCount: targetEntry.retrievalCount || 0,
+    lastRetrievedAt: targetEntry.lastRetrievedAt || 0,
+    retrievalLog: normalizeKnowledgeRetrievalLog(targetEntry.retrievalLog),
+  } : entry);
+  await saveKnowledgeEntriesByEntryScope(targetEntry, nextEntries);
+  activeKnowledgeEntryId = targetEntry.id;
+  renderKnowledgeBaseWorkspace();
+  updateSharedAgentStatus(langText(`已重建“${targetEntry.title}”的标准化结果。`, `Rebuilt normalized payload for "${targetEntry.title}".`), "success");
+  return true;
+}
+
 async function deleteProjectKnowledgeEntries(topicId) {
   if (!topicId) {
     return;
@@ -2622,7 +2746,7 @@ async function extractDocxTextPreview(file) {
     try {
       const zip = await window.JSZip.loadAsync(arrayBuffer);
       const xmlParts = await Promise.all(
-        ["word/document.xml", "word/footnotes.xml", "word/endnotes.xml", "word/header1.xml", "word/footer1.xml"]
+        ["word/document.xml", "word/footnotes.xml", "word/endnotes.xml"]
           .filter((path) => zip.file(path))
           .map(async (path) => ({ path, xmlText: await zip.file(path).async("string") }))
       );
@@ -2695,8 +2819,17 @@ async function extractSpreadsheetTextPreview(file) {
       if (!sheet) {
         return "";
       }
-      const csv = window.XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
-      return [`[${sheetName}]`, csv].filter(Boolean).join("\n");
+      const rows = window.XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false, raw: false })
+        .map((row) => normalizeSpreadsheetRowCells(row))
+        .filter((row) => row.length);
+      if (!rows.length) {
+        return "";
+      }
+      const normalizedRows = rows
+        .slice(0, 60)
+        .map((row) => row.length === 1 ? `## ${row[0]}` : `| ${row.join(" | ")}`)
+        .join("\n");
+      return [`## ${sheetName}`, normalizedRows].filter(Boolean).join("\n");
     })
     .filter(Boolean)
     .join("\n\n");
@@ -3039,11 +3172,18 @@ function renderKnowledgeBaseWorkspace() {
     </button>
   `).join("");
 
+  const previousKnowledgeEntryId = activeKnowledgeEntryId;
   const activeEntry = entries.find((entry) => entry.id === activeKnowledgeEntryId) || entries[0];
   if (!activeEntry) {
     return;
   }
+  if (previousKnowledgeEntryId !== activeEntry.id) {
+    activeKnowledgePreviewMode = getDefaultKnowledgePreviewMode(activeEntry);
+  }
   activeKnowledgeEntryId = activeEntry.id;
+  if (!["normalized", "chunks", "source"].includes(activeKnowledgePreviewMode)) {
+    activeKnowledgePreviewMode = getDefaultKnowledgePreviewMode(activeEntry);
+  }
   if (knowledgeSelectionPanel) {
     knowledgeSelectionPanel.innerHTML = `<div class="knowledge-summary-line">${escapeHtml(langText(`目录：${getKnowledgeCategoryLabel(activeEntry.category)}`, `Folder: ${getKnowledgeCategoryLabel(activeEntry.category)}`))}</div>`;
   }
@@ -3056,12 +3196,11 @@ function renderKnowledgeBaseWorkspace() {
         ${activeEntry.originalDataUrl ? `<button class="knowledge-action-button" type="button" data-knowledge-action="download-original" data-knowledge-id="${activeEntry.id}">${escapeHtml(langText("下载原文件", "Download Original"))}</button>` : ""}
         <button class="knowledge-action-button" type="button" data-knowledge-action="download-normalized-json" data-knowledge-id="${activeEntry.id}">${escapeHtml(langText("下载标准化 JSON", "Download Normalized JSON"))}</button>
         <button class="knowledge-action-button" type="button" data-knowledge-action="download-chunks-json" data-knowledge-id="${activeEntry.id}">${escapeHtml(langText("下载 Chunks JSON", "Download Chunks JSON"))}</button>
+        <button class="knowledge-action-button" type="button" data-knowledge-action="rebuild-normalized" data-knowledge-id="${activeEntry.id}">${escapeHtml(langText("重建标准化", "Rebuild Normalized"))}</button>
+        <button class="knowledge-action-button danger" type="button" data-knowledge-action="delete-entry" data-knowledge-id="${activeEntry.id}">${escapeHtml(langText("删除条目", "Delete Entry"))}</button>
       </div>`,
     ].join("");
   }
-  const recentRetrievalMarkup = (activeEntry.retrievalLog || []).length
-    ? `<div class="knowledge-ingestion-card"><div class="knowledge-ingestion-title">${escapeHtml(langText("最近命中记录", "Recent Retrievals"))}</div><div class="knowledge-ingestion-list">${activeEntry.retrievalLog.map((item) => `<div class="knowledge-ingestion-item"><div class="knowledge-ingestion-meta">${escapeHtml(`${formatEvidenceCreatedAt(item.timestamp)} · ${formatKnowledgeRetrievalContext(item.context)}${item.chunkIndex ? ` · Chunk ${item.chunkIndex}` : ""}`)}</div><div class="knowledge-ingestion-copy">${escapeHtml(item.query || langText("无检索词", "No query"))}</div><div class="knowledge-ingestion-copy is-muted">${escapeHtml(item.snippet || langText("本次命中未记录额外片段。", "No snippet was stored for this hit."))}</div></div>`).join("")}</div></div>`
-    : `<div class="knowledge-ingestion-card"><div class="knowledge-ingestion-title">${escapeHtml(langText("最近命中记录", "Recent Retrievals"))}</div><div class="knowledge-ingestion-copy is-muted">${escapeHtml(langText("这份资料还没有被讨论链路命中过。后续一旦进入 shared brief，这里会留下回溯记录。", "This document has not been used by the discussion flow yet. Once it enters the shared brief, its retrieval history will appear here."))}</div></div>`;
   knowledgeDetail.innerHTML = `
     <div class="evidence-detail-panel">
       <div class="evidence-detail-title">${escapeHtml(activeEntry.title)}</div>
@@ -3073,22 +3212,145 @@ function renderKnowledgeBaseWorkspace() {
         activeEntry.chunks?.length ? langText(`${activeEntry.chunks.length} 段`, `${activeEntry.chunks.length} chunks`) : "",
         activeEntry.size ? `${Math.max(1, Math.round(activeEntry.size / 1024))} KB` : "",
       ].filter(Boolean).join("  ·  "))}</div>
-      <div class="evidence-detail-surface">
-        <div class="knowledge-ingestion-card">
-          <div class="knowledge-ingestion-title">${escapeHtml(langText("入库流水", "Ingestion Pipeline"))}</div>
-          <div class="knowledge-ingestion-list">
-            <div class="knowledge-ingestion-item"><div class="knowledge-ingestion-meta">${escapeHtml(langText("原文件", "Original File"))}</div><div class="knowledge-ingestion-copy">${escapeHtml(`${activeEntry.name || activeEntry.title} · ${Math.max(1, Math.round((activeEntry.size || 0) / 1024))} KB`)}</div></div>
-            <div class="knowledge-ingestion-item"><div class="knowledge-ingestion-meta">${escapeHtml(langText("标准化结果", "Normalization"))}</div><div class="knowledge-ingestion-copy">${escapeHtml(`${getKnowledgeConversionStatusLabel(activeEntry.conversionStatus)} · ${activeEntry.normalizedFormat || langText("未识别", "Unknown")}`)}</div></div>
-            <div class="knowledge-ingestion-item"><div class="knowledge-ingestion-meta">${escapeHtml(langText("可检索状态", "Search Readiness"))}</div><div class="knowledge-ingestion-copy">${escapeHtml(activeEntry.conversionStatus === "ready" ? langText(`已生成 ${activeEntry.chunks?.length || 0} 个 chunk，可进入本地检索。`, `${activeEntry.chunks?.length || 0} chunks generated and ready for local retrieval.`) : langText("当前未形成稳定 chunk，讨论阶段不会稳定命中。", "No stable chunks were generated yet, so retrieval will be limited."))}</div></div>
-            <div class="knowledge-ingestion-item"><div class="knowledge-ingestion-meta">${escapeHtml(langText("存档时间", "Stored At"))}</div><div class="knowledge-ingestion-copy">${escapeHtml(formatEvidenceCreatedAt(activeEntry.storedAt || activeEntry.createdAt) || langText("未知", "Unknown"))}</div></div>
-          </div>
+      <div class="knowledge-preview-panel">
+        <div class="knowledge-preview-tabs" role="tablist" aria-label="${escapeHtml(langText("知识预览模式", "Knowledge Preview Modes"))}">
+          ${buildKnowledgePreviewTabsMarkup(activeKnowledgePreviewMode)}
         </div>
-        <div class="evidence-detail-copy">${escapeHtml(activeEntry.summary || langText("当前文件还没有提取到可展示的摘要。", "No summary has been extracted yet."))}</div>
-        ${activeEntry.textPreview ? `<div class="evidence-detail-copy">${escapeHtml(activeEntry.textPreview)}</div>` : `<div class="evidence-detail-placeholder">${escapeHtml(langText("这个文件已入库，但当前还没有提取出可展示的正文。", "This file has been stored, but no readable text preview is available yet."))}</div>`}
-        ${recentRetrievalMarkup}
+        <div class="knowledge-preview-viewport">
+          ${buildKnowledgePreviewContentMarkup(activeEntry, activeKnowledgePreviewMode)}
+        </div>
       </div>
     </div>
   `;
+}
+
+function buildKnowledgeDetailPreviewText(text, maxLines = 18) {
+  const normalized = normalizeKnowledgeText(text);
+  if (!normalized) {
+    return "";
+  }
+  const lines = normalized.split("\n");
+  if (lines.length <= maxLines) {
+    return normalized;
+  }
+  return `${lines.slice(0, maxLines).join("\n")}\n…`;
+}
+
+function getDefaultKnowledgePreviewMode(entry) {
+  if (entry?.originalDataUrl && entry?.normalizedFormat === "pdf") {
+    return "source";
+  }
+  return "normalized";
+}
+
+function getKnowledgePreviewTabLabel(mode) {
+  if (mode === "chunks") {
+    return langText("Chunks 预览", "Chunk Preview");
+  }
+  if (mode === "source") {
+    return langText("源文件预览", "Source Preview");
+  }
+  return langText("标准化预览", "Normalized Preview");
+}
+
+function isSparsePdfKnowledgeEntry(entry) {
+  if (entry?.normalizedFormat !== "pdf") {
+    return false;
+  }
+  const normalized = normalizeKnowledgeText(entry?.textPreview || "");
+  if (!normalized) {
+    return true;
+  }
+  const meaningfulLines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^##\s*第\s*\d+\s*页$/i.test(line));
+  return meaningfulLines.join(" ").length < 24;
+}
+
+function buildKnowledgePreviewTabsMarkup(activeMode) {
+  return ["normalized", "chunks", "source"].map((mode) => `
+    <button class="knowledge-preview-tab ${mode === activeMode ? "active" : ""}" type="button" data-knowledge-preview-mode="${mode}">
+      ${escapeHtml(getKnowledgePreviewTabLabel(mode))}
+    </button>
+  `).join("");
+}
+
+function buildKnowledgePreviewEmptyMarkup(title, copy) {
+  return `
+    <div class="knowledge-preview-empty">
+      <div class="knowledge-preview-empty-title">${escapeHtml(title)}</div>
+      <div class="knowledge-preview-empty-copy">${escapeHtml(copy)}</div>
+    </div>
+  `;
+}
+
+function buildKnowledgeNormalizedPreviewMarkup(entry) {
+  const normalizedText = normalizeKnowledgeText(entry?.textPreview || "");
+  if (!normalizedText) {
+    return buildKnowledgePreviewEmptyMarkup(
+      langText("当前没有标准化正文", "No normalized text yet"),
+      langText("这份资料已入库，但还没有形成稳定的标准化正文。你可以先看源文件预览，或者点击重建标准化再试一次。", "This document is stored, but no stable normalized text is available yet. Check the source preview or rebuild normalization and try again.")
+    );
+  }
+  if (isSparsePdfKnowledgeEntry(entry)) {
+    return buildKnowledgePreviewEmptyMarkup(
+      langText("PDF 只提取到很少文本", "Only limited PDF text extracted"),
+      langText("这份 PDF 当前主要只抽到了页码或极少正文，所以标准化预览会很薄。建议切到“源文件预览”直接看原 PDF；后续要提升这类文件，需要补 OCR/图片型 PDF 处理。", "This PDF currently only yielded page markers or very little body text, so the normalized preview is intentionally sparse. Switch to Source Preview to inspect the original PDF. Better handling later will require OCR or image-PDF processing.")
+    );
+  }
+  return `<div class="knowledge-preview-scroll">${escapeHtml(normalizedText)}</div>`;
+}
+
+function buildKnowledgeChunkPreviewMarkup(entry) {
+  if (!entry?.chunks?.length) {
+    return buildKnowledgePreviewEmptyMarkup(
+      langText("当前没有可用 chunks", "No chunks available"),
+      isSparsePdfKnowledgeEntry(entry)
+        ? langText("这份 PDF 当前没有抽出足够正文，因此还没形成可检索 chunks。先看源文件预览会更直观。", "This PDF does not have enough extracted text to form retrieval chunks yet. The source preview will be more useful for now.")
+        : langText("当前还没有生成稳定 chunks。你可以点击重建标准化再试一次。", "No stable chunks have been generated yet. Try rebuilding normalization.")
+    );
+  }
+  return `
+    <div class="knowledge-chunk-list">
+      ${entry.chunks.map((chunk) => `
+        <section class="knowledge-chunk-card">
+          <div class="knowledge-chunk-meta">${escapeHtml(langText(`Chunk ${chunk.chunkIndex} · ${String(chunk.text || "").length} 字符`, `Chunk ${chunk.chunkIndex} · ${String(chunk.text || "").length} chars`))}</div>
+          <div class="knowledge-preview-scroll">${escapeHtml(chunk.text || "")}</div>
+        </section>
+      `).join("")}
+    </div>
+  `;
+}
+
+function buildKnowledgeSourcePreviewMarkup(entry) {
+  if (!entry?.originalDataUrl) {
+    return buildKnowledgePreviewEmptyMarkup(
+      langText("当前没有源文件副本", "No source file copy"),
+      langText("这条知识没有保存可直接预览的原文件副本。你仍可以看标准化结果或重新上传原文件。", "No previewable source file copy was saved for this entry. You can still inspect the normalized result or upload the original again.")
+    );
+  }
+  if (entry?.normalizedFormat === "pdf") {
+    return `<iframe class="knowledge-source-frame" src="${escapeHtml(entry.originalDataUrl)}" title="${escapeHtml(entry.title || "PDF Source")}"></iframe>`;
+  }
+  if (String(entry?.type || "").startsWith("image/")) {
+    return `<img class="knowledge-source-image" src="${escapeHtml(entry.originalDataUrl)}" alt="${escapeHtml(entry.title || "Knowledge Source")}" />`;
+  }
+  return buildKnowledgePreviewEmptyMarkup(
+    langText("当前格式不支持内嵌源文件预览", "Inline source preview is unavailable"),
+    langText("这类文件已保存原件，但浏览器里不适合直接内嵌展示。你可以使用上方“下载原文件”查看。", "The original file is stored, but this format is not suitable for inline browser preview. Use Download Original above to inspect it.")
+  );
+}
+
+function buildKnowledgePreviewContentMarkup(entry, mode) {
+  if (mode === "chunks") {
+    return buildKnowledgeChunkPreviewMarkup(entry);
+  }
+  if (mode === "source") {
+    return buildKnowledgeSourcePreviewMarkup(entry);
+  }
+  return buildKnowledgeNormalizedPreviewMarkup(entry);
 }
 
 async function buildKnowledgeEntryFromFile(file, options = {}) {
@@ -11622,7 +11884,29 @@ function bindEvents() {
     }
     if (action === "download-chunks-json") {
       downloadJsonFile(`${fileBaseName}.chunks.json`, buildKnowledgeChunkExportPayload(entry));
+      return;
     }
+    if (action === "rebuild-normalized") {
+      rebuildKnowledgeEntry(entry.id).catch((error) => {
+        console.error("Knowledge rebuild failed", error);
+        updateSharedAgentStatus(error?.message || langText("重建标准化失败。", "Failed to rebuild normalized payload."), "error");
+      });
+      return;
+    }
+    if (action === "delete-entry") {
+      removeKnowledgeEntry(entry.id).catch((error) => {
+        console.error("Knowledge delete failed", error);
+        updateSharedAgentStatus(error?.message || langText("删除知识条目失败。", "Failed to delete knowledge entry."), "error");
+      });
+    }
+  });
+  knowledgeDetail?.addEventListener("click", (event) => {
+    const trigger = event.target.closest("[data-knowledge-preview-mode]");
+    if (!trigger) {
+      return;
+    }
+    activeKnowledgePreviewMode = trigger.dataset.knowledgePreviewMode || "normalized";
+    renderKnowledgeBaseWorkspace();
   });
 
   openRoundtableWorkbenchButton?.addEventListener("click", () => {
