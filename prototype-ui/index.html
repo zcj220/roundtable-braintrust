@@ -250,7 +250,7 @@
       <div class="modal-header">
         <div>
           <p class="section-label" id="knowledge-base-section-label">知识库</p>
-          <h2 id="knowledge-base-title">全局知识库与项目知识包</h2>
+          <h2 id="knowledge-base-title">全局知识库</h2>
         </div>
         <div class="header-actions roundtable-toolbar-actions">
           <button class="ghost-link" id="knowledge-upload-trigger" type="button">上传文档</button>
@@ -258,10 +258,6 @@
         </div>
       </div>
       <div class="modal-toolbar knowledge-toolbar">
-        <div class="tab-row" id="knowledge-scope-tabs">
-          <button class="tab-pill active" id="knowledge-scope-global" data-scope="global" type="button">全局知识库</button>
-          <button class="tab-pill" id="knowledge-scope-project" data-scope="project" type="button">项目知识包</button>
-        </div>
         <div class="knowledge-toolbar-fields">
           <label class="roundtable-filter-field" for="knowledge-search">
             <span id="knowledge-search-label">检索</span>
@@ -271,11 +267,6 @@
             <span id="knowledge-category-filter-label">目录</span>
             <select id="knowledge-category-filter">
               <option value="all">全部</option>
-              <option value="company">公司</option>
-              <option value="product">产品</option>
-              <option value="process">流程</option>
-              <option value="reference">参考</option>
-              <option value="project">项目</option>
             </select>
           </label>
           <label class="roundtable-filter-field" for="knowledge-tag-filter">
@@ -287,14 +278,14 @@
           <label class="roundtable-filter-field" for="knowledge-upload-category">
             <span id="knowledge-upload-category-label">上传到目录</span>
             <select id="knowledge-upload-category">
-              <option value="company">公司</option>
-              <option value="product">产品</option>
-              <option value="process">流程</option>
-              <option value="reference" selected>参考</option>
-              <option value="project">项目</option>
+              <option value="" selected>请选择目录</option>
             </select>
+            <div class="knowledge-category-actions">
+              <button class="ghost-link compact-link" id="knowledge-category-add" type="button">新增目录</button>
+              <button class="ghost-link compact-link" id="knowledge-category-rename" type="button">改名</button>
+              <button class="ghost-link compact-link danger-link" id="knowledge-category-delete" type="button">删除</button>
+            </div>
           </label>
-          <button class="tiny-badge button-badge" id="knowledge-global-toggle" type="button">本项目调用全局知识库 ✔</button>
         </div>
       </div>
       <div class="knowledge-note-strip" id="knowledge-note-strip">第一版支持 TXT、Markdown、JSON、CSV、PDF、DOCX、XLSX、XLS；旧版 DOC 建议先转为 DOCX。</div>
@@ -570,15 +561,16 @@
           </div>
           <div class="inline-actions seat-ai-row">
             <button class="seat-inline-toggle" id="toggle-ai-role-recommendation" type="button" aria-pressed="true"></button>
+            <button class="seat-inline-toggle" id="toggle-knowledge-enabled" type="button" aria-pressed="true"></button>
+          </div>
+          <div class="inline-actions seat-library-row">
+            <button class="ghost-link add-seat-trigger" id="open-seat-picker" type="button">席位</button>
+            <button class="ghost-link" id="regenerate-personas" type="button" style="display:none">重新生成</button>
             <button class="seat-voice-toggle" id="toggle-voice-read" type="button" aria-pressed="false" aria-label="切换朗读">
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="M5 9h4l5-4v14l-5-4H5V9Zm11.2-1.8a1 1 0 0 1 1.4 0A7.9 7.9 0 0 1 20 12a7.9 7.9 0 0 1-2.4 4.8 1 1 0 1 1-1.4-1.4A5.9 5.9 0 0 0 18 12a5.9 5.9 0 0 0-1.8-3.4 1 1 0 0 1 0-1.4Zm-2.8 2.8a1 1 0 0 1 1.4 0A4 4 0 0 1 16 12a4 4 0 0 1-1.2 2.8 1 1 0 0 1-1.4-1.4A2 2 0 0 0 14 12a2 2 0 0 0-.6-1.4 1 1 0 0 1 0-1.4Z" fill="currentColor"></path>
               </svg>
             </button>
-          </div>
-          <div class="inline-actions seat-library-row">
-            <button class="ghost-link add-seat-trigger" id="open-seat-picker" type="button">席位</button>
-            <button class="ghost-link" id="regenerate-personas" type="button" style="display:none">重新生成</button>
           </div>
           <div class="inline-actions seat-control-row">
             <button class="action-primary compact-primary" id="start-discussion" type="button">开始讨论</button>

@@ -632,10 +632,15 @@ button {
 .seat-ai-row {
   align-items: center;
   margin-top: 10px;
+  gap: 8px;
+  flex-wrap: nowrap;
+  justify-content: space-between;
 }
 
-.seat-ai-row .seat-voice-toggle {
-  margin-left: auto;
+.seat-ai-row .seat-inline-toggle {
+  gap: 6px;
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .seat-library-row,
@@ -666,6 +671,10 @@ button {
   font-size: 13px;
   color: var(--text);
   white-space: nowrap;
+}
+
+.seat-ai-row .seat-toggle-label {
+  font-size: 12px;
 }
 
 .seat-toggle-track {
@@ -712,6 +721,10 @@ button {
   padding: 0;
   position: relative;
   margin-left: 10px;
+}
+
+.seat-library-row .seat-voice-toggle {
+  margin-left: auto;
 }
 
 .seat-voice-toggle svg {
@@ -1156,6 +1169,23 @@ button {
   min-width: 0;
 }
 
+.knowledge-toolbar-fields #knowledge-category-filter,
+.knowledge-toolbar-fields #knowledge-upload-category {
+  width: 220px;
+  max-width: 100%;
+}
+
+.knowledge-category-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.knowledge-category-actions .ghost-link {
+  padding: 0;
+}
+
 .roundtable-filter-field select {
   width: auto;
   min-width: 88px;
@@ -1171,6 +1201,9 @@ button {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .roundtable-filter-field select option {

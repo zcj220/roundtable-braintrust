@@ -1211,6 +1211,7 @@ const USER_MEMORY_KEY = "userMemory";
 const PROJECT_ARTIFACTS_KEY_PREFIX = "projectArtifacts:";
 const GLOBAL_KNOWLEDGE_KEY = "knowledgeEntries:global";
 const PROJECT_KNOWLEDGE_KEY_PREFIX = "knowledgeEntries:project:";
+const KNOWLEDGE_CATEGORY_CONFIG_KEY = "knowledgeCategories";
 const SHARED_AGENT_IDS = [
   "user-memory-agent",
   "project-memory-agent",
@@ -1218,6 +1219,48 @@ const SHARED_AGENT_IDS = [
   "web-search-agent",
   "multimodal-evidence-agent",
 ];
+
+const DEFAULT_KNOWLEDGE_CATEGORIES = [
+  { id: "company", label: "公司", labelEn: "Company" },
+  { id: "product", label: "产品", labelEn: "Product" },
+  { id: "process", label: "流程", labelEn: "Process" },
+  { id: "reference", label: "参考", labelEn: "Reference" },
+  { id: "project", label: "项目", labelEn: "Project" },
+];
+
+function buildDefaultKnowledgeCategories() {
+  return DEFAULT_KNOWLEDGE_CATEGORIES.map((category) => ({ ...category }));
+}
+
+function normalizeKnowledgeCategories(records) {
+  const source = Array.isArray(records) && records.length ? records : buildDefaultKnowledgeCategories();
+  const seenIds = new Set();
+  const normalized = source
+    .filter(Boolean)
+    .map((record, index) => {
+      if (typeof record === "string") {
+        return {
+          id: `knowledge-category-${index + 1}`,
+          label: record,
+          labelEn: record,
+        };
+      }
+      const label = String(record.label || record.name || record.id || "").trim();
+      const id = String(record.id || "").trim() || `knowledge-category-${index + 1}`;
+      if (!label || seenIds.has(id)) {
+        return null;
+      }
+      seenIds.add(id);
+      return {
+        id,
+        label,
+        labelEn: String(record.labelEn || record.label || record.name || id).trim() || label,
+      };
+    })
+    .filter(Boolean);
+
+  return normalized.length ? normalized : buildDefaultKnowledgeCategories();
+}
 
 function buildEmptyUserMemory() {
   return {
@@ -1278,6 +1321,7 @@ const state = {
   discussionRoundNotes: [],
   recommendedRoleGenerationMeta: null,
   aiAutoRecommendEnabled: true,
+  knowledgeEnabled: true,
   voiceReadEnabled: false,
   topicConfirmed: false,
   seatsReady: false,
@@ -1298,6 +1342,7 @@ const state = {
   mappings: { main: "", challenger: "", judge: "", multimodal: "" },
   selectedIds: new Set(),
   seatAssignments: {},
+  seatLayoutCustomized: false,
   discussionOrder: {},
   ttsVoiceAssignments: {},
   seatModelAssignments: {},
@@ -1309,6 +1354,7 @@ const state = {
   projectArtifacts: [],
   globalKnowledgeEntries: [],
   projectKnowledgeEntries: [],
+  knowledgeCategories: buildDefaultKnowledgeCategories(),
   sharedAgentQuery: "",
   sharedAgentSources: "",
   sharedAgentStatus: { text: "", tone: "" },
@@ -1443,6 +1489,7 @@ const startDiscussionButton = document.getElementById("start-discussion");
 const stopDiscussionButton = document.getElementById("stop-discussion");
 const regeneratePersonasButton = document.getElementById("regenerate-personas");
 const toggleAiRoleRecommendationButton = document.getElementById("toggle-ai-role-recommendation");
+const toggleKnowledgeEnabledButton = document.getElementById("toggle-knowledge-enabled");
 const toggleVoiceReadButton = document.getElementById("toggle-voice-read");
 const seatFeedback = document.getElementById("seat-feedback");
 const seatStack = document.getElementById("seat-stack");
@@ -1472,6 +1519,9 @@ const knowledgeSearchInputField = document.getElementById("knowledge-search");
 const knowledgeCategoryFilterSelect = document.getElementById("knowledge-category-filter");
 const knowledgeTagFilterSelect = document.getElementById("knowledge-tag-filter");
 const knowledgeUploadCategorySelect = document.getElementById("knowledge-upload-category");
+const knowledgeCategoryAddButton = document.getElementById("knowledge-category-add");
+const knowledgeCategoryRenameButton = document.getElementById("knowledge-category-rename");
+const knowledgeCategoryDeleteButton = document.getElementById("knowledge-category-delete");
 
 let dbPromise;
 let roleEditorContext = null;
@@ -1671,6 +1721,228 @@ function normalizeKnowledgeEntries(records) {
     : [];
 }
 
+function getKnowledgeCategoryDefinition(categoryId) {
+  return normalizeKnowledgeCategories(state.knowledgeCategories).find((category) => category.id === categoryId) || null;
+}
+
+function getKnowledgeCategoryLabel(categoryId) {
+  if (!categoryId) {
+    return langText("未分类", "Uncategorized");
+  }
+  const category = getKnowledgeCategoryDefinition(categoryId);
+  if (!category) {
+    return String(categoryId);
+  }
+  return state.appLanguage === "en"
+    ? String(category.labelEn || category.label || category.id)
+    : String(category.label || category.labelEn || category.id);
+}
+
+function getKnowledgeCategoryShortLabel(label, maxChars = 12) {
+  const chars = Array.from(String(label || "").trim());
+  if (chars.length <= maxChars) {
+    return chars.join("");
+  }
+  return `${chars.slice(0, Math.max(0, maxChars - 3)).join("")}...`;
+}
+
+function renderKnowledgeCategoryOptions() {
+  const categories = normalizeKnowledgeCategories(state.knowledgeCategories);
+  state.knowledgeCategories = categories;
+
+  if (knowledgeCategoryFilterSelect) {
+    const selectedValue = knowledgeCategoryFilterSelect.value || "all";
+    knowledgeCategoryFilterSelect.innerHTML = [
+      `<option value="all">${escapeHtml(langText("全部", "All"))}</option>`,
+      ...categories.map((category) => {
+        const label = getKnowledgeCategoryLabel(category.id);
+        return `<option value="${escapeHtml(category.id)}" title="${escapeHtml(label)}">${escapeHtml(getKnowledgeCategoryShortLabel(label))}</option>`;
+      }),
+    ].join("");
+    knowledgeCategoryFilterSelect.value = categories.some((category) => category.id === selectedValue) ? selectedValue : "all";
+    const selectedCategoryLabel = selectedValue === "all" ? langText("全部", "All") : getKnowledgeCategoryLabel(knowledgeCategoryFilterSelect.value);
+    knowledgeCategoryFilterSelect.title = selectedCategoryLabel;
+  }
+
+  if (knowledgeUploadCategorySelect) {
+    const selectedValue = String(knowledgeUploadCategorySelect.value || "").trim();
+    knowledgeUploadCategorySelect.innerHTML = [
+      `<option value="">${escapeHtml(langText("请选择目录", "Choose Folder"))}</option>`,
+      ...categories.map((category) => {
+        const label = getKnowledgeCategoryLabel(category.id);
+        return `<option value="${escapeHtml(category.id)}" title="${escapeHtml(label)}">${escapeHtml(getKnowledgeCategoryShortLabel(label))}</option>`;
+      }),
+    ].join("");
+    knowledgeUploadCategorySelect.value = categories.some((category) => category.id === selectedValue) ? selectedValue : "";
+    knowledgeUploadCategorySelect.title = knowledgeUploadCategorySelect.value ? getKnowledgeCategoryLabel(knowledgeUploadCategorySelect.value) : langText("请选择目录", "Choose Folder");
+  }
+}
+
+async function saveKnowledgeCategories(categories) {
+  state.knowledgeCategories = normalizeKnowledgeCategories(categories);
+  await saveAppState(KNOWLEDGE_CATEGORY_CONFIG_KEY, state.knowledgeCategories);
+}
+
+function createKnowledgeCategoryId() {
+  return `knowledge-category-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function getSelectedKnowledgeCategoryIdForManagement() {
+  const selectedCategoryId = String(knowledgeUploadCategorySelect?.value || "").trim();
+  if (selectedCategoryId) {
+    return selectedCategoryId;
+  }
+  updateSharedAgentStatus(langText("请先在“上传到目录”里选中一个目录，再执行改名或删除。", "Choose a folder in the upload selector before renaming or deleting it."), "error");
+  knowledgeUploadCategorySelect?.focus();
+  return "";
+}
+
+function normalizeKnowledgeCategoryName(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function hasDuplicateKnowledgeCategoryName(name, ignoreId = "") {
+  const normalizedName = normalizeKnowledgeCategoryName(name).toLowerCase();
+  return normalizeKnowledgeCategories(state.knowledgeCategories).some((category) => category.id !== ignoreId && normalizeKnowledgeCategoryName(category.label).toLowerCase() === normalizedName);
+}
+
+async function remapKnowledgeCategoryAcrossEntries(sourceCategoryId, targetCategoryId) {
+  if (!sourceCategoryId || !targetCategoryId || sourceCategoryId === targetCategoryId) {
+    return;
+  }
+
+  const remapEntries = (entries) => {
+    let changed = false;
+    const nextEntries = normalizeKnowledgeEntries(entries).map((entry) => {
+      if (entry.category !== sourceCategoryId) {
+        return entry;
+      }
+      changed = true;
+      return {
+        ...entry,
+        category: targetCategoryId,
+        tags: Array.isArray(entry.tags) ? entry.tags.filter((tag) => tag !== sourceCategoryId) : [],
+      };
+    });
+    return { changed, nextEntries };
+  };
+
+  const globalResult = remapEntries(state.globalKnowledgeEntries);
+  if (globalResult.changed) {
+    state.globalKnowledgeEntries = globalResult.nextEntries;
+    await saveGlobalKnowledgeEntries(state.globalKnowledgeEntries);
+  }
+
+  const activeTopicId = state.activeTopicId;
+  for (const topic of state.topics) {
+    if (!topic?.id) {
+      continue;
+    }
+    const entries = topic.id === activeTopicId ? state.projectKnowledgeEntries : await loadProjectKnowledgeEntries(topic.id);
+    const projectResult = remapEntries(entries);
+    if (!projectResult.changed) {
+      continue;
+    }
+    if (topic.id === activeTopicId) {
+      state.projectKnowledgeEntries = projectResult.nextEntries;
+    }
+    await saveProjectKnowledgeEntries(topic.id, projectResult.nextEntries);
+  }
+}
+
+async function handleAddKnowledgeCategory() {
+  const rawName = window.prompt(langText("输入新目录名称", "Enter a new folder name"), "");
+  if (rawName === null) {
+    return;
+  }
+  const nextName = normalizeKnowledgeCategoryName(rawName);
+  if (!nextName) {
+    updateSharedAgentStatus(langText("目录名称不能为空。", "Folder name cannot be empty."), "error");
+    return;
+  }
+  if (hasDuplicateKnowledgeCategoryName(nextName)) {
+    updateSharedAgentStatus(langText("已经有同名目录了。", "A folder with the same name already exists."), "error");
+    return;
+  }
+  const nextCategory = { id: createKnowledgeCategoryId(), label: nextName, labelEn: nextName };
+  await saveKnowledgeCategories([...state.knowledgeCategories, nextCategory]);
+  renderKnowledgeCategoryOptions();
+  if (knowledgeUploadCategorySelect) {
+    knowledgeUploadCategorySelect.value = nextCategory.id;
+  }
+  renderKnowledgeBaseWorkspace();
+  updateSharedAgentStatus(langText(`已新增目录“${nextName}”。`, `Added folder "${nextName}".`), "success");
+}
+
+async function handleRenameKnowledgeCategory() {
+  const categoryId = getSelectedKnowledgeCategoryIdForManagement();
+  if (!categoryId) {
+    return;
+  }
+  const targetCategory = getKnowledgeCategoryDefinition(categoryId);
+  if (!targetCategory) {
+    updateSharedAgentStatus(langText("当前目录不存在，刷新后再试。", "The selected folder no longer exists. Refresh and try again."), "error");
+    return;
+  }
+  const rawName = window.prompt(langText("输入新的目录名称", "Enter the new folder name"), targetCategory.label || "");
+  if (rawName === null) {
+    return;
+  }
+  const nextName = normalizeKnowledgeCategoryName(rawName);
+  if (!nextName) {
+    updateSharedAgentStatus(langText("目录名称不能为空。", "Folder name cannot be empty."), "error");
+    return;
+  }
+  if (hasDuplicateKnowledgeCategoryName(nextName, categoryId)) {
+    updateSharedAgentStatus(langText("已经有同名目录了。", "A folder with the same name already exists."), "error");
+    return;
+  }
+  await saveKnowledgeCategories(state.knowledgeCategories.map((category) => category.id === categoryId ? { ...category, label: nextName, labelEn: nextName } : category));
+  renderKnowledgeCategoryOptions();
+  if (knowledgeUploadCategorySelect) {
+    knowledgeUploadCategorySelect.value = categoryId;
+  }
+  renderKnowledgeBaseWorkspace();
+  updateSharedAgentStatus(langText(`目录已改名为“${nextName}”。`, `Folder renamed to "${nextName}".`), "success");
+}
+
+async function handleDeleteKnowledgeCategory() {
+  const categoryId = getSelectedKnowledgeCategoryIdForManagement();
+  if (!categoryId) {
+    return;
+  }
+  const categories = normalizeKnowledgeCategories(state.knowledgeCategories);
+  if (categories.length <= 1) {
+    updateSharedAgentStatus(langText("至少要保留一个目录，当前不能再删。", "At least one folder must remain."), "error");
+    return;
+  }
+  const targetCategory = categories.find((category) => category.id === categoryId);
+  if (!targetCategory) {
+    updateSharedAgentStatus(langText("当前目录不存在，刷新后再试。", "The selected folder no longer exists. Refresh and try again."), "error");
+    return;
+  }
+  const fallbackCategory = categories.find((category) => category.id !== categoryId) || categories[0];
+  const confirmed = await openConfirmDialog({
+    title: langText("删除目录", "Delete Folder"),
+    message: langText(`删除目录“${targetCategory.label}”后，原来挂在这个目录下的文档会自动改到“${getKnowledgeCategoryLabel(fallbackCategory.id)}”。`, `Delete folder "${targetCategory.label}"? Existing documents under it will be moved to "${getKnowledgeCategoryLabel(fallbackCategory.id)}".`),
+    confirmText: langText("删除", "Delete"),
+  });
+  if (!confirmed) {
+    return;
+  }
+  await remapKnowledgeCategoryAcrossEntries(categoryId, fallbackCategory.id);
+  await saveKnowledgeCategories(categories.filter((category) => category.id !== categoryId));
+  renderKnowledgeCategoryOptions();
+  if (knowledgeCategoryFilterSelect) {
+    knowledgeCategoryFilterSelect.value = "all";
+  }
+  if (knowledgeUploadCategorySelect) {
+    knowledgeUploadCategorySelect.value = "";
+  }
+  renderKnowledgeBaseWorkspace();
+  updateSharedAgentStatus(langText(`目录“${targetCategory.label}”已删除，相关文档已转到“${getKnowledgeCategoryLabel(fallbackCategory.id)}”。`, `Folder "${targetCategory.label}" was deleted and its documents were moved to "${getKnowledgeCategoryLabel(fallbackCategory.id)}".`), "success");
+}
+
 async function loadGlobalKnowledgeEntries() {
   return normalizeKnowledgeEntries(await loadAppState(GLOBAL_KNOWLEDGE_KEY, []));
 }
@@ -1802,6 +2074,15 @@ function updateSharedAgentStatus(text, tone = "") {
   }
   sharedAgentStatus.textContent = text;
   sharedAgentStatus.className = `agent-status ${tone}`.trim();
+}
+
+function requireKnowledgeUploadCategory() {
+  const category = String(knowledgeUploadCategorySelect?.value || "").trim();
+  if (!category) {
+    knowledgeUploadCategorySelect?.focus();
+    throw new Error(langText("上传前请先选择知识目录。", "Please choose a knowledge folder before uploading."));
+  }
+  return category;
 }
 
 async function persistUserMemory() {
@@ -2014,12 +2295,6 @@ function getKnowledgeEntryFormatLabel(entry) {
 }
 
 function getKnowledgeScopeEntries() {
-  if (state.knowledgeScope === "project") {
-    return normalizeKnowledgeEntries([
-      ...state.projectKnowledgeEntries,
-      ...(state.projectUsesGlobalKnowledge ? state.globalKnowledgeEntries : []),
-    ]);
-  }
   return normalizeKnowledgeEntries(state.globalKnowledgeEntries);
 }
 
@@ -2054,7 +2329,7 @@ function filterKnowledgeEntries(entries) {
     if (!searchTerm) {
       return true;
     }
-    const haystack = [entry.title, entry.summary, entry.textPreview, ...(entry.tags || [])].join(" ").toLowerCase();
+    const haystack = [entry.title, getKnowledgeCategoryLabel(entry.category), entry.summary, entry.textPreview, ...(entry.tags || [])].join(" ").toLowerCase();
     return haystack.includes(searchTerm);
   });
 }
@@ -2073,8 +2348,8 @@ function renderKnowledgeBaseWorkspace() {
   }
 
   knowledgeSummaryStrip.innerHTML = `
-    <div class="knowledge-summary-line">${escapeHtml(state.knowledgeScope === "project" ? langText("当前查看：项目知识包", "Viewing: Project Pack") : langText("当前查看：全局知识库", "Viewing: Global Knowledge"))}</div>
-    <div class="knowledge-summary-line">${escapeHtml(langText(`全局 ${state.globalKnowledgeEntries.length} 条 · 项目 ${state.projectKnowledgeEntries.length} 条`, `Global ${state.globalKnowledgeEntries.length} · Project ${state.projectKnowledgeEntries.length}`))}</div>
+    <div class="knowledge-summary-line">${escapeHtml(langText("当前查看：全局知识库", "Viewing: Global Knowledge"))}</div>
+    <div class="knowledge-summary-line">${escapeHtml(langText(`当前共 ${state.globalKnowledgeEntries.length} 条资料`, `${state.globalKnowledgeEntries.length} items in the knowledge base`))}</div>
   `;
 
   if (!entries.some((entry) => entry.id === activeKnowledgeEntryId)) {
@@ -2083,7 +2358,7 @@ function renderKnowledgeBaseWorkspace() {
 
   if (!entries.length) {
     activeKnowledgeEntryId = "";
-    knowledgeList.innerHTML = `<div class="empty-panel">${escapeHtml(langText("当前知识库还是空的。先上传文档，或切换到另一个范围。", "The knowledge base is empty. Upload documents or switch scope."))}</div>`;
+    knowledgeList.innerHTML = `<div class="empty-panel">${escapeHtml(langText("当前知识库还是空的。先上传文档。", "The knowledge base is empty. Upload documents to get started."))}</div>`;
     knowledgeDetail.innerHTML = `<div class="evidence-detail-empty">${escapeHtml(langText("右侧会显示文档摘要、提取文本和基础信息。", "Document summary, extracted text, and metadata will appear here."))}</div>`;
     if (knowledgeSelectionPanel) {
       knowledgeSelectionPanel.innerHTML = "";
@@ -2108,7 +2383,7 @@ function renderKnowledgeBaseWorkspace() {
   }
   activeKnowledgeEntryId = activeEntry.id;
   if (knowledgeSelectionPanel) {
-    knowledgeSelectionPanel.innerHTML = `<div class="knowledge-summary-line">${escapeHtml(langText(`目录：${activeEntry.category || "reference"}`, `Folder: ${activeEntry.category || "reference"}`))}</div>`;
+    knowledgeSelectionPanel.innerHTML = `<div class="knowledge-summary-line">${escapeHtml(langText(`目录：${getKnowledgeCategoryLabel(activeEntry.category)}`, `Folder: ${getKnowledgeCategoryLabel(activeEntry.category)}`))}</div>`;
   }
   if (knowledgeEditorPanel) {
     knowledgeEditorPanel.innerHTML = `<div class="knowledge-summary-line">${escapeHtml(langText(`标签：${(activeEntry.tags || []).join(" / ") || "无"}`, `Tags: ${(activeEntry.tags || []).join(" / ") || "none"}`))}</div>`;
@@ -2118,7 +2393,7 @@ function renderKnowledgeBaseWorkspace() {
       <div class="evidence-detail-title">${escapeHtml(activeEntry.title)}</div>
       <div class="evidence-detail-meta">${escapeHtml([
         activeEntry.scope === "project" ? langText("项目知识包", "Project Pack") : langText("全局知识库", "Global Knowledge"),
-        activeEntry.category || "reference",
+        getKnowledgeCategoryLabel(activeEntry.category),
         activeEntry.size ? `${Math.max(1, Math.round(activeEntry.size / 1024))} KB` : "",
       ].filter(Boolean).join("  ·  "))}</div>
       <div class="evidence-detail-surface">
@@ -2142,7 +2417,7 @@ async function buildKnowledgeEntryFromFile(file, options = {}) {
     type: file.type || "application/octet-stream",
     size: file.size || 0,
     category,
-    tags: uniqueStrings([category, extension].filter(Boolean)),
+    tags: uniqueStrings([extension].filter(Boolean)),
     summary: summarizeText(textPreview || `${file.name || langText("文件", "File")} · ${langText("已上传入库", "stored in knowledge base")}`, 180),
     textPreview,
     sourceUrl: "",
@@ -2159,7 +2434,7 @@ async function handleKnowledgeUploads(files) {
     ensureActiveTopicSession();
   }
   const scope = state.knowledgeScope === "project" ? "project" : "global";
-  const category = knowledgeUploadCategorySelect?.value || "reference";
+  const category = requireKnowledgeUploadCategory();
   const topicId = scope === "project" ? state.activeTopicId : "";
   const newEntries = await Promise.all(attachments.map((file) => buildKnowledgeEntryFromFile(file, { scope, category, topicId })));
   if (scope === "project") {
@@ -3388,6 +3663,7 @@ function buildCurrentTopicSnapshot() {
     recommendedRoles: state.recommendedRoles,
     selectedIds: [...state.selectedIds],
     seatAssignments: { ...state.seatAssignments },
+    seatLayoutCustomized: state.seatLayoutCustomized,
     discussionOrder: { ...state.discussionOrder },
     ttsVoiceAssignments: { ...state.ttsVoiceAssignments },
     seatModelAssignments: { ...state.seatModelAssignments },
@@ -3518,12 +3794,17 @@ function applyTopicSnapshot(snapshot) {
   }
   state.selectedIds = new Set(snapshot.selectedIds || []);
   state.seatAssignments = snapshot.seatAssignments || {};
+  state.seatLayoutCustomized = !!snapshot.seatLayoutCustomized;
   state.discussionOrder = snapshot.discussionOrder || {};
   state.ttsVoiceAssignments = snapshot.ttsVoiceAssignments || {};
   state.seatModelAssignments = snapshot.seatModelAssignments || {};
   sanitizeSeatModelAssignments();
-  ensureCoreAssignments();
-  syncDiscussionOrder();
+  if (state.seatLayoutCustomized) {
+    ensureCoreAssignments();
+    syncDiscussionOrder();
+  } else {
+    applyDefaultSeatLayout([...state.selectedIds], { force: true });
+  }
   state.pendingAttachments = snapshot.pendingAttachments || [];
   userInput.value = snapshot.userInput || "";
   discussionStream.innerHTML = snapshot.discussionHtml || "";
@@ -4103,8 +4384,6 @@ function applyLanguageToStaticUi() {
   }
   const knowledgeSectionLabel = document.getElementById("knowledge-base-section-label");
   const knowledgeTitle = document.getElementById("knowledge-base-title");
-  const knowledgeScopeGlobal = document.getElementById("knowledge-scope-global");
-  const knowledgeScopeProject = document.getElementById("knowledge-scope-project");
   const knowledgeSearchLabel = document.getElementById("knowledge-search-label");
   const knowledgeCategoryFilterLabel = document.getElementById("knowledge-category-filter-label");
   const knowledgeTagFilterLabel = document.getElementById("knowledge-tag-filter-label");
@@ -4116,19 +4395,22 @@ function applyLanguageToStaticUi() {
     knowledgeSectionLabel.textContent = langText("知识库", "Knowledge Base");
   }
   if (knowledgeTitle) {
-    knowledgeTitle.textContent = langText("全局知识库与项目知识包", "Global Knowledge and Project Pack");
+    knowledgeTitle.textContent = langText("全局知识库", "Global Knowledge Base");
   }
   if (knowledgeUploadTrigger) {
     knowledgeUploadTrigger.textContent = langText("上传文档", "Upload Docs");
   }
+  if (knowledgeCategoryAddButton) {
+    knowledgeCategoryAddButton.textContent = langText("新增目录", "Add Folder");
+  }
+  if (knowledgeCategoryRenameButton) {
+    knowledgeCategoryRenameButton.textContent = langText("改名", "Rename");
+  }
+  if (knowledgeCategoryDeleteButton) {
+    knowledgeCategoryDeleteButton.textContent = langText("删除", "Delete");
+  }
   if (closeKnowledgeBaseButton) {
     closeKnowledgeBaseButton.textContent = t("close");
-  }
-  if (knowledgeScopeGlobal) {
-    knowledgeScopeGlobal.textContent = langText("全局知识库", "Global Knowledge");
-  }
-  if (knowledgeScopeProject) {
-    knowledgeScopeProject.textContent = langText("项目知识包", "Project Pack");
   }
   if (knowledgeSearchLabel) {
     knowledgeSearchLabel.textContent = langText("检索", "Search");
@@ -4159,7 +4441,6 @@ function applyLanguageToStaticUi() {
   const roundtableEvidenceFilterLabel = document.getElementById("roundtable-evidence-filter-label");
   const roundtableEvidenceDetailTitle = document.getElementById("roundtable-evidence-detail-title");
   const evidenceTranslateToggle = document.getElementById("evidence-translate-toggle");
-  const knowledgeGlobalToggle = document.getElementById("knowledge-global-toggle");
   const knowledgeNoteStrip = document.getElementById("knowledge-note-strip");
   const knowledgeCountBadge = document.getElementById("knowledge-count-badge");
   if (roundtableSectionLabel) {
@@ -4187,11 +4468,6 @@ function applyLanguageToStaticUi() {
     evidenceTranslateToggle.textContent = langText(`自动翻译 ${state.autoTranslateEvidence ? "✔" : "✘"}`, `Auto Translate ${state.autoTranslateEvidence ? "✔" : "✘"}`);
     evidenceTranslateToggle.title = langText("开启后，搜索结果采用 AI 自动翻译为中文", "When enabled, search results are automatically translated for the current language.");
   }
-  if (knowledgeGlobalToggle) {
-    knowledgeGlobalToggle.textContent = state.projectUsesGlobalKnowledge
-      ? langText("本项目调用全局知识库 ✔", "Use Global KB in This Project ✔")
-      : langText("本项目不调用全局知识库 ✘", "Do Not Use Global KB in This Project ✘");
-  }
   if (knowledgeNoteStrip) {
     knowledgeNoteStrip.textContent = langText("第一版支持 TXT、Markdown、JSON、CSV、PDF、DOCX、XLSX、XLS；旧版 DOC 建议先转为 DOCX。", "This first version supports TXT, Markdown, JSON, CSV, PDF, DOCX, XLSX, and XLS. Convert legacy DOC files to DOCX first.");
   }
@@ -4207,25 +4483,12 @@ function applyLanguageToStaticUi() {
     file: langText("文件", "Files"),
     text: langText("文本", "Text"),
   });
-  localizeSelectOptions(document.getElementById("knowledge-category-filter"), {
-    all: langText("全部", "All"),
-    company: langText("公司", "Company"),
-    product: langText("产品", "Product"),
-    process: langText("流程", "Process"),
-    reference: langText("参考", "Reference"),
-    project: langText("项目", "Project"),
-  });
-  localizeSelectOptions(document.getElementById("knowledge-upload-category"), {
-    company: langText("公司", "Company"),
-    product: langText("产品", "Product"),
-    process: langText("流程", "Process"),
-    reference: langText("参考", "Reference"),
-    project: langText("项目", "Project"),
-  });
+  renderKnowledgeCategoryOptions();
   localizeSelectOptions(document.getElementById("knowledge-tag-filter"), {
     all: langText("全部标签", "All Tags"),
   });
   renderKnowledgeScopeUi();
+  renderKnowledgeEnabledToggle();
   updateProfileTemplateHint(defaultProfileMap.get(providerTemplateSelect?.value) || null);
   setElementText("people-library-section-label", "peopleLibrarySectionLabel");
   setElementText("people-library-title", "peopleLibraryTitle");
@@ -4714,6 +4977,18 @@ function renderAiRoleRecommendationToggle() {
   `;
   toggleAiRoleRecommendationButton.classList.toggle("is-on", state.aiAutoRecommendEnabled);
   toggleAiRoleRecommendationButton.setAttribute("aria-pressed", state.aiAutoRecommendEnabled ? "true" : "false");
+}
+
+function renderKnowledgeEnabledToggle() {
+  if (!toggleKnowledgeEnabledButton) {
+    return;
+  }
+  toggleKnowledgeEnabledButton.innerHTML = `
+    <span class="seat-toggle-label">${escapeHtml(langText("启用知识库", "Use Knowledge Base"))}</span>
+    <span class="seat-toggle-track" aria-hidden="true"></span>
+  `;
+  toggleKnowledgeEnabledButton.classList.toggle("is-on", state.knowledgeEnabled);
+  toggleKnowledgeEnabledButton.setAttribute("aria-pressed", state.knowledgeEnabled ? "true" : "false");
 }
 
 function renderVoiceReadToggle() {
@@ -5433,15 +5708,17 @@ async function runDiscussionFlow() {
     return;
   }
 
-  if (state.selectedIds.size < state.discussionSize) {
-    updateSeatFeedback(langText(`人物还没配置完全，当前是 ${state.selectedIds.size}/${state.discussionSize}。先把席位配满再开始讨论。`, `Seat setup is incomplete: ${state.selectedIds.size}/${state.discussionSize}. Fill all seats before starting the discussion.`), "pending");
+  const selectedRoles = getOrderedSelectedRoleIds()
+    .map((roleId) => getRoleById(roleId))
+    .filter(Boolean);
+  const startBlockerMessage = getSeatStartBlockerMessage(selectedRoles);
+  if (startBlockerMessage) {
+    updateSeatFeedback(startBlockerMessage, "pending");
     return;
   }
 
-  const judgeRole = getRoleByAssignment("judge");
-  const orderedSpeakers = getOrderedSelectedRoleIds()
-    .map((roleId) => getRoleById(roleId))
-    .filter((role) => role && getRoleAssignment(role) !== "judge");
+  const judgeRole = selectedRoles.find((role) => getRoleAssignment(role) === "judge") || null;
+  const orderedSpeakers = selectedRoles.filter((role) => getRoleAssignment(role) !== "judge");
   const moderatorProfile = getPrimarySummaryProfile();
   const moderatorRole = {
     id: "host-ai",
@@ -5458,14 +5735,6 @@ async function runDiscussionFlow() {
     avatar: langText("主", "H"),
   };
 
-  if (!state.lastSummary) {
-    updateSeatFeedback(langText("先让主 AI 整理并确认任务定义，再开始讨论。", "Let the primary AI organize and confirm the task definition before starting."), "pending");
-    return;
-  }
-  if (!orderedSpeakers.length || !judgeRole) {
-    updateSeatFeedback(langText("至少要有若干讨论人物，并给裁判分配一个人物。", "You need several discussion personas and one persona assigned as judge."), "pending");
-    return;
-  }
   const judgeProfile = judgeRole ? getRoleModelProfile(judgeRole) : null;
   if (!moderatorProfile || !judgeProfile || orderedSpeakers.some((role) => !getRoleModelProfile(role))) {
     updateSeatFeedback(langText("先在设置里选好主持AI，并在每个席位卡里选好模型。", "Choose a host AI in settings and assign a model to each seat card first."), "pending");
@@ -5763,11 +6032,11 @@ function buildTaskSummaryPromptContent(content, attachments = [], options = {}) 
 async function requestAiTaskSummary(content, attachments = [], options = {}) {
   const profile = getPrimarySummaryProfile();
   if (!profile) {
-    throw new Error("还没有可用的主 AI 接入。先在设置里保存配置，并映射给主 AI。");
+    throw new Error(langText("还没有可用的主 AI 接入。先在设置里保存配置，并映射给主 AI。", "No primary AI connection is available yet. Save a configuration in Settings and map it to the primary AI first."));
   }
 
   if (!profile.baseUrl || !profile.modelId || !profile.apiKey) {
-    throw new Error(`主 AI 接入“${profile.displayName}”还没配完整，至少要有 Base URL、模型 ID 和 API Key。`);
+    throw new Error(langText(`主 AI 接入“${profile.displayName}”还没配完整，至少要有 Base URL、模型 ID 和 API Key。`, `The primary AI connection "${profile.displayName}" is incomplete. It must include at least the Base URL, Model ID, and API Key.`));
   }
 
   const { treatAsSupplement = false, baseSummary = "", clarificationQuestions = [] } = options;
@@ -5851,7 +6120,7 @@ async function requestAiTaskSummary(content, attachments = [], options = {}) {
   const rawSummary = extractTextFromModelResponse(payload, profile.compatibility);
   const summary = normalizeTaskSummary(rawSummary, fallbackSource);
   if (!summary) {
-    throw new Error("主 AI 返回了空结果");
+    throw new Error(langText("主 AI 返回了空结果", "The primary AI returned an empty result."));
   }
   return summary;
 }
@@ -6016,6 +6285,95 @@ function getRoundRoleLabel(assignment) {
     default:
       return langText("旁证", "Supporting Voice");
   }
+}
+
+function getDefaultMiddleSeatAssignment(role, index) {
+  const candidates = ["participant", "neutral", "rebuttal"];
+  const fingerprint = `${role?.id || ""}|${role?.name || ""}|${role?.seat || ""}|${index}`;
+  let hash = 0;
+  for (let position = 0; position < fingerprint.length; position += 1) {
+    hash = (hash * 31 + fingerprint.charCodeAt(position)) % 2147483647;
+  }
+  return candidates[Math.abs(hash) % candidates.length];
+}
+
+function applyDefaultSeatLayout(selectedRoleIds = [...state.selectedIds], options = {}) {
+  const { force = false } = options;
+  if (!force && state.seatLayoutCustomized) {
+    return;
+  }
+
+  const orderedRoleIds = [...new Set(selectedRoleIds)].filter((roleId) => getRoleById(roleId));
+  const nextAssignments = {};
+  const nextDiscussionOrder = {};
+
+  if (!orderedRoleIds.length) {
+    state.seatAssignments = {};
+    state.discussionOrder = {};
+    return;
+  }
+
+  if (orderedRoleIds.length === 1) {
+    nextAssignments[orderedRoleIds[0]] = "challenger";
+    nextDiscussionOrder[orderedRoleIds[0]] = 1;
+  } else {
+    let discussantOrder = 1;
+    orderedRoleIds.forEach((roleId, index) => {
+      const role = getRoleById(roleId);
+      const assignment = index === 0
+        ? "challenger"
+        : index === orderedRoleIds.length - 1
+          ? "judge"
+          : getDefaultMiddleSeatAssignment(role, index);
+      nextAssignments[roleId] = assignment;
+      if (assignment !== "judge") {
+        nextDiscussionOrder[roleId] = discussantOrder;
+        discussantOrder += 1;
+      }
+    });
+  }
+
+  state.seatAssignments = nextAssignments;
+  state.discussionOrder = nextDiscussionOrder;
+  orderedRoleIds.forEach((roleId) => {
+    const role = getRoleById(roleId);
+    if (role) {
+      ensureSeatModelAssignment(role);
+    }
+  });
+}
+
+function getSeatStartBlockerMessage(selectedRoles = getOrderedSelectedRoleIds().map((roleId) => getRoleById(roleId)).filter(Boolean)) {
+  if (!state.lastSummary) {
+    return langText("先让主 AI 整理并确认任务定义，再开始讨论。", "Let the primary AI organize and confirm the task definition before starting.");
+  }
+  if (selectedRoles.length < state.discussionSize) {
+    return langText(`当前讨论人数还没配满，需要先补齐到 ${state.discussionSize} 个席位。`, `The discussion is not fully staffed yet. Fill all ${state.discussionSize} seats first.`);
+  }
+
+  const judgeRole = selectedRoles.find((role) => getRoleAssignment(role) === "judge") || null;
+  const discussants = selectedRoles.filter((role) => getRoleAssignment(role) !== "judge");
+  if (!judgeRole) {
+    return langText("当前讨论未设置裁判。请先把其中一个席位设为裁判，再开始讨论。", "No judge is set for this discussion. Assign one seat as judge before starting.");
+  }
+  if (!discussants.length) {
+    return langText("当前讨论还没有发言席位。请至少保留一个主讲或讨论席位。", "There are no speaking seats yet. Keep at least one lead or discussion seat.");
+  }
+
+  const moderatorProfile = getPrimarySummaryProfile();
+  if (!moderatorProfile) {
+    return langText("先在设置里选好主持AI，再开始讨论。", "Choose a host AI in settings before starting.");
+  }
+  const judgeProfile = getRoleModelProfile(judgeRole);
+  if (!judgeProfile) {
+    return langText("当前裁判还没绑定可用模型。请先给裁判席位选一个模型。", "The judge seat does not have an available model yet. Assign one before starting.");
+  }
+  const missingModelRole = discussants.find((role) => !getRoleModelProfile(role));
+  if (missingModelRole) {
+    return langText(`先给 ${getDisplayRoleName(missingModelRole)} 选一个模型，再开始讨论。`, `Assign a model to ${getDisplayRoleName(missingModelRole)} before starting.`);
+  }
+
+  return "";
 }
 
 function getSeatSourceLabel(role) {
@@ -6237,24 +6595,7 @@ function updateProfileTemplateHint(profile = null) {
 }
 
 function renderKnowledgeScopeUi() {
-  const knowledgeScopeGlobal = document.getElementById("knowledge-scope-global");
-  const knowledgeScopeProject = document.getElementById("knowledge-scope-project");
-  const knowledgeGlobalToggle = document.getElementById("knowledge-global-toggle");
-  if (knowledgeScopeGlobal) {
-    const isActive = state.knowledgeScope === "global";
-    knowledgeScopeGlobal.classList.toggle("active", isActive);
-    knowledgeScopeGlobal.setAttribute("aria-pressed", String(isActive));
-  }
-  if (knowledgeScopeProject) {
-    const isActive = state.knowledgeScope === "project";
-    knowledgeScopeProject.classList.toggle("active", isActive);
-    knowledgeScopeProject.setAttribute("aria-pressed", String(isActive));
-  }
-  if (knowledgeGlobalToggle) {
-    knowledgeGlobalToggle.textContent = state.projectUsesGlobalKnowledge
-      ? langText("本项目调用全局知识库 ✔", "Use Global KB in This Project ✔")
-      : langText("本项目不调用全局知识库 ✘", "Do Not Use Global KB in This Project ✘");
-  }
+  state.knowledgeScope = "global";
 }
 
 function getConfiguredProfiles() {
@@ -6339,7 +6680,12 @@ function renderSeatStack() {
     seatConfigProgress.textContent = `${selectedRoles.length}/${state.discussionSize}`;
     seatConfigProgress.classList.toggle("warm", selectedRoles.length < state.discussionSize);
   }
-  startDiscussionButton.disabled = state.discussionRunning || selectedRoles.length < state.discussionSize;
+  const startBlockerMessage = getSeatStartBlockerMessage(selectedRoles);
+  startDiscussionButton.disabled = state.discussionRunning || !!startBlockerMessage;
+  startDiscussionButton.title = startBlockerMessage || "";
+  if (!state.discussionRunning) {
+    updateSeatFeedback(startBlockerMessage || langText("当前可以开始讨论了。", "Everything is ready. You can start the discussion now."), startBlockerMessage ? "pending" : "success");
+  }
 
   // 动态更新按钮文字：有历史轮次则显示"继续讨论"
   if (!state.discussionRunning) {
@@ -6879,7 +7225,7 @@ function renderProviderTemplateSelect() {
 
 function updateSeatFeedback(message, tone = "") {
   seatFeedback.textContent = message;
-  seatFeedback.className = `seat-feedback seat-feedback-hidden ${tone}`.trim();
+  seatFeedback.className = `seat-feedback ${message ? "" : "seat-feedback-hidden"} ${tone}`.trim();
   seatPickerFeedback.textContent = message;
   seatPickerFeedback.className = `drawer-feedback ${tone}`.trim();
 }
@@ -7161,7 +7507,11 @@ function replaceSelectedRole(oldRoleId, newRoleId) {
     ensureSeatAssignment(replacementRole);
     ensureSeatModelAssignment(replacementRole);
   }
-  syncDiscussionOrder();
+  if (state.seatLayoutCustomized) {
+    syncDiscussionOrder();
+  } else {
+    applyDefaultSeatLayout(getOrderedSelectedRoleIds(), { force: true });
+  }
 }
 
 function syncRoleColorPicker(value) {
@@ -9388,9 +9738,11 @@ async function hydrateState() {
   state.modelProfiles = (await dbGetAll(PROFILE_STORE)).map(normalizeProfile);
   state.appLanguage = await loadAppState("appLanguage", "zh");
   state.appTheme = await loadAppState("appTheme", "dark");
+  state.knowledgeEnabled = await loadAppState("knowledgeEnabled", true);
   state.voiceReadEnabled = await loadAppState("voiceReadEnabled", false);
   state.knowledgeScope = await loadAppState("knowledgeScope", "global");
   state.projectUsesGlobalKnowledge = await loadAppState("projectUsesGlobalKnowledge", true);
+  state.knowledgeCategories = normalizeKnowledgeCategories(await loadAppState(KNOWLEDGE_CATEGORY_CONFIG_KEY, buildDefaultKnowledgeCategories()));
   state.userMemory = normalizeUserMemory(await loadAppState(USER_MEMORY_KEY, buildEmptyUserMemory()));
   state.mappings = normalizeModelMappings(await loadAppState("modelMappings", {
     main: defaultProfiles[0].id,
@@ -9560,7 +9912,11 @@ function toggleSeatSelection(roleId) {
     delete state.seatAssignments[roleId];
     delete state.discussionOrder[roleId];
     delete state.seatModelAssignments[roleId];
-    syncDiscussionOrder();
+    if (state.seatLayoutCustomized) {
+      syncDiscussionOrder();
+    } else {
+      applyDefaultSeatLayout([...state.selectedIds], { force: true });
+    }
     renderSeatPicker();
     renderSeatStack();
     updateSeatFeedback(`已移出席位：${getRoleById(roleId)?.name || "人物"}`, "");
@@ -9579,13 +9935,17 @@ function toggleSeatSelection(roleId) {
   }
 
   state.selectedIds.add(roleId);
-  syncDiscussionOrder();
   const role = getRoleById(roleId);
-  if (role) {
-    state.seatAssignments[roleId] = suggestSeatAssignment(role);
-    ensureSeatModelAssignment(role);
+  if (state.seatLayoutCustomized) {
+    syncDiscussionOrder();
+    if (role) {
+      state.seatAssignments[roleId] = suggestSeatAssignment(role);
+      ensureSeatModelAssignment(role);
+    }
+    ensureCoreAssignments();
+  } else {
+    applyDefaultSeatLayout([...state.selectedIds], { force: true });
   }
-  ensureCoreAssignments();
   renderSeatPicker();
   renderSeatStack();
   updateSeatFeedback(`已加入席位：${getRoleById(roleId)?.name || "人物"}`, "success");
@@ -10009,6 +10369,7 @@ function resetPendingPersonaGeneration() {
   state.recommendedRoles = [];
   state.selectedIds.clear();
   state.seatAssignments = {};
+  state.seatLayoutCustomized = false;
   state.discussionOrder = {};
   state.seatModelAssignments = {};
   setStatusLoadingState(false);
@@ -10193,21 +10554,14 @@ async function finishSeatGeneration(options = {}) {
   }
   state.selectedIds.clear();
   state.seatAssignments = {};
+  state.seatLayoutCustomized = false;
   state.discussionOrder = {};
   state.seatModelAssignments = {};
   const defaultRecommended = [
     ...state.recommendedRoles.slice(0, Math.min(state.discussionSize, state.recommendedRoles.length)).map((role) => role.id),
   ].filter(Boolean);
   [...new Set(defaultRecommended)].slice(0, state.discussionSize).forEach((roleId) => state.selectedIds.add(roleId));
-  syncDiscussionOrder();
-  [...state.selectedIds].forEach((roleId) => {
-    const role = getRoleById(roleId);
-    if (role) {
-      state.seatAssignments[roleId] = suggestSeatAssignment(role);
-      ensureSeatModelAssignment(role);
-    }
-  });
-  ensureCoreAssignments();
+  applyDefaultSeatLayout([...state.selectedIds], { force: true });
   state.generatingSeats = false;
   state.seatsReady = true;
   setStatusLoadingState(false);
@@ -10274,6 +10628,7 @@ function startSeatGeneration(options = {}) {
     state.recommendedRoles = [];
     state.selectedIds.clear();
     state.seatAssignments = {};
+    state.seatLayoutCustomized = false;
     state.discussionOrder = {};
     state.seatModelAssignments = {};
     state.seatSource = "library";
@@ -10311,6 +10666,7 @@ function startSeatGeneration(options = {}) {
   state.recommendedRoleGenerationMeta = null;
   state.selectedIds.clear();
   state.seatAssignments = {};
+  state.seatLayoutCustomized = false;
   state.discussionOrder = {};
   state.seatModelAssignments = {};
   setStatusLoadingState(true);
@@ -10362,6 +10718,7 @@ function seedConversation() {
   state.recommendedRoles = [];
   state.seatModelAssignments = {};
   state.seatAssignments = {};
+  state.seatLayoutCustomized = false;
   state.pendingAttachments = [];
   setStatusLoadingState(false);
   renderAiRoleRecommendationToggle();
@@ -10398,7 +10755,11 @@ function applyDiscussionSize(nextSize) {
     });
   }
 
-  syncDiscussionOrder();
+  if (state.seatLayoutCustomized) {
+    syncDiscussionOrder();
+  } else {
+    applyDefaultSeatLayout([...state.selectedIds], { force: true });
+  }
   renderSeatStack();
   renderSeatPicker();
   updateCompactSummary();
@@ -10418,27 +10779,24 @@ function bindEvents() {
   openKnowledgeBaseButton?.addEventListener("click", () => {
     openKnowledgeBaseModal();
   });
-  document.getElementById("knowledge-scope-global")?.addEventListener("click", async () => {
-    state.knowledgeScope = "global";
-    renderKnowledgeScopeUi();
-    renderKnowledgeBaseWorkspace();
-    await saveAppState("knowledgeScope", state.knowledgeScope);
-  });
-  document.getElementById("knowledge-scope-project")?.addEventListener("click", async () => {
-    state.knowledgeScope = "project";
-    renderKnowledgeScopeUi();
-    renderKnowledgeBaseWorkspace();
-    await saveAppState("knowledgeScope", state.knowledgeScope);
-  });
-  document.getElementById("knowledge-global-toggle")?.addEventListener("click", async () => {
-    state.projectUsesGlobalKnowledge = !state.projectUsesGlobalKnowledge;
-    renderKnowledgeScopeUi();
-    renderKnowledgeBaseWorkspace();
-    await saveAppState("projectUsesGlobalKnowledge", state.projectUsesGlobalKnowledge);
-  });
   closeKnowledgeBaseButton?.addEventListener("click", closeKnowledgeBaseModal);
   knowledgeBaseBackdrop?.addEventListener("click", closeKnowledgeBaseModal);
+  knowledgeCategoryAddButton?.addEventListener("click", () => {
+    void handleAddKnowledgeCategory();
+  });
+  knowledgeCategoryRenameButton?.addEventListener("click", () => {
+    void handleRenameKnowledgeCategory();
+  });
+  knowledgeCategoryDeleteButton?.addEventListener("click", () => {
+    void handleDeleteKnowledgeCategory();
+  });
   knowledgeUploadTrigger?.addEventListener("click", () => {
+    try {
+      requireKnowledgeUploadCategory();
+    } catch (error) {
+      updateSharedAgentStatus(error instanceof Error ? error.message : String(error), "error");
+      return;
+    }
     try {
       if (typeof knowledgeUploadInput?.showPicker === "function") {
         knowledgeUploadInput.showPicker();
@@ -10457,6 +10815,9 @@ function bindEvents() {
     try {
       await handleKnowledgeUploads(files);
       updateSharedAgentStatus(langText(`知识库已入库 ${files.length} 个文件。`, `Stored ${files.length} knowledge file(s).`), "success");
+      if (knowledgeUploadCategorySelect) {
+        knowledgeUploadCategorySelect.value = "";
+      }
     } catch (error) {
       updateSharedAgentStatus(error instanceof Error ? error.message : String(error), "error");
     } finally {
@@ -10544,6 +10905,18 @@ function bindEvents() {
       "pending"
     );
     void syncCurrentTopicSnapshot();
+  });
+
+  toggleKnowledgeEnabledButton?.addEventListener("click", async () => {
+    state.knowledgeEnabled = !state.knowledgeEnabled;
+    renderKnowledgeEnabledToggle();
+    await saveAppState("knowledgeEnabled", state.knowledgeEnabled);
+    updateSeatFeedback(
+      state.knowledgeEnabled
+        ? langText("当前讨论已启用知识库。", "Knowledge base is enabled for this discussion.")
+        : langText("当前讨论已关闭知识库。", "Knowledge base is disabled for this discussion."),
+      state.knowledgeEnabled ? "success" : "pending"
+    );
   });
 
   toggleVoiceReadButton?.addEventListener("click", async () => {
@@ -10706,7 +11079,12 @@ function bindEvents() {
     state.selectedIds.delete(button.dataset.roleId);
     delete state.seatAssignments[button.dataset.roleId];
     delete state.discussionOrder[button.dataset.roleId];
-    syncDiscussionOrder();
+    delete state.seatModelAssignments[button.dataset.roleId];
+    if (state.seatLayoutCustomized) {
+      syncDiscussionOrder();
+    } else {
+      applyDefaultSeatLayout([...state.selectedIds], { force: true });
+    }
     renderSeatStack();
     renderSeatPicker();
     updateSeatFeedback(`已移出席位：${getRoleById(button.dataset.roleId)?.name || "人物"}`, "");
@@ -10745,6 +11123,7 @@ function bindEvents() {
 
     const orderSelect = event.target.closest(".seat-order-select");
     if (orderSelect) {
+      state.seatLayoutCustomized = true;
       setDiscussionOrder(orderSelect.dataset.roleId, Number(orderSelect.value || 1));
       renderSeatStack();
       updateSeatFeedback(langText(`已调整讨论顺序：${getRoleById(orderSelect.dataset.roleId)?.name || "人物"} -> 第 ${orderSelect.value} 位`, `Updated speaking order: ${getRoleById(orderSelect.dataset.roleId)?.name || "persona"} -> position ${orderSelect.value}`), "success");
@@ -10756,6 +11135,7 @@ function bindEvents() {
     if (!select) {
       return;
     }
+    state.seatLayoutCustomized = true;
     setSeatAssignment(select.dataset.roleId, select.value);
     if (select.value === "judge" || !getRoleByAssignment("judge")) {
       ensureCoreAssignments();
@@ -11241,6 +11621,7 @@ function bindEvents() {
       state.recommendedRoles = [];
       state.selectedIds.clear();
       state.seatAssignments = {};
+      state.seatLayoutCustomized = false;
       state.discussionOrder = {};
       state.seatModelAssignments = {};
       renderSeatStack();
