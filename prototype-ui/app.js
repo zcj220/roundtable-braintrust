@@ -273,6 +273,9 @@ function buildBaseRoleSystemPrompt({ name, seat, description, stance, method, te
     `你的职业背景与长期经验是：${description}`,
     `你的核心倾向是：${stance}。你最常用的方法是：${method}。你的表达气质应保持：${temper}。`,
     "你不是一个抽象标签，而是一个长期在一线、研究或实务里反复处理这类问题的人。发言时先体现这个身份的人会怎么看、先抓什么、最担心什么，再给出判断。",
+    "每次正式发言都优先完成四件事：先点出你最先看的关键信号，再给出你的判断，再说出你最担心的风险，最后指出桌上其他人最容易忽略的一点。",
+    "如果你同意别人，也要说清你同意的是哪一部分、为什么成立；如果你反对别人，也要明确反对的是哪个具体判断、哪条证据不够、哪种代价被低估。",
+    "不要把自己写成任务解释器、流程播报员或百科词条作者。你是在桌边参与讨论，要像真人一样提出判断、质疑、保留和建议。",
     "除非任务明确要求你严格停留在历史时点，否则你默认可以使用当下公开知识、现代常识和今天已经形成的专业方法，但仍要保持这个身份本来的训练背景、关注重点和说话气质。",
     "不要空泛复述任务，也不要写成百科词条。你是在参与桌边讨论，要有判断、有边界、有取舍。",
     "遇到不确定之处要直说，不要装作什么都懂；遇到别人明显跳步或想当然的地方，要直接指出。",
@@ -285,6 +288,9 @@ function buildBaseRoleSystemPromptEn({ name, seat, description }) {
     `Your professional background and long-term experience are: ${description}`,
     "You are not an abstract label. You are someone who has handled this kind of problem repeatedly in real practice, research, or delivery.",
     "When you speak, start from what this identity would notice first, what matters most, and what concerns you most before giving judgment.",
+    "In each turn, do four things in order: identify the first critical signal, state your judgment, name the main risk, and point out what others at the table are likely missing.",
+    "If you agree with someone, specify exactly which part stands and why. If you disagree, name the exact claim, evidence gap, or underestimated trade-off you are pushing back on.",
+    "Do not turn into a narrator, prompt explainer, or encyclopedia entry. Stay as a real participant in the discussion.",
     "Be direct about uncertainty. If someone is making a leap or relying on wishful thinking, point it out clearly.",
   ].join(" ");
 }
@@ -4347,8 +4353,182 @@ function formatTurnContext(turn) {
     `职责：${turn.role.description}`,
     `角色提示：${turn.role.systemPrompt || "无"}`,
     turn.searchDigest ? `此人发言前搜索到的网页证据（其他人可据此质疑或核实）：\n${turn.searchDigest}` : "",
+    turn.handoff?.next_role_focus ? `交接给下一位的重点：${turn.handoff.next_role_focus}` : "",
+    turn.handoff?.local_knowledge_needed?.length ? `建议下一位优先看的本地知识方向：${turn.handoff.local_knowledge_needed.join("、")}` : "",
+    turn.handoff?.recommended_counterpoints?.length ? `建议下一位优先反打的点：${turn.handoff.recommended_counterpoints.join("；")}` : "",
     `发言内容：${turn.text}`,
   ].filter(Boolean).join("\n");
+}
+
+function buildDiscussionStateLabel(round, totalRounds, speakerRole, orderedSpeakers) {
+  const speakerIndex = Math.max(0, orderedSpeakers.findIndex((role) => role?.id === speakerRole?.id));
+  return `round_${round}_speaker_${speakerIndex + 1}_of_${orderedSpeakers.length}_total_${totalRounds}`;
+}
+
+function getNextSpeakerRole(orderedSpeakers, currentRole) {
+  const currentIndex = orderedSpeakers.findIndex((role) => role?.id === currentRole?.id);
+  if (currentIndex === -1) {
+    return null;
+  }
+  return orderedSpeakers[currentIndex + 1] || null;
+}
+
+function buildKnowledgeGateDecision({ summary, speakerRole, nextRole, liveTurns = [], roundNotes = [] }) {
+  const seedQuery = [
+    summary,
+    getActiveRoleName(speakerRole),
+    getActiveRoleSeat(speakerRole),
+    getActiveRoleDescription(speakerRole),
+    ...liveTurns.slice(-2).map((turn) => turn?.text || ""),
+    ...roundNotes.slice(-1).map((note) => note?.moderatorSummary || ""),
+  ].filter(Boolean).join("\n");
+  const knowledgeResult = state.knowledgeEnabled
+    ? filterKnowledgeEntries(getKnowledgeScopeEntries(), {
+      queryOverride: seedQuery,
+      categoryOverride: "all",
+    })
+    : { entries: [] };
+  const hits = (knowledgeResult.entries || []).slice(0, 3);
+  const categories = uniqueStrings(hits.map((entry) => getKnowledgeCategoryLabel(entry.category))).slice(0, 3);
+  const keywords = uniqueStrings([
+    getActiveRoleName(speakerRole),
+    getActiveRoleSeat(speakerRole),
+    getActiveRoleName(nextRole),
+    ...hits.map((entry) => entry.title),
+  ]).slice(0, 6);
+  return {
+    shouldUseLocalKnowledge: !!hits.length,
+    preferredCategories: categories,
+    preferredKeywords: keywords,
+    localKnowledgeNeeded: hits.map((entry) => `${entry.title}｜${getKnowledgeCategoryLabel(entry.category)}`).slice(0, 3),
+    evidenceGaps: uniqueStrings([
+      hits.length ? "还需要确认知识命中片段是否足够直接支撑本轮观点" : "当前没有明显本地知识命中，需要更多事实支撑",
+      nextRole ? `${getActiveRoleName(nextRole)} 下一轮最需要的关键证据是什么` : "当前轮最后一位发言后，仍需主持人做收束",
+    ]).slice(0, 3),
+  };
+}
+
+function buildSpeakerTurnPrompt({
+  round,
+  totalRounds,
+  speakerRole,
+  nextRole,
+  assignment,
+  summary,
+  roundNotes,
+  liveTurns,
+  compressedHistory,
+  speakerSearchDigest,
+  knowledgeGate,
+  orderedSpeakers,
+  budgetHint,
+}) {
+  const nextRoleBlock = nextRole
+    ? [
+      `下一位角色：${getActiveRoleName(nextRole)}`,
+      `下一位席位：${getActiveRoleSeat(nextRole)}`,
+      `下一位职责：${getActiveRoleDescription(nextRole)}`,
+    ].join("\n")
+    : langText("下一位角色：无，本轮到你后将进入主持收束。", "Next role: none. After you, the host will compress the round.");
+  const knowledgeGateBlock = [
+    `知识门控判断：${knowledgeGate.shouldUseLocalKnowledge ? langText("建议优先结合本地知识命中。", "Use local knowledge hits first.") : langText("当前没有稳定的本地知识命中，不要硬编引用。", "No stable local knowledge hit is available. Do not force citations.")}`,
+    knowledgeGate.preferredCategories.length ? `优先目录：${knowledgeGate.preferredCategories.join("、")}` : "",
+    knowledgeGate.preferredKeywords.length ? `优先关键词：${knowledgeGate.preferredKeywords.join("、")}` : "",
+    knowledgeGate.localKnowledgeNeeded.length ? `已命中的本地知识：${knowledgeGate.localKnowledgeNeeded.join("；")}` : "",
+    knowledgeGate.evidenceGaps.length ? `当前证据缺口：${knowledgeGate.evidenceGaps.join("；")}` : "",
+  ].filter(Boolean).join("\n");
+  return [
+    `你现在是本场讨论里的第 ${state.discussionOrder[speakerRole.id] || 1} 位发言者，第 ${round}/${totalRounds} 轮发言。`,
+    `当前讨论状态：${buildDiscussionStateLabel(round, totalRounds, speakerRole, orderedSpeakers)}`,
+    getAssignmentInstruction(assignment),
+    getSpeakerModeInstruction(assignment),
+    getModelOutputLanguageInstruction(),
+    "请只基于任务、共享事实包、前面轮次压缩记忆和本轮已经出现的发言继续往下讲。不要假装看到了还没发言的人。",
+    buildDiscussionContext(summary, roundNotes, liveTurns, compressedHistory),
+    speakerSearchDigest ? `你在发言前做了一次网页搜索，以下是你查到的参考资料，可以引用其中的事实或数据来支撑你的论点（如果相关）：\n${speakerSearchDigest}` : "",
+    rolePromptBlock(speakerRole),
+    nextRoleBlock,
+    knowledgeGateBlock,
+    "你这次必须同时完成两件事：第一，输出你自己的正式发言；第二，给下一位角色留下结构化交接。",
+    "严格输出 JSON 对象，不要 Markdown，不要解释，不要补充多余文字。",
+    "JSON 必须包含字段：speaker_message, speaker_claims, speaker_risks, speaker_open_questions, handoff。",
+    "handoff 必须包含字段：next_role_id, next_role_focus, local_knowledge_needed, web_search_needed, preferred_categories, preferred_keywords, avoid_categories, missing_evidence_types, current_round_summary, recommended_counterpoints。",
+    "speaker_message 只写当前角色面向用户的正式发言正文。handoff 只写给系统和下一位角色的准备信息，不要把下一位正式发言写出来。",
+    "如果没有足够依据，就在 speaker_message 里明确承认；不要为了凑 JSON 字段而编造证据。数组字段没有内容时返回空数组。",
+    `speaker_message 篇幅要求：${budgetHint}`,
+    "绝对不要输出 thinking process、analyze user input、自检步骤、constraint list 或任何内部推理过程。",
+  ].filter(Boolean).join("\n\n");
+}
+
+function normalizeSpeakerTurnPayload(payload, fallbackNextRole) {
+  const handoff = payload?.handoff && typeof payload.handoff === "object" && !Array.isArray(payload.handoff)
+    ? payload.handoff
+    : {};
+  return {
+    speakerMessage: sanitizeDisplayedModelText(String(payload?.speaker_message || payload?.speakerMessage || "").trim()),
+    speakerClaims: normalizeClarificationQuestions(payload?.speaker_claims || payload?.speakerClaims || []),
+    speakerRisks: normalizeClarificationQuestions(payload?.speaker_risks || payload?.speakerRisks || []),
+    speakerOpenQuestions: normalizeClarificationQuestions(payload?.speaker_open_questions || payload?.speakerOpenQuestions || []),
+    handoff: {
+      next_role_id: String(handoff?.next_role_id || fallbackNextRole?.id || "").trim(),
+      next_role_focus: String(handoff?.next_role_focus || "").trim(),
+      local_knowledge_needed: normalizeClarificationQuestions(handoff?.local_knowledge_needed || []),
+      web_search_needed: normalizeClarificationQuestions(handoff?.web_search_needed || []),
+      preferred_categories: normalizeClarificationQuestions(handoff?.preferred_categories || []),
+      preferred_keywords: normalizeClarificationQuestions(handoff?.preferred_keywords || []),
+      avoid_categories: normalizeClarificationQuestions(handoff?.avoid_categories || []),
+      missing_evidence_types: normalizeClarificationQuestions(handoff?.missing_evidence_types || []),
+      current_round_summary: String(handoff?.current_round_summary || "").trim(),
+      recommended_counterpoints: normalizeClarificationQuestions(handoff?.recommended_counterpoints || []),
+    },
+  };
+}
+
+function parseSpeakerTurnResponse(rawText, fallbackNextRole) {
+  const jsonText = extractJsonObject(rawText);
+  if (!jsonText) {
+    return {
+      speakerMessage: sanitizeDisplayedModelText(rawText),
+      speakerClaims: [],
+      speakerRisks: [],
+      speakerOpenQuestions: [],
+      handoff: {
+        next_role_id: fallbackNextRole?.id || "",
+        next_role_focus: "",
+        local_knowledge_needed: [],
+        web_search_needed: [],
+        preferred_categories: [],
+        preferred_keywords: [],
+        avoid_categories: [],
+        missing_evidence_types: [],
+        current_round_summary: "",
+        recommended_counterpoints: [],
+      },
+    };
+  }
+  try {
+    return normalizeSpeakerTurnPayload(JSON.parse(jsonText), fallbackNextRole);
+  } catch (error) {
+    console.warn("speaker turn JSON parse failed", error);
+    return {
+      speakerMessage: sanitizeDisplayedModelText(rawText),
+      speakerClaims: [],
+      speakerRisks: [],
+      speakerOpenQuestions: [],
+      handoff: {
+        next_role_id: fallbackNextRole?.id || "",
+        next_role_focus: "",
+        local_knowledge_needed: [],
+        web_search_needed: [],
+        preferred_categories: [],
+        preferred_keywords: [],
+        avoid_categories: [],
+        missing_evidence_types: [],
+        current_round_summary: "",
+        recommended_counterpoints: [],
+      },
+    };
+  }
 }
 
 function formatFinishedRoundContext(note) {
@@ -5074,7 +5254,7 @@ const UI_TEXT = {
     roleDescriptionLabel: "人物说明",
     roleDescriptionPlaceholder: "写这个人物的身份背景、长期经验和典型关切",
     rolePromptLabel: "专有提示词",
-    rolePromptPlaceholder: "写给 AI 的专属提示词，先交代身份，再说明这个人物如何观察、分析、发言和反驳",
+    rolePromptPlaceholder: "写给 AI 的专属提示词模板：先交代身份，再写清楚这个人物先看什么、如何判断、如何发言、如何反驳别人、何时承认不确定",
     roleStanceLabel: "立场",
     roleColorLabel: "角色颜色",
     roleTemperLabel: "性格",
@@ -5197,7 +5377,7 @@ const UI_TEXT = {
     roleDescriptionLabel: "Persona Background",
     roleDescriptionPlaceholder: "Describe this persona's background, long-term experience, and typical concerns",
     rolePromptLabel: "Persona Prompt",
-    rolePromptPlaceholder: "Write the AI prompt for this persona: state the identity first, then how this persona observes, analyzes, speaks, and challenges",
+    rolePromptPlaceholder: "Write the AI prompt for this persona: identity first, then what this persona notices first, how they judge, how they speak, how they challenge others, and when they admit uncertainty",
     roleStanceLabel: "Stance",
     roleColorLabel: "Color",
     roleTemperLabel: "Temper",
@@ -6573,32 +6753,45 @@ async function runSingleDiscussionRound({
     const assignment = getRoleAssignment(speakerRole);
     const isLead = assignment === "challenger" || assignment === "rebuttal";
     const discussionProfile = getRoleModelProfile(speakerRole);
+    const nextRole = getNextSpeakerRole(orderedSpeakers, speakerRole);
 
     // 席位级即时搜索：发言前先根据角色立场搜索相关网页，把结果作为额外证据塞进 prompt
     setSpeakerCardForRole(speakerRole, langText(`第 ${round} 轮 · 正在搜索`, `Round ${round} · Searching`), langText("正在搜索与本轮论点相关的网页资料...", "Searching for web references relevant to this turn..."));
     updateLiveStatus(langText(`第 ${round} 轮：${getActiveRoleName(speakerRole)} 正在搜索网页`, `Round ${round}: ${getActiveRoleName(speakerRole)} is searching the web`), "pending");
     const speakerSearchDigest = await runSpeakerWebSearch(speakerRole, summary, signal);
+    const knowledgeGate = buildKnowledgeGateDecision({
+      summary,
+      speakerRole,
+      nextRole,
+      liveTurns,
+      roundNotes,
+    });
 
-    const speakerPrompt = [
-      `你现在是本场讨论里的第 ${state.discussionOrder[speakerRole.id] || 1} 位发言者，第 ${round}/${totalRounds} 轮发言。`,
-      getAssignmentInstruction(assignment),
-      getSpeakerModeInstruction(assignment),
-      getModelOutputLanguageInstruction(),
-      "请只基于任务、主持AI前面轮次的小结，以及本轮已经出现的发言继续往下讲。不要假装看到了还没发言的人。",
-      buildDiscussionContext(summary, roundNotes, liveTurns, compressedHistory),
-      speakerSearchDigest ? `你在发言前做了一次网页搜索，以下是你查到的参考资料，可以引用其中的事实或数据来支撑你的论点（如果相关）：\n${speakerSearchDigest}` : "",
-      rolePromptBlock(speakerRole),
-      `篇幅要求：${isLead ? budget.charHint : "控制在 280 到 520 字内。"}`,
-      "绝对不要输出 thinking process、analyze user input、自检步骤、constraint list 或任何内部推理过程。",
-      "要求：直接输出本轮发言正文，不要自我介绍，不要使用 Markdown 标题和列表，也不要使用统一小标题、固定口头禅或把模式约束原样复述出来。每个自然段之间用一个换行符分隔，不要把全部内容连成一整段。",
-    ].filter(Boolean).join("\n\n");
+    const speakerPrompt = buildSpeakerTurnPrompt({
+      round,
+      totalRounds,
+      speakerRole,
+      nextRole,
+      assignment,
+      summary,
+      roundNotes,
+      liveTurns,
+      compressedHistory,
+      speakerSearchDigest,
+      knowledgeGate,
+      orderedSpeakers,
+      budgetHint: isLead ? budget.charHint : "控制在 280 到 520 字内。",
+    });
 
     setSpeakerCardForRole(speakerRole, langText(`第 ${round} 轮 · 正在思考`, `Round ${round} · Thinking`), langText("正在读取任务和前面已发言内容，并准备按顺序接续。", "Reading the task and previous turns, then preparing to continue in order."));
     updateLiveStatus(langText(`第 ${round} 轮：${getActiveRoleName(speakerRole)} 正在思考`, `Round ${round}: ${getActiveRoleName(speakerRole)} is thinking`), "pending");
     updateSeatFeedback(langText(`第 ${round} 轮：${getActiveRoleName(speakerRole)} 正在思考`, `Round ${round}: ${getActiveRoleName(speakerRole)} is thinking`), "pending");
     let speakerText;
+    let speakerTurnPayload;
     try {
-      speakerText = await requestModelText(discussionProfile, speakerPrompt, isLead ? budget.main : budget.participant, signal);
+      const rawSpeakerResponse = await requestModelText(discussionProfile, speakerPrompt, isLead ? budget.main : budget.participant, signal);
+      speakerTurnPayload = parseSpeakerTurnResponse(rawSpeakerResponse, nextRole);
+      speakerText = speakerTurnPayload.speakerMessage || sanitizeDisplayedModelText(rawSpeakerResponse);
     } catch (speakerError) {
       if (speakerError?.name === "AbortError") {
         throw speakerError;
@@ -6624,7 +6817,17 @@ async function runSingleDiscussionRound({
     setSpeakerCardForRole(speakerRole, langText(`第 ${round} 轮 · 正在发言`, `Round ${round} · Speaking`), langText("当前顺序发言已生成，马上写入讨论流。", "The current turn has been generated and will be written into the discussion stream next."));
     updateLiveStatus(langText(`第 ${round} 轮：${getActiveRoleName(speakerRole)} 正在发言`, `Round ${round}: ${getActiveRoleName(speakerRole)} is speaking`), "pending");
     appendRoleMessage(speakerRole, formatRoundSpeakerLabel(round, speakerRole), speakerText, discussionProfile.displayName);
-    liveTurns.push({ role: speakerRole, assignmentLabel: formatRoundSpeakerLabel(round, speakerRole), text: speakerText, searchDigest: speakerSearchDigest || "" });
+    liveTurns.push({
+      role: speakerRole,
+      assignmentLabel: formatRoundSpeakerLabel(round, speakerRole),
+      text: speakerText,
+      searchDigest: speakerSearchDigest || "",
+      handoff: speakerTurnPayload?.handoff || null,
+      speakerClaims: speakerTurnPayload?.speakerClaims || [],
+      speakerRisks: speakerTurnPayload?.speakerRisks || [],
+      speakerOpenQuestions: speakerTurnPayload?.speakerOpenQuestions || [],
+      knowledgeGate,
+    });
   }
 
   const isFinalRound = round >= totalRounds;
