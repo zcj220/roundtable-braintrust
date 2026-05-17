@@ -1306,6 +1306,75 @@ button {
   color: var(--muted);
 }
 
+.knowledge-hit-snippet {
+  grid-column: 2 / 4;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+  padding-bottom: 2px;
+}
+
+.knowledge-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.knowledge-action-button {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.knowledge-action-button:hover {
+  border-color: rgba(94, 199, 212, 0.4);
+  background: rgba(94, 199, 212, 0.08);
+}
+
+.knowledge-ingestion-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.knowledge-ingestion-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.knowledge-ingestion-list {
+  display: grid;
+  gap: 8px;
+}
+
+.knowledge-ingestion-item {
+  display: grid;
+  gap: 3px;
+}
+
+.knowledge-ingestion-meta {
+  font-size: 10px;
+  color: var(--warm-soft);
+}
+
+.knowledge-ingestion-copy {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.knowledge-ingestion-copy.is-muted {
+  color: var(--muted);
+}
 .evidence-detail-surface {
   display: grid;
   grid-auto-rows: max-content;

@@ -1212,6 +1212,16 @@ const PROJECT_ARTIFACTS_KEY_PREFIX = "projectArtifacts:";
 const GLOBAL_KNOWLEDGE_KEY = "knowledgeEntries:global";
 const PROJECT_KNOWLEDGE_KEY_PREFIX = "knowledgeEntries:project:";
 const KNOWLEDGE_CATEGORY_CONFIG_KEY = "knowledgeCategories";
+const KNOWLEDGE_VECTOR_SIZE = 256;
+const KNOWLEDGE_CHUNK_SIZE = 320;
+const KNOWLEDGE_CHUNK_OVERLAP = 48;
+const KNOWLEDGE_TEXT_EXTENSIONS = new Set(["txt", "md", "markdown", "json", "csv", "xml", "html", "htm", "yaml", "yml", "js", "jsx", "ts", "tsx", "css", "py", "java", "sql"]);
+const KNOWLEDGE_BINARY_FORMATS = new Map([
+  ["pdf", "pdf"],
+  ["docx", "docx"],
+  ["xlsx", "spreadsheet"],
+  ["xls", "spreadsheet"],
+]);
 const SHARED_AGENT_IDS = [
   "user-memory-agent",
   "project-memory-agent",
@@ -1715,10 +1725,232 @@ function normalizeKnowledgeEntries(records) {
         tags: Array.isArray(record.tags) ? record.tags.filter(Boolean) : [],
         summary: record.summary || "",
         textPreview: record.textPreview || "",
+        normalizedFormat: record.normalizedFormat || detectKnowledgeNormalizedFormat(record.name || record.title || "", record.type || "").normalizedFormat,
+        conversionStatus: record.conversionStatus || ((record.textPreview || "").trim() ? "ready" : "limited"),
+        chunks: normalizeKnowledgeChunks(record.chunks, record.textPreview || ""),
+        originalDataUrl: record.originalDataUrl || "",
+        retrievalCount: Number(record.retrievalCount || 0),
+        lastRetrievedAt: Number(record.lastRetrievedAt || 0),
+        retrievalLog: normalizeKnowledgeRetrievalLog(record.retrievalLog),
         sourceUrl: record.sourceUrl || "",
+        storedAt: Number(record.storedAt || record.createdAt || Date.now()),
         createdAt: Number(record.createdAt || Date.now()),
       }))
     : [];
+}
+
+function normalizeKnowledgeRetrievalLog(records) {
+  return Array.isArray(records)
+    ? records
+      .filter(Boolean)
+      .map((record) => ({
+        timestamp: Number(record.timestamp || 0),
+        query: summarizeText(String(record.query || "").trim(), 120),
+        context: String(record.context || "shared_brief").trim() || "shared_brief",
+        snippet: summarizeText(String(record.snippet || "").trim(), 160),
+        score: Number(record.score || 0),
+        chunkIndex: Number(record.chunkIndex || 0),
+      }))
+      .filter((record) => record.timestamp)
+      .sort((left, right) => right.timestamp - left.timestamp)
+      .slice(0, 12)
+    : [];
+}
+
+function normalizeKnowledgeText(value) {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\u0000/g, " ")
+    .replace(/\t+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function detectKnowledgeNormalizedFormat(fileName = "", fileType = "") {
+  const extension = String(fileName).match(/\.([A-Za-z0-9]+)$/)?.[1]?.toLowerCase() || "";
+  if (KNOWLEDGE_TEXT_EXTENSIONS.has(extension)) {
+    if (["md", "markdown"].includes(extension)) {
+      return { supported: true, normalizedFormat: "markdown", extension };
+    }
+    if (extension === "json") {
+      return { supported: true, normalizedFormat: "json", extension };
+    }
+    if (extension === "csv") {
+      return { supported: true, normalizedFormat: "csv", extension };
+    }
+    if (["html", "htm", "xml"].includes(extension)) {
+      return { supported: true, normalizedFormat: "html", extension };
+    }
+    if (["yaml", "yml"].includes(extension)) {
+      return { supported: true, normalizedFormat: "yaml", extension };
+    }
+    if (["js", "jsx", "ts", "tsx", "css", "py", "java", "sql"].includes(extension)) {
+      return { supported: true, normalizedFormat: "source_code", extension };
+    }
+    return { supported: true, normalizedFormat: "plain_text", extension };
+  }
+  if (KNOWLEDGE_BINARY_FORMATS.has(extension)) {
+    return { supported: true, normalizedFormat: KNOWLEDGE_BINARY_FORMATS.get(extension), extension };
+  }
+  if (/^text\//i.test(fileType) || /^application\/(json|xml)/i.test(fileType)) {
+    return { supported: true, normalizedFormat: "plain_text", extension };
+  }
+  if (fileType === "application/pdf") {
+    return { supported: true, normalizedFormat: "pdf", extension: extension || "pdf" };
+  }
+  if (fileType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+    return { supported: true, normalizedFormat: "docx", extension: extension || "docx" };
+  }
+  if (/spreadsheetml|ms-excel/i.test(fileType)) {
+    return { supported: true, normalizedFormat: "spreadsheet", extension: extension || "xlsx" };
+  }
+  return { supported: false, normalizedFormat: extension ? extension.toUpperCase() : langText("未支持", "Unsupported"), extension };
+}
+
+function getKnowledgeConversionStatusLabel(status) {
+  switch (status) {
+    case "ready":
+      return langText("已标准化", "Ready");
+    case "unsupported":
+      return langText("未纳入检索", "Not Searchable");
+    default:
+      return langText("整理受限", "Limited");
+  }
+}
+
+function buildKnowledgeTerms(text) {
+  const normalized = normalizeKnowledgeText(text).toLowerCase();
+  if (!normalized) {
+    return [];
+  }
+  const terms = [];
+  let currentAscii = "";
+  for (const char of normalized) {
+    if (/^[a-z0-9_]$/i.test(char)) {
+      currentAscii += char;
+      continue;
+    }
+    if (currentAscii) {
+      terms.push(currentAscii);
+      if (currentAscii.length >= 4) {
+        for (let index = 0; index <= currentAscii.length - 3; index += 1) {
+          terms.push(currentAscii.slice(index, index + 3));
+        }
+      }
+      currentAscii = "";
+    }
+    if (char >= "\u4e00" && char <= "\u9fff") {
+      terms.push(char);
+    }
+  }
+  if (currentAscii) {
+    terms.push(currentAscii);
+    if (currentAscii.length >= 4) {
+      for (let index = 0; index <= currentAscii.length - 3; index += 1) {
+        terms.push(currentAscii.slice(index, index + 3));
+      }
+    }
+  }
+  const joinedCjk = [...normalized].filter((char) => char >= "\u4e00" && char <= "\u9fff").join("");
+  if (joinedCjk.length >= 2) {
+    for (let index = 0; index <= joinedCjk.length - 2; index += 1) {
+      terms.push(joinedCjk.slice(index, index + 2));
+    }
+  }
+  return [...new Set(terms.filter(Boolean))].slice(0, 512);
+}
+
+function buildKnowledgeVector(text) {
+  const vector = new Array(KNOWLEDGE_VECTOR_SIZE).fill(0);
+  const terms = buildKnowledgeTerms(text);
+  if (!terms.length) {
+    return vector;
+  }
+  terms.forEach((term) => {
+    const weight = 1 + Math.min(term.length, 12) / 12;
+    ["a", "b"].forEach((salt) => {
+      const bucket = hashString(`${salt}:${term}`) % KNOWLEDGE_VECTOR_SIZE;
+      const sign = hashString(`${salt}:sign:${term}`) % 2 === 0 ? 1 : -1;
+      vector[bucket] += sign * weight;
+    });
+  });
+  const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+  if (!norm) {
+    return vector;
+  }
+  return vector.map((value) => value / norm);
+}
+
+function cosineSimilarity(left, right) {
+  if (!left?.length || !right?.length || left.length !== right.length) {
+    return 0;
+  }
+  let sum = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    sum += left[index] * right[index];
+  }
+  return sum;
+}
+
+function buildKnowledgeChunks(text, maxSize = KNOWLEDGE_CHUNK_SIZE, overlap = KNOWLEDGE_CHUNK_OVERLAP) {
+  const normalized = normalizeKnowledgeText(text);
+  if (!normalized) {
+    return [];
+  }
+  const chunks = [];
+  let start = 0;
+  let chunkIndex = 1;
+  while (start < normalized.length) {
+    const slice = normalized.slice(start, start + maxSize).trim();
+    if (!slice) {
+      break;
+    }
+    chunks.push({
+      chunkIndex,
+      text: slice,
+    });
+    if (start + maxSize >= normalized.length) {
+      break;
+    }
+    start += Math.max(80, maxSize - overlap);
+    chunkIndex += 1;
+  }
+  return chunks;
+}
+
+function normalizeKnowledgeChunks(records, fallbackText = "") {
+  if (Array.isArray(records) && records.length) {
+    return records
+      .filter(Boolean)
+      .map((record, index) => ({
+        chunkIndex: Number(record.chunkIndex || index + 1),
+        text: normalizeKnowledgeText(record.text || ""),
+      }))
+      .filter((record) => record.text);
+  }
+  return buildKnowledgeChunks(fallbackText);
+}
+
+function buildKnowledgeSnippet(text, matchedTerms = []) {
+  const normalized = normalizeKnowledgeText(text);
+  if (!normalized) {
+    return "";
+  }
+  const firstTerm = matchedTerms.find(Boolean);
+  if (!firstTerm) {
+    return summarizeText(normalized, 110);
+  }
+  const lowerText = normalized.toLowerCase();
+  const lowerTerm = firstTerm.toLowerCase();
+  const termIndex = lowerText.indexOf(lowerTerm);
+  if (termIndex === -1) {
+    return summarizeText(normalized, 110);
+  }
+  const start = Math.max(0, termIndex - 48);
+  const end = Math.min(normalized.length, termIndex + firstTerm.length + 72);
+  const snippet = normalized.slice(start, end).trim();
+  return `${start > 0 ? "…" : ""}${snippet}${end < normalized.length ? "…" : ""}`;
 }
 
 function getKnowledgeCategoryDefinition(categoryId) {
@@ -2267,17 +2499,18 @@ async function extractSpreadsheetTextPreview(file) {
 async function extractTextPreviewForFile(file) {
   const fileName = String(file?.name || "");
   const fileType = String(file?.type || "");
+  const importProfile = detectKnowledgeNormalizedFormat(fileName, fileType);
   try {
-    if (/^(text\/|application\/(json|xml))/i.test(fileType) || /\.(txt|md|markdown|json|csv|xml|html?)$/i.test(fileName)) {
+    if (importProfile.supported && ["plain_text", "markdown", "json", "csv", "html", "yaml", "source_code"].includes(importProfile.normalizedFormat)) {
       return summarizeText(await readFileAsText(file), 4000);
     }
-    if (fileType === "application/pdf" || /\.pdf$/i.test(fileName)) {
+    if (importProfile.normalizedFormat === "pdf") {
       return summarizeText(await extractPdfTextPreview(file), 4000);
     }
-    if (fileType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || /\.docx$/i.test(fileName)) {
+    if (importProfile.normalizedFormat === "docx") {
       return summarizeText(await extractDocxTextPreview(file), 4000);
     }
-    if (/spreadsheetml|ms-excel/i.test(fileType) || /\.(xlsx|xls)$/i.test(fileName)) {
+    if (importProfile.normalizedFormat === "spreadsheet") {
       return summarizeText(await extractSpreadsheetTextPreview(file), 4000);
     }
   } catch (error) {
@@ -2315,23 +2548,208 @@ function renderKnowledgeTagFilterOptions(entries) {
   knowledgeTagFilterSelect.value = tags.includes(selectedValue) ? selectedValue : "all";
 }
 
-function filterKnowledgeEntries(entries) {
-  const searchTerm = String(knowledgeSearchInputField?.value || "").trim().toLowerCase();
-  const category = knowledgeCategoryFilterSelect?.value || "all";
-  const tag = knowledgeTagFilterSelect?.value || "all";
-  return entries.filter((entry) => {
+function filterKnowledgeEntries(entries, options = {}) {
+  const searchTerm = String(options.queryOverride ?? knowledgeSearchInputField?.value ?? "").trim();
+  const category = options.categoryOverride ?? knowledgeCategoryFilterSelect?.value ?? "all";
+  const tag = options.tagOverride ?? knowledgeTagFilterSelect?.value ?? "all";
+  const filteredEntries = entries.filter((entry) => {
     if (category !== "all" && entry.category !== category) {
       return false;
     }
     if (tag !== "all" && !(entry.tags || []).includes(tag)) {
       return false;
     }
-    if (!searchTerm) {
-      return true;
-    }
-    const haystack = [entry.title, getKnowledgeCategoryLabel(entry.category), entry.summary, entry.textPreview, ...(entry.tags || [])].join(" ").toLowerCase();
-    return haystack.includes(searchTerm);
+    return true;
   });
+
+  const searchableCount = filteredEntries.filter((entry) => entry.conversionStatus === "ready" && (entry.chunks || []).length).length;
+  const blockedCount = filteredEntries.length - searchableCount;
+  if (!searchTerm) {
+    return {
+      entries: filteredEntries.sort((left, right) => (right.createdAt || 0) - (left.createdAt || 0)),
+      searchTerm: "",
+      searchableCount,
+      blockedCount,
+    };
+  }
+
+  const queryTerms = buildKnowledgeTerms(searchTerm);
+  const queryVector = buildKnowledgeVector(searchTerm);
+  const hits = filteredEntries
+    .filter((entry) => entry.conversionStatus === "ready")
+    .map((entry) => {
+      const chunks = Array.isArray(entry.chunks) && entry.chunks.length ? entry.chunks : buildKnowledgeChunks(entry.textPreview || "");
+      let bestHit = null;
+      chunks.forEach((chunk) => {
+        const chunkText = normalizeKnowledgeText(chunk.text || "");
+        if (!chunkText) {
+          return;
+        }
+        const lowerChunk = chunkText.toLowerCase();
+        const matchedTerms = queryTerms.filter((term) => lowerChunk.includes(term.toLowerCase()));
+        const lexicalScore = matchedTerms.reduce((sum, term) => sum + 1 + Math.min(term.length, 12) / 12, 0);
+        const vectorScore = Math.max(0, cosineSimilarity(buildKnowledgeVector(chunkText), queryVector));
+        const score = lexicalScore + vectorScore * 3;
+        if (score <= 0) {
+          return;
+        }
+        if (!bestHit || score > bestHit.score) {
+          bestHit = {
+            score,
+            matchedTerms,
+            snippet: buildKnowledgeSnippet(chunkText, matchedTerms),
+            chunkIndex: Number(chunk.chunkIndex || 1),
+          };
+        }
+      });
+      return bestHit
+        ? {
+            ...entry,
+            searchScore: bestHit.score,
+            searchMatchedTerms: bestHit.matchedTerms,
+            searchSnippet: bestHit.snippet,
+            searchChunkIndex: bestHit.chunkIndex,
+          }
+        : null;
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      if (right.searchScore !== left.searchScore) {
+        return right.searchScore - left.searchScore;
+      }
+      return (right.createdAt || 0) - (left.createdAt || 0);
+    });
+
+  return {
+    entries: hits,
+    searchTerm,
+    searchableCount,
+    blockedCount,
+  };
+}
+
+function buildKnowledgeCatalogSummary(entries) {
+  const categoryMap = new Map();
+  entries.forEach((entry) => {
+    const categoryKey = entry.category || "reference";
+    const current = categoryMap.get(categoryKey) || { categoryKey, total: 0, ready: 0 };
+    current.total += 1;
+    if (entry.conversionStatus === "ready") {
+      current.ready += 1;
+    }
+    categoryMap.set(categoryKey, current);
+  });
+  return [...categoryMap.values()]
+    .sort((left, right) => right.ready - left.ready)
+    .map((item) => `${getKnowledgeCategoryLabel(item.categoryKey)} ${item.ready}/${item.total}`)
+    .slice(0, 5)
+    .join(" · ");
+}
+
+function buildKnowledgeNormalizedPayload(entry) {
+  const chunks = normalizeKnowledgeChunks(entry.chunks, entry.textPreview || "");
+  return {
+    id: entry.id,
+    title: entry.title,
+    originalFileName: entry.name,
+    mimeType: entry.type,
+    category: entry.category,
+    categoryLabel: getKnowledgeCategoryLabel(entry.category),
+    tags: uniqueStrings(entry.tags || []),
+    normalizedFormat: entry.normalizedFormat || "",
+    conversionStatus: entry.conversionStatus || "limited",
+    summary: entry.summary || "",
+    textPreview: entry.textPreview || "",
+    storedAt: entry.storedAt || entry.createdAt || 0,
+    createdAt: entry.createdAt || 0,
+    chunkCount: chunks.length,
+    chunks: chunks.map((chunk) => ({
+      chunkIndex: Number(chunk.chunkIndex || 0),
+      text: String(chunk.text || ""),
+      charLength: Array.from(String(chunk.text || "")).length,
+    })),
+  };
+}
+
+function buildKnowledgeChunkExportPayload(entry) {
+  const payload = buildKnowledgeNormalizedPayload(entry);
+  return {
+    documentId: payload.id,
+    title: payload.title,
+    normalizedFormat: payload.normalizedFormat,
+    conversionStatus: payload.conversionStatus,
+    chunkCount: payload.chunkCount,
+    chunks: payload.chunks,
+  };
+}
+
+function sanitizeKnowledgeFileBaseName(entry) {
+  const rawName = String(entry?.name || entry?.title || "knowledge-document").replace(/\.[A-Za-z0-9]+$/i, "").trim() || "knowledge-document";
+  return rawName.replace(/[\\/:*?"<>|]/g, "-").trim() || "knowledge-document";
+}
+
+function formatKnowledgeRetrievalContext(context) {
+  if (context === "shared_brief") {
+    return langText("共享事实包", "Shared Brief");
+  }
+  return String(context || "");
+}
+
+async function recordKnowledgeRetrievalHits(query, hits, context = "shared_brief") {
+  if (!Array.isArray(hits) || !hits.length) {
+    return;
+  }
+  const now = Date.now();
+  const hitMap = new Map(hits.map((hit) => [hit.id, hit]));
+  state.globalKnowledgeEntries = normalizeKnowledgeEntries(state.globalKnowledgeEntries.map((entry) => {
+    const matchedHit = hitMap.get(entry.id);
+    if (!matchedHit) {
+      return entry;
+    }
+    const nextCount = Number(entry.retrievalCount || 0) + 1;
+    const nextLog = normalizeKnowledgeRetrievalLog([
+      {
+        timestamp: now,
+        query,
+        context,
+        snippet: matchedHit.searchSnippet || matchedHit.summary || matchedHit.textPreview || "",
+        score: matchedHit.searchScore || 0,
+        chunkIndex: matchedHit.searchChunkIndex || 0,
+      },
+      ...(entry.retrievalLog || []),
+    ]);
+    return {
+      ...entry,
+      retrievalCount: nextCount,
+      lastRetrievedAt: now,
+      retrievalLog: nextLog,
+    };
+  }));
+  await saveGlobalKnowledgeEntries(state.globalKnowledgeEntries);
+}
+
+function buildLocalKnowledgeDigest(query, limit = 4) {
+  if (!state.knowledgeEnabled) {
+    return "";
+  }
+  const allEntries = getKnowledgeScopeEntries();
+  if (!allEntries.length) {
+    return "";
+  }
+  const result = filterKnowledgeEntries(allEntries, {
+    queryOverride: query,
+    categoryOverride: "all",
+    tagOverride: "all",
+  });
+  const hits = result.entries.slice(0, limit);
+  if (!hits.length) {
+    return "";
+  }
+  const matchedCategories = uniqueStrings(hits.map((entry) => getKnowledgeCategoryLabel(entry.category)));
+  return [
+    `本地知识库命中目录：${matchedCategories.join("、") || langText("未分类", "Uncategorized")}`,
+    ...hits.map((entry, index) => `${index + 1}. ${entry.title}｜目录：${getKnowledgeCategoryLabel(entry.category)}｜片段：${entry.searchSnippet || summarizeText(entry.summary || entry.textPreview || "", 88)}`),
+  ].join("\n");
 }
 
 function renderKnowledgeBaseWorkspace() {
@@ -2341,7 +2759,8 @@ function renderKnowledgeBaseWorkspace() {
 
   const allEntries = getKnowledgeScopeEntries();
   renderKnowledgeTagFilterOptions(allEntries);
-  const entries = filterKnowledgeEntries(allEntries).sort((left, right) => (right.createdAt || 0) - (left.createdAt || 0));
+  const filteredResult = filterKnowledgeEntries(allEntries);
+  const entries = filteredResult.entries;
   const knowledgeCountBadge = document.getElementById("knowledge-count-badge");
   if (knowledgeCountBadge) {
     knowledgeCountBadge.textContent = langText(`${entries.length} 条`, `${entries.length} items`);
@@ -2350,6 +2769,8 @@ function renderKnowledgeBaseWorkspace() {
   knowledgeSummaryStrip.innerHTML = `
     <div class="knowledge-summary-line">${escapeHtml(langText("当前查看：全局知识库", "Viewing: Global Knowledge"))}</div>
     <div class="knowledge-summary-line">${escapeHtml(langText(`当前共 ${state.globalKnowledgeEntries.length} 条资料`, `${state.globalKnowledgeEntries.length} items in the knowledge base`))}</div>
+    <div class="knowledge-summary-line">${escapeHtml(langText(`可检索 ${filteredResult.searchableCount} 条，受限 ${filteredResult.blockedCount} 条`, `${filteredResult.searchableCount} searchable, ${filteredResult.blockedCount} limited`))}</div>
+    <div class="knowledge-summary-line">${escapeHtml(langText(`目录概览：${buildKnowledgeCatalogSummary(allEntries) || "暂无"}`, `Catalog: ${buildKnowledgeCatalogSummary(allEntries) || "none yet"}`))}</div>
   `;
 
   if (!entries.some((entry) => entry.id === activeKnowledgeEntryId)) {
@@ -2358,8 +2779,11 @@ function renderKnowledgeBaseWorkspace() {
 
   if (!entries.length) {
     activeKnowledgeEntryId = "";
-    knowledgeList.innerHTML = `<div class="empty-panel">${escapeHtml(langText("当前知识库还是空的。先上传文档。", "The knowledge base is empty. Upload documents to get started."))}</div>`;
-    knowledgeDetail.innerHTML = `<div class="evidence-detail-empty">${escapeHtml(langText("右侧会显示文档摘要、提取文本和基础信息。", "Document summary, extracted text, and metadata will appear here."))}</div>`;
+    const hasActiveFilters = Boolean(filteredResult.searchTerm)
+      || (knowledgeCategoryFilterSelect?.value || "all") !== "all"
+      || (knowledgeTagFilterSelect?.value || "all") !== "all";
+    knowledgeList.innerHTML = `<div class="empty-panel">${escapeHtml(hasActiveFilters ? langText("当前筛选条件下没有命中资料。可以清空检索词或切换目录、标签后再试。", "No knowledge items matched the current filters. Clear the search or switch folder/tag filters and try again.") : langText("当前知识库还是空的。先上传文档。", "The knowledge base is empty. Upload documents to get started."))}</div>`;
+    knowledgeDetail.innerHTML = `<div class="evidence-detail-empty">${escapeHtml(hasActiveFilters ? langText("命中片段、摘要和基础信息会在这里显示。", "Matched snippets, summaries, and metadata will appear here.") : langText("右侧会显示文档摘要、提取文本和基础信息。", "Document summary, extracted text, and metadata will appear here."))}</div>`;
     if (knowledgeSelectionPanel) {
       knowledgeSelectionPanel.innerHTML = "";
     }
@@ -2373,7 +2797,8 @@ function renderKnowledgeBaseWorkspace() {
     <button class="evidence-list-item ${entry.id === activeKnowledgeEntryId ? "active" : ""}" data-knowledge-id="${entry.id}" type="button">
       <span class="evidence-list-index">${index + 1}.</span>
       <span class="evidence-list-label">${escapeHtml(entry.title)}</span>
-      <span class="evidence-list-kind">${escapeHtml(getKnowledgeEntryFormatLabel(entry))}</span>
+      <span class="evidence-list-kind">${escapeHtml([getKnowledgeEntryFormatLabel(entry), getKnowledgeConversionStatusLabel(entry.conversionStatus)].filter(Boolean).join(" · "))}</span>
+      ${entry.searchSnippet ? `<span class="knowledge-hit-snippet">${escapeHtml(entry.searchSnippet)}</span>` : ""}
     </button>
   `).join("");
 
@@ -2386,19 +2811,44 @@ function renderKnowledgeBaseWorkspace() {
     knowledgeSelectionPanel.innerHTML = `<div class="knowledge-summary-line">${escapeHtml(langText(`目录：${getKnowledgeCategoryLabel(activeEntry.category)}`, `Folder: ${getKnowledgeCategoryLabel(activeEntry.category)}`))}</div>`;
   }
   if (knowledgeEditorPanel) {
-    knowledgeEditorPanel.innerHTML = `<div class="knowledge-summary-line">${escapeHtml(langText(`标签：${(activeEntry.tags || []).join(" / ") || "无"}`, `Tags: ${(activeEntry.tags || []).join(" / ") || "none"}`))}</div>`;
+    knowledgeEditorPanel.innerHTML = [
+      `<div class="knowledge-summary-line">${escapeHtml(langText(`标签：${(activeEntry.tags || []).join(" / ") || "无"}`, `Tags: ${(activeEntry.tags || []).join(" / ") || "none"}`))}</div>`,
+      `<div class="knowledge-summary-line">${escapeHtml(langText(`状态：${getKnowledgeConversionStatusLabel(activeEntry.conversionStatus)} · 分片 ${activeEntry.chunks?.length || 0} 段`, `Status: ${getKnowledgeConversionStatusLabel(activeEntry.conversionStatus)} · ${activeEntry.chunks?.length || 0} chunks`))}</div>`,
+      `<div class="knowledge-summary-line">${escapeHtml(langText(`回溯：累计命中 ${activeEntry.retrievalCount || 0} 次${activeEntry.lastRetrievedAt ? ` · 最近 ${formatEvidenceCreatedAt(activeEntry.lastRetrievedAt)}` : ""}`, `History: ${activeEntry.retrievalCount || 0} hit(s)${activeEntry.lastRetrievedAt ? ` · Latest ${formatEvidenceCreatedAt(activeEntry.lastRetrievedAt)}` : ""}`))}</div>`,
+      `<div class="knowledge-action-row">
+        ${activeEntry.originalDataUrl ? `<button class="knowledge-action-button" type="button" data-knowledge-action="download-original" data-knowledge-id="${activeEntry.id}">${escapeHtml(langText("下载原文件", "Download Original"))}</button>` : ""}
+        <button class="knowledge-action-button" type="button" data-knowledge-action="download-normalized-json" data-knowledge-id="${activeEntry.id}">${escapeHtml(langText("下载标准化 JSON", "Download Normalized JSON"))}</button>
+        <button class="knowledge-action-button" type="button" data-knowledge-action="download-chunks-json" data-knowledge-id="${activeEntry.id}">${escapeHtml(langText("下载 Chunks JSON", "Download Chunks JSON"))}</button>
+      </div>`,
+    ].join("");
   }
+  const recentRetrievalMarkup = (activeEntry.retrievalLog || []).length
+    ? `<div class="knowledge-ingestion-card"><div class="knowledge-ingestion-title">${escapeHtml(langText("最近命中记录", "Recent Retrievals"))}</div><div class="knowledge-ingestion-list">${activeEntry.retrievalLog.map((item) => `<div class="knowledge-ingestion-item"><div class="knowledge-ingestion-meta">${escapeHtml(`${formatEvidenceCreatedAt(item.timestamp)} · ${formatKnowledgeRetrievalContext(item.context)}${item.chunkIndex ? ` · Chunk ${item.chunkIndex}` : ""}`)}</div><div class="knowledge-ingestion-copy">${escapeHtml(item.query || langText("无检索词", "No query"))}</div><div class="knowledge-ingestion-copy is-muted">${escapeHtml(item.snippet || langText("本次命中未记录额外片段。", "No snippet was stored for this hit."))}</div></div>`).join("")}</div></div>`
+    : `<div class="knowledge-ingestion-card"><div class="knowledge-ingestion-title">${escapeHtml(langText("最近命中记录", "Recent Retrievals"))}</div><div class="knowledge-ingestion-copy is-muted">${escapeHtml(langText("这份资料还没有被讨论链路命中过。后续一旦进入 shared brief，这里会留下回溯记录。", "This document has not been used by the discussion flow yet. Once it enters the shared brief, its retrieval history will appear here."))}</div></div>`;
   knowledgeDetail.innerHTML = `
     <div class="evidence-detail-panel">
       <div class="evidence-detail-title">${escapeHtml(activeEntry.title)}</div>
       <div class="evidence-detail-meta">${escapeHtml([
         activeEntry.scope === "project" ? langText("项目知识包", "Project Pack") : langText("全局知识库", "Global Knowledge"),
         getKnowledgeCategoryLabel(activeEntry.category),
+        getKnowledgeConversionStatusLabel(activeEntry.conversionStatus),
+        activeEntry.normalizedFormat || "",
+        activeEntry.chunks?.length ? langText(`${activeEntry.chunks.length} 段`, `${activeEntry.chunks.length} chunks`) : "",
         activeEntry.size ? `${Math.max(1, Math.round(activeEntry.size / 1024))} KB` : "",
       ].filter(Boolean).join("  ·  "))}</div>
       <div class="evidence-detail-surface">
+        <div class="knowledge-ingestion-card">
+          <div class="knowledge-ingestion-title">${escapeHtml(langText("入库流水", "Ingestion Pipeline"))}</div>
+          <div class="knowledge-ingestion-list">
+            <div class="knowledge-ingestion-item"><div class="knowledge-ingestion-meta">${escapeHtml(langText("原文件", "Original File"))}</div><div class="knowledge-ingestion-copy">${escapeHtml(`${activeEntry.name || activeEntry.title} · ${Math.max(1, Math.round((activeEntry.size || 0) / 1024))} KB`)}</div></div>
+            <div class="knowledge-ingestion-item"><div class="knowledge-ingestion-meta">${escapeHtml(langText("标准化结果", "Normalization"))}</div><div class="knowledge-ingestion-copy">${escapeHtml(`${getKnowledgeConversionStatusLabel(activeEntry.conversionStatus)} · ${activeEntry.normalizedFormat || langText("未识别", "Unknown")}`)}</div></div>
+            <div class="knowledge-ingestion-item"><div class="knowledge-ingestion-meta">${escapeHtml(langText("可检索状态", "Search Readiness"))}</div><div class="knowledge-ingestion-copy">${escapeHtml(activeEntry.conversionStatus === "ready" ? langText(`已生成 ${activeEntry.chunks?.length || 0} 个 chunk，可进入本地检索。`, `${activeEntry.chunks?.length || 0} chunks generated and ready for local retrieval.`) : langText("当前未形成稳定 chunk，讨论阶段不会稳定命中。", "No stable chunks were generated yet, so retrieval will be limited."))}</div></div>
+            <div class="knowledge-ingestion-item"><div class="knowledge-ingestion-meta">${escapeHtml(langText("存档时间", "Stored At"))}</div><div class="knowledge-ingestion-copy">${escapeHtml(formatEvidenceCreatedAt(activeEntry.storedAt || activeEntry.createdAt) || langText("未知", "Unknown"))}</div></div>
+          </div>
+        </div>
         <div class="evidence-detail-copy">${escapeHtml(activeEntry.summary || langText("当前文件还没有提取到可展示的摘要。", "No summary has been extracted yet."))}</div>
         ${activeEntry.textPreview ? `<div class="evidence-detail-copy">${escapeHtml(activeEntry.textPreview)}</div>` : `<div class="evidence-detail-placeholder">${escapeHtml(langText("这个文件已入库，但当前还没有提取出可展示的正文。", "This file has been stored, but no readable text preview is available yet."))}</div>`}
+        ${recentRetrievalMarkup}
       </div>
     </div>
   `;
@@ -2406,8 +2856,23 @@ function renderKnowledgeBaseWorkspace() {
 
 async function buildKnowledgeEntryFromFile(file, options = {}) {
   const { scope = "global", category = "reference", topicId = "" } = options;
-  const textPreview = await extractTextPreviewForFile(file);
+  const importProfile = detectKnowledgeNormalizedFormat(file?.name || "", file?.type || "");
+  const [textPreview, originalDataUrl] = await Promise.all([
+    importProfile.supported ? extractTextPreviewForFile(file) : Promise.resolve(""),
+    readFileAsDataUrl(file).catch(() => ""),
+  ]);
   const extension = (String(file.name || "").match(/\.([A-Za-z0-9]+)$/)?.[1] || "").toUpperCase();
+  const conversionStatus = !importProfile.supported
+    ? "unsupported"
+    : textPreview
+      ? "ready"
+      : "limited";
+  const chunks = conversionStatus === "ready" ? buildKnowledgeChunks(textPreview) : [];
+  const summary = conversionStatus === "ready"
+    ? summarizeText(textPreview || `${file.name || langText("文件", "File")} · ${langText("已上传入库", "stored in knowledge base")}`, 180)
+    : conversionStatus === "limited"
+      ? langText("文件已入库，但当前只拿到了有限的可检索文本。建议后续补更清晰的文本版资料。", "The file was stored, but only limited searchable text is available. Consider uploading a cleaner text version later.")
+      : langText("该文件格式当前不会进入知识检索。你仍可保留原文件名作记录，但讨论阶段不会命中它。", "This file format is not searchable in the current version. It can stay as a record, but discussions will not retrieve it.");
   return {
     id: `knowledge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     topicId: scope === "project" ? topicId : "",
@@ -2418,9 +2883,17 @@ async function buildKnowledgeEntryFromFile(file, options = {}) {
     size: file.size || 0,
     category,
     tags: uniqueStrings([extension].filter(Boolean)),
-    summary: summarizeText(textPreview || `${file.name || langText("文件", "File")} · ${langText("已上传入库", "stored in knowledge base")}`, 180),
+    summary,
     textPreview,
+    normalizedFormat: importProfile.normalizedFormat,
+    conversionStatus,
+    chunks,
+    originalDataUrl,
+    retrievalCount: 0,
+    lastRetrievedAt: 0,
+    retrievalLog: [],
     sourceUrl: "",
+    storedAt: Date.now(),
     createdAt: Date.now(),
   };
 }
@@ -2436,7 +2909,20 @@ async function handleKnowledgeUploads(files) {
   const scope = state.knowledgeScope === "project" ? "project" : "global";
   const category = requireKnowledgeUploadCategory();
   const topicId = scope === "project" ? state.activeTopicId : "";
-  const newEntries = await Promise.all(attachments.map((file) => buildKnowledgeEntryFromFile(file, { scope, category, topicId })));
+  const supportedFiles = [];
+  const blockedFiles = [];
+  attachments.forEach((file) => {
+    const profile = detectKnowledgeNormalizedFormat(file?.name || "", file?.type || "");
+    if (profile.supported) {
+      supportedFiles.push(file);
+    } else {
+      blockedFiles.push(file.name || langText("未命名文件", "Untitled file"));
+    }
+  });
+  if (!supportedFiles.length) {
+    throw new Error(langText("当前选中的文件都不是这版知识库支持的格式。请优先上传 TXT、Markdown、JSON、CSV、HTML、DOCX、XLSX、XLS、PDF 或源码/YAML 文本文件。", "None of the selected files are supported in this knowledge base version. Upload TXT, Markdown, JSON, CSV, HTML, DOCX, XLSX, XLS, PDF, source code, or YAML text files first."));
+  }
+  const newEntries = await Promise.all(supportedFiles.map((file) => buildKnowledgeEntryFromFile(file, { scope, category, topicId })));
   if (scope === "project") {
     state.projectKnowledgeEntries = normalizeKnowledgeEntries([...state.projectKnowledgeEntries, ...newEntries]);
     await saveProjectKnowledgeEntries(topicId, state.projectKnowledgeEntries);
@@ -2446,6 +2932,10 @@ async function handleKnowledgeUploads(files) {
   }
   activeKnowledgeEntryId = newEntries[newEntries.length - 1]?.id || activeKnowledgeEntryId;
   renderKnowledgeBaseWorkspace();
+  return {
+    storedCount: newEntries.length,
+    blockedFiles,
+  };
 }
 
 async function resizeImageForAnalysis(dataUrl, maxDim = 1024, quality = 0.82) {
@@ -2838,6 +3328,22 @@ function downloadBlob(fileName, blob) {
 
 function downloadTextFile(fileName, content) {
   downloadBlob(fileName, new Blob([content], { type: "text/plain;charset=utf-8" }));
+}
+
+function downloadJsonFile(fileName, payload) {
+  downloadBlob(fileName, new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" }));
+}
+
+function downloadDataUrlFile(fileName, dataUrl) {
+  if (!dataUrl) {
+    return;
+  }
+  const anchor = document.createElement("a");
+  anchor.href = dataUrl;
+  anchor.download = fileName;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
 }
 
 function escapeExportHtml(value) {
@@ -4469,7 +4975,7 @@ function applyLanguageToStaticUi() {
     evidenceTranslateToggle.title = langText("开启后，搜索结果采用 AI 自动翻译为中文", "When enabled, search results are automatically translated for the current language.");
   }
   if (knowledgeNoteStrip) {
-    knowledgeNoteStrip.textContent = langText("第一版支持 TXT、Markdown、JSON、CSV、PDF、DOCX、XLSX、XLS；旧版 DOC 建议先转为 DOCX。", "This first version supports TXT, Markdown, JSON, CSV, PDF, DOCX, XLSX, and XLS. Convert legacy DOC files to DOCX first.");
+    knowledgeNoteStrip.textContent = langText("当前只把可稳定标准化的资料纳入检索：TXT、Markdown、JSON、CSV、HTML、YAML、常见源码文本、PDF、DOCX、XLSX、XLS。上传后会先整理成分片，再进入本地检索。", "Only formats that can be normalized reliably enter retrieval: TXT, Markdown, JSON, CSV, HTML, YAML, common source code text, PDF, DOCX, XLSX, and XLS. Uploaded files are chunked locally before retrieval.");
   }
   if (knowledgeCountBadge) {
     const count = Number.parseInt(knowledgeCountBadge.textContent, 10);
@@ -7911,6 +8417,23 @@ async function buildSharedResearchBrief(summary, moderatorProfile, orderedSpeake
 }
 
 async function buildSharedResearchBriefFromSources(summary, moderatorProfile, orderedSpeakers, sourceDigest = "", signal) {
+  const localKnowledgeResult = state.knowledgeEnabled
+    ? filterKnowledgeEntries(getKnowledgeScopeEntries(), {
+      queryOverride: summary,
+      categoryOverride: "all",
+      tagOverride: "all",
+    })
+    : { entries: [] };
+  const localKnowledgeHits = (localKnowledgeResult.entries || []).slice(0, 4);
+  const localKnowledgeDigest = localKnowledgeHits.length
+    ? [
+      `本地知识库命中目录：${uniqueStrings(localKnowledgeHits.map((entry) => getKnowledgeCategoryLabel(entry.category))).join("、") || langText("未分类", "Uncategorized")}`,
+      ...localKnowledgeHits.map((entry, index) => `${index + 1}. ${entry.title}｜目录：${getKnowledgeCategoryLabel(entry.category)}｜片段：${entry.searchSnippet || summarizeText(entry.summary || entry.textPreview || "", 88)}`),
+    ].join("\n")
+    : "";
+  if (localKnowledgeHits.length) {
+    await recordKnowledgeRetrievalHits(summary, localKnowledgeHits, "shared_brief");
+  }
   const prompt = [
     "你现在是这张圆桌唯一的共享 research agent。",
     "你的职责不是替任何一个席位发言，而是先为整张桌子整理一份所有角色共用的事实包。",
@@ -7921,6 +8444,7 @@ async function buildSharedResearchBriefFromSources(summary, moderatorProfile, or
     getModelOutputLanguageInstruction(),
     `任务定义：${summary}`,
     `本次参与人物及其长期观察重心：${orderedSpeakers.map((role) => `${getActiveRoleName(role)}（${getActiveRoleSeat(role)}）`).join("，")}`,
+    localKnowledgeDigest ? `本地知识库命中结果（请先吸收这批片段，再判断还缺什么）：\n${localKnowledgeDigest}` : "",
     sourceDigest ? `补充来源材料（请优先消化这批材料，再提炼成共享事实包）：\n${sourceDigest}` : "",
   ].join("\n\n");
 
@@ -10813,8 +11337,13 @@ function bindEvents() {
       return;
     }
     try {
-      await handleKnowledgeUploads(files);
-      updateSharedAgentStatus(langText(`知识库已入库 ${files.length} 个文件。`, `Stored ${files.length} knowledge file(s).`), "success");
+      const uploadResult = await handleKnowledgeUploads(files);
+      updateSharedAgentStatus(
+        uploadResult.blockedFiles.length
+          ? langText(`已入库 ${uploadResult.storedCount} 个文件；以下格式暂未纳入检索：${uploadResult.blockedFiles.join("、")}`, `Stored ${uploadResult.storedCount} file(s); these formats are not searchable yet: ${uploadResult.blockedFiles.join(", ")}`)
+          : langText(`知识库已入库 ${uploadResult.storedCount} 个文件，并已整理成可检索片段。`, `Stored ${uploadResult.storedCount} knowledge file(s) and prepared searchable chunks.`),
+        uploadResult.blockedFiles.length ? "pending" : "success"
+      );
       if (knowledgeUploadCategorySelect) {
         knowledgeUploadCategorySelect.value = "";
       }
@@ -10834,6 +11363,29 @@ function bindEvents() {
     }
     activeKnowledgeEntryId = trigger.dataset.knowledgeId || "";
     renderKnowledgeBaseWorkspace();
+  });
+  knowledgeEditorPanel?.addEventListener("click", (event) => {
+    const trigger = event.target.closest("[data-knowledge-action]");
+    if (!trigger) {
+      return;
+    }
+    const entry = getKnowledgeScopeEntries().find((item) => item.id === (trigger.dataset.knowledgeId || ""));
+    if (!entry) {
+      return;
+    }
+    const fileBaseName = sanitizeKnowledgeFileBaseName(entry);
+    const action = trigger.dataset.knowledgeAction || "";
+    if (action === "download-original") {
+      downloadDataUrlFile(entry.name || `${fileBaseName}.${entry.normalizedFormat || "bin"}`, entry.originalDataUrl || "");
+      return;
+    }
+    if (action === "download-normalized-json") {
+      downloadJsonFile(`${fileBaseName}.normalized.json`, buildKnowledgeNormalizedPayload(entry));
+      return;
+    }
+    if (action === "download-chunks-json") {
+      downloadJsonFile(`${fileBaseName}.chunks.json`, buildKnowledgeChunkExportPayload(entry));
+    }
   });
 
   openRoundtableWorkbenchButton?.addEventListener("click", () => {

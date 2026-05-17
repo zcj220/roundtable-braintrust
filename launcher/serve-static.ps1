@@ -37,7 +37,19 @@ function Write-TextResponse($context, [int]$statusCode, [string]$text, [string]$
   $context.Response.StatusCode = $statusCode
   $context.Response.ContentType = $contentType
   $context.Response.ContentLength64 = $buffer.LongLength
-  $context.Response.OutputStream.Write($buffer, 0, $buffer.Length)
+  if ($context.Request.HttpMethod -ne "HEAD") {
+    $context.Response.OutputStream.Write($buffer, 0, $buffer.Length)
+  }
+  $context.Response.Close()
+}
+
+function Write-BytesResponse($context, [int]$statusCode, [byte[]]$bytes, [string]$contentType = "application/octet-stream") {
+  $context.Response.StatusCode = $statusCode
+  $context.Response.ContentType = $contentType
+  $context.Response.ContentLength64 = $bytes.LongLength
+  if ($context.Request.HttpMethod -ne "HEAD") {
+    $context.Response.OutputStream.Write($bytes, 0, $bytes.Length)
+  }
   $context.Response.Close()
 }
 
@@ -180,11 +192,7 @@ try {
       try {
         $proxyResult = Invoke-ProxyRequest $targetUri
         # 直接透传原始字节，不做任何字符编码转换
-        $context.Response.StatusCode = $proxyResult.StatusCode
-        $context.Response.ContentType = $proxyResult.ContentType
-        $context.Response.ContentLength64 = $proxyResult.Bytes.LongLength
-        $context.Response.OutputStream.Write($proxyResult.Bytes, 0, $proxyResult.Bytes.Length)
-        $context.Response.Close()
+        Write-BytesResponse $context $proxyResult.StatusCode $proxyResult.Bytes $proxyResult.ContentType
       } catch {
         Write-TextResponse $context 502 $_.Exception.Message
       }
@@ -199,11 +207,7 @@ try {
     }
 
     $bytes = [System.IO.File]::ReadAllBytes($target)
-    $context.Response.StatusCode = 200
-    $context.Response.ContentType = Get-ContentType $target
-    $context.Response.ContentLength64 = $bytes.LongLength
-    $context.Response.OutputStream.Write($bytes, 0, $bytes.Length)
-    $context.Response.Close()
+    Write-BytesResponse $context 200 $bytes (Get-ContentType $target)
   }
 } finally {
   if ($listener.IsListening) {
