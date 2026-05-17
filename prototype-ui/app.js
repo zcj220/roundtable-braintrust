@@ -1326,10 +1326,17 @@ function buildEmptyDiscussionState() {
     retrievalStatus: "idle",
     knowledgeGate: {
       shouldUseLocalKnowledge: false,
+      shouldUseWebSearch: false,
+      retrievalStrategy: "context_only",
       preferredCategories: [],
       preferredKeywords: [],
       localKnowledgeNeeded: [],
+      decisionReasons: [],
+      webSearchReasons: [],
+      skippedSignals: [],
       evidenceGaps: [],
+      localHitCount: 0,
+      rationaleSummary: "",
     },
     nextSpeakerPackage: null,
     handoff: null,
@@ -1354,20 +1361,52 @@ function normalizeDiscussionState(runtimeState) {
       preferredCategories: normalizeClarificationQuestions(nextState?.knowledgeGate?.preferredCategories || []),
       preferredKeywords: normalizeClarificationQuestions(nextState?.knowledgeGate?.preferredKeywords || []),
       localKnowledgeNeeded: normalizeClarificationQuestions(nextState?.knowledgeGate?.localKnowledgeNeeded || []),
+      decisionReasons: normalizeClarificationQuestions(nextState?.knowledgeGate?.decisionReasons || []),
+      webSearchReasons: normalizeClarificationQuestions(nextState?.knowledgeGate?.webSearchReasons || []),
+      skippedSignals: normalizeClarificationQuestions(nextState?.knowledgeGate?.skippedSignals || []),
       evidenceGaps: normalizeClarificationQuestions(nextState?.knowledgeGate?.evidenceGaps || []),
       shouldUseLocalKnowledge: !!nextState?.knowledgeGate?.shouldUseLocalKnowledge,
+      shouldUseWebSearch: !!nextState?.knowledgeGate?.shouldUseWebSearch,
+      retrievalStrategy: String(nextState?.knowledgeGate?.retrievalStrategy || base.knowledgeGate.retrievalStrategy || "context_only").trim() || "context_only",
+      localHitCount: Math.max(0, Number(nextState?.knowledgeGate?.localHitCount || 0) || 0),
+      rationaleSummary: String(nextState?.knowledgeGate?.rationaleSummary || "").trim(),
     },
     nextSpeakerPackage: nextState?.nextSpeakerPackage && typeof nextState.nextSpeakerPackage === "object"
       ? {
+        packageVersion: String(nextState.nextSpeakerPackage.packageVersion || "v1").trim() || "v1",
         targetRoleId: String(nextState.nextSpeakerPackage.targetRoleId || "").trim(),
         targetRoleName: String(nextState.nextSpeakerPackage.targetRoleName || "").trim(),
         sourceRoleId: String(nextState.nextSpeakerPackage.sourceRoleId || "").trim(),
         sourceRoleName: String(nextState.nextSpeakerPackage.sourceRoleName || "").trim(),
+        discussionStateLabel: String(nextState.nextSpeakerPackage.discussionStateLabel || "").trim(),
+        taskSummary: String(nextState.nextSpeakerPackage.taskSummary || "").trim(),
+        historyDigest: String(nextState.nextSpeakerPackage.historyDigest || "").trim(),
+        liveContextDigest: String(nextState.nextSpeakerPackage.liveContextDigest || "").trim(),
+        retrievalStrategy: String(nextState.nextSpeakerPackage.retrievalStrategy || "context_only").trim() || "context_only",
         handoffFocus: String(nextState.nextSpeakerPackage.handoffFocus || "").trim(),
         handoffSummary: String(nextState.nextSpeakerPackage.handoffSummary || "").trim(),
+        handoffKeywords: normalizeClarificationQuestions(nextState.nextSpeakerPackage.handoffKeywords || []),
         localKnowledgeHits: normalizeClarificationQuestions(nextState.nextSpeakerPackage.localKnowledgeHits || []),
+        localKnowledgeQuery: String(nextState.nextSpeakerPackage.localKnowledgeQuery || "").trim(),
         webSearchSummary: String(nextState.nextSpeakerPackage.webSearchSummary || "").trim(),
+        webSearchQueries: normalizeClarificationQuestions(nextState.nextSpeakerPackage.webSearchQueries || []),
+        decisionReasons: normalizeClarificationQuestions(nextState.nextSpeakerPackage.decisionReasons || []),
+        decisionRationale: String(nextState.nextSpeakerPackage.decisionRationale || "").trim(),
+        preferredCategories: normalizeClarificationQuestions(nextState.nextSpeakerPackage.preferredCategories || []),
+        preferredKeywords: normalizeClarificationQuestions(nextState.nextSpeakerPackage.preferredKeywords || []),
         evidenceGaps: normalizeClarificationQuestions(nextState.nextSpeakerPackage.evidenceGaps || []),
+        preparedInput: nextState.nextSpeakerPackage.preparedInput && typeof nextState.nextSpeakerPackage.preparedInput === "object"
+          ? {
+            identityBlock: String(nextState.nextSpeakerPackage.preparedInput.identityBlock || "").trim(),
+            taskBlock: String(nextState.nextSpeakerPackage.preparedInput.taskBlock || "").trim(),
+            historyBlock: String(nextState.nextSpeakerPackage.preparedInput.historyBlock || "").trim(),
+            liveContextBlock: String(nextState.nextSpeakerPackage.preparedInput.liveContextBlock || "").trim(),
+            retrievalBlock: String(nextState.nextSpeakerPackage.preparedInput.retrievalBlock || "").trim(),
+            packageBlock: String(nextState.nextSpeakerPackage.preparedInput.packageBlock || "").trim(),
+            roleBlock: String(nextState.nextSpeakerPackage.preparedInput.roleBlock || "").trim(),
+            outputBlock: String(nextState.nextSpeakerPackage.preparedInput.outputBlock || "").trim(),
+          }
+          : null,
       }
       : null,
     handoff: nextState?.handoff && typeof nextState.handoff === "object"
@@ -1430,7 +1469,27 @@ function formatDiscussionRetrievalStatusLabel(status) {
 }
 
 function buildDiscussionStatusDetailMarkup({ runtimeState, nextSpeakerPackage, knowledgeHits, evidenceGaps }) {
+  if (!shouldExposeInternalWorkflow()) {
+    return "";
+  }
   const sections = [];
+  const decisionReasons = uniqueStrings(normalizeClarificationQuestions([
+    ...(runtimeState.knowledgeGate?.decisionReasons || []),
+    ...(nextSpeakerPackage?.decisionReasons || []),
+  ])).slice(0, 4);
+  const webSearchReasons = uniqueStrings(normalizeClarificationQuestions(runtimeState.knowledgeGate?.webSearchReasons || [])).slice(0, 3);
+  const skippedSignals = uniqueStrings(normalizeClarificationQuestions(runtimeState.knowledgeGate?.skippedSignals || [])).slice(0, 2);
+  if (runtimeState.knowledgeGate?.rationaleSummary || nextSpeakerPackage?.decisionRationale || decisionReasons.length || webSearchReasons.length || skippedSignals.length) {
+    sections.push(`
+      <section class="discussion-status-detail-section">
+        <div class="discussion-status-detail-title">${escapeHtml(langText("检索决策", "Retrieval Decision"))}</div>
+        <div class="discussion-status-detail-copy">${escapeHtml(nextSpeakerPackage?.decisionRationale || runtimeState.knowledgeGate?.rationaleSummary || "")}</div>
+        ${decisionReasons.length ? `<div class="discussion-status-detail-list">${decisionReasons.map((item) => `<div>${escapeHtml(item)}</div>`).join("")}</div>` : ""}
+        ${webSearchReasons.length ? `<div class="discussion-status-detail-list">${webSearchReasons.map((item) => `<div>${escapeHtml(item)}</div>`).join("")}</div>` : ""}
+        ${skippedSignals.length ? `<div class="discussion-status-detail-list">${skippedSignals.map((item) => `<div>${escapeHtml(item)}</div>`).join("")}</div>` : ""}
+      </section>
+    `);
+  }
   if (nextSpeakerPackage?.handoffSummary || runtimeState.handoff?.current_round_summary) {
     sections.push(`
       <section class="discussion-status-detail-section">
@@ -1506,14 +1565,24 @@ function renderDiscussionStatusPanel() {
   discussionStatusGaps.textContent = evidenceGaps.length
     ? evidenceGaps.join("；")
     : langText("当前没有明显证据缺口", "No clear evidence gap right now");
-  discussionStatusSummary.textContent = [
-    nextSpeakerPackage?.handoffFocus ? `当前重点：${nextSpeakerPackage.handoffFocus}` : "",
-    knowledgeHits.length ? `本地知识：${knowledgeHits.slice(0, 2).join("；")}` : "",
-    nextSpeakerPackage?.webSearchSummary ? `网页补充：${summarizeText(nextSpeakerPackage.webSearchSummary, 140)}` : "",
-    runtimeState.handoff?.current_round_summary ? `上一位交接：${runtimeState.handoff.current_round_summary}` : "",
-  ].filter(Boolean).join("\n") || langText("系统还没有开始为任何角色准备资料。", "The system has not started preparing materials for any role yet.");
+  discussionStatusSummary.textContent = shouldExposeInternalWorkflow()
+    ? ([
+      nextSpeakerPackage?.handoffFocus ? `当前重点：${nextSpeakerPackage.handoffFocus}` : "",
+      nextSpeakerPackage?.decisionRationale ? `策略说明：${nextSpeakerPackage.decisionRationale}` : "",
+      knowledgeHits.length ? `本地知识：${knowledgeHits.slice(0, 2).join("；")}` : "",
+      nextSpeakerPackage?.webSearchSummary ? `网页补充：${summarizeText(nextSpeakerPackage.webSearchSummary, 140)}` : "",
+      runtimeState.handoff?.current_round_summary ? `上一位交接：${runtimeState.handoff.current_round_summary}` : "",
+    ].filter(Boolean).join("\n") || langText("系统还没有开始为任何角色准备资料。", "The system has not started preparing materials for any role yet."))
+    : ([
+      runtimeState.phase === "speaker_preparing" ? langText("系统正在为当前角色整理参考材料。", "The system is preparing references for the current role.") : "",
+      runtimeState.phase === "speaker_speaking" ? langText("当前角色已进入正式发言阶段。", "The current role has entered the speaking phase.") : "",
+      runtimeState.retrievalStatus === "local_only" ? langText("已优先结合本地知识。", "Local knowledge has been applied first.") : "",
+      runtimeState.retrievalStatus === "local_first_web_supplement" ? langText("已先结合本地知识，再补充公开资料。", "Local knowledge has been applied first, then public sources were added.") : "",
+      runtimeState.retrievalStatus === "web_first" ? langText("当前主要依赖公开资料补充判断。", "The current role is relying mainly on public sources.") : "",
+      knowledgeHits.length ? langText(`当前已命中 ${knowledgeHits.length} 条本地知识。`, `${knowledgeHits.length} local knowledge hits are currently available.`) : "",
+    ].filter(Boolean).join("\n") || langText("系统会在讨论推进时自动整理相关参考材料。", "The system will automatically prepare relevant references as the discussion advances."));
   if (discussionStatusToggle) {
-    discussionStatusToggle.classList.toggle("hidden", !hasDetail);
+    discussionStatusToggle.classList.toggle("hidden", !hasDetail || !shouldExposeInternalWorkflow());
     discussionStatusToggle.setAttribute("aria-expanded", hasDetail && discussionStatusExpanded ? "true" : "false");
     discussionStatusToggle.textContent = discussionStatusExpanded
       ? langText("收起准备包", "Collapse Package")
@@ -1569,22 +1638,35 @@ function collectLocalKnowledgeHitsForSpeaker({ summary, speakerRole, previousTur
 }
 
 async function prepareNextSpeakerPackage({ summary, speakerRole, previousTurn, knowledgeGate, speakerSearchDigest, liveTurns, roundNotes }) {
+  const localKnowledge = collectLocalKnowledgeHitsForSpeaker({ summary, speakerRole, previousTurn, knowledgeGate });
   const nextPackage = {
+    packageVersion: "v1",
     targetRoleId: speakerRole?.id || "",
     targetRoleName: getActiveRoleName(speakerRole),
     sourceRoleId: previousTurn?.role?.id || "",
     sourceRoleName: previousTurn?.role ? getActiveRoleName(previousTurn.role) : "",
+    discussionStateLabel: "",
+    taskSummary: String(summary || "").trim(),
+    historyDigest: "",
+    liveContextDigest: "",
     retrievalStrategy: String(knowledgeGate?.retrievalStrategy || "context_only").trim(),
     handoffFocus: String(previousTurn?.handoff?.next_role_focus || "").trim(),
     handoffSummary: String(previousTurn?.handoff?.current_round_summary || previousTurn?.text || "").trim(),
+    handoffKeywords: normalizeClarificationQuestions(previousTurn?.handoff?.preferred_keywords || []),
     localKnowledgeHits: [],
+    localKnowledgeQuery: String(localKnowledge.query || "").trim(),
     webSearchSummary: summarizeText(speakerSearchDigest || previousTurn?.searchDigest || "", 220),
+    webSearchQueries: normalizeClarificationQuestions(previousTurn?.handoff?.web_search_needed || []),
+    decisionReasons: normalizeClarificationQuestions(knowledgeGate?.decisionReasons || []),
+    decisionRationale: String(knowledgeGate?.rationaleSummary || "").trim(),
+    preferredCategories: normalizeClarificationQuestions(knowledgeGate?.preferredCategories || []),
+    preferredKeywords: normalizeClarificationQuestions(knowledgeGate?.preferredKeywords || []),
     evidenceGaps: normalizeClarificationQuestions([
       ...(previousTurn?.handoff?.missing_evidence_types || []),
       ...(knowledgeGate?.evidenceGaps || []),
     ]),
+    preparedInput: null,
   };
-  const localKnowledge = collectLocalKnowledgeHitsForSpeaker({ summary, speakerRole, previousTurn, knowledgeGate });
   if (localKnowledge.hits.length) {
     nextPackage.localKnowledgeHits = localKnowledge.hits.map((entry) => `${entry.title}｜${getKnowledgeCategoryLabel(entry.category)}｜${entry.searchSnippet || summarizeText(entry.summary || entry.textPreview || "", 72)}`);
     await recordKnowledgeRetrievalHits(localKnowledge.query, localKnowledge.hits, "next_speaker_package");
@@ -1594,11 +1676,84 @@ async function prepareNextSpeakerPackage({ summary, speakerRole, previousTurn, k
   return nextPackage;
 }
 
+function buildPreparedTurnInput({
+  round,
+  totalRounds,
+  speakerRole,
+  nextRole,
+  assignment,
+  summary,
+  roundNotes,
+  liveTurns,
+  compressedHistory,
+  knowledgeGate,
+  nextSpeakerPackage,
+  orderedSpeakers,
+  budgetHint,
+}) {
+  const discussionContextBlock = buildDiscussionContext(summary, roundNotes, liveTurns, compressedHistory);
+  const retrievalLines = [
+    `检索策略：${formatRetrievalStrategyLabel(knowledgeGate?.retrievalStrategy || "context_only")}`,
+    knowledgeGate?.rationaleSummary ? `策略说明：${knowledgeGate.rationaleSummary}` : "",
+    knowledgeGate?.decisionReasons?.length ? `触发依据：${knowledgeGate.decisionReasons.join("；")}` : "",
+    knowledgeGate?.webSearchReasons?.length ? `补网页原因：${knowledgeGate.webSearchReasons.join("；")}` : "",
+    knowledgeGate?.skippedSignals?.length ? `当前跳过：${knowledgeGate.skippedSignals.join("；")}` : "",
+    knowledgeGate?.preferredCategories?.length ? `优先目录：${knowledgeGate.preferredCategories.join("、")}` : "",
+    knowledgeGate?.preferredKeywords?.length ? `优先关键词：${knowledgeGate.preferredKeywords.join("、")}` : "",
+    knowledgeGate?.localKnowledgeNeeded?.length ? `已命中的本地知识：${knowledgeGate.localKnowledgeNeeded.join("；")}` : "",
+    knowledgeGate?.evidenceGaps?.length ? `当前证据缺口：${knowledgeGate.evidenceGaps.join("；")}` : "",
+  ].filter(Boolean).join("\n");
+  const packageBlock = nextSpeakerPackage
+    ? buildNextSpeakerPackagePromptBlock(nextSpeakerPackage)
+    : "";
+  const preparedInput = {
+    identityBlock: [
+      `你现在是本场讨论里的第 ${state.discussionOrder[speakerRole.id] || 1} 位发言者，第 ${round}/${totalRounds} 轮发言。`,
+      `当前讨论状态：${buildDiscussionStateLabel(round, totalRounds, speakerRole, orderedSpeakers)}`,
+      getAssignmentInstruction(assignment),
+      getSpeakerModeInstruction(assignment),
+      getModelOutputLanguageInstruction(),
+    ].filter(Boolean).join("\n\n"),
+    taskBlock: [
+      "请只基于任务、共享事实包、前面轮次压缩记忆和本轮已经出现的发言继续往下讲。不要假装看到了还没发言的人。",
+      `任务定义：${summary}`,
+      state.sharedResearchBrief ? `共享事实包：\n${state.sharedResearchBrief}` : "",
+    ].filter(Boolean).join("\n\n"),
+    historyBlock: compressedHistory ? `轮次压缩记忆：\n${compressedHistory}` : "",
+    liveContextBlock: discussionContextBlock,
+    retrievalBlock: retrievalLines,
+    packageBlock,
+    roleBlock: rolePromptBlock(speakerRole),
+    outputBlock: [
+      nextRole
+        ? [`下一位角色：${getActiveRoleName(nextRole)}`, `下一位席位：${getActiveRoleSeat(nextRole)}`, `下一位职责：${getActiveRoleDescription(nextRole)}`].join("\n")
+        : langText("下一位角色：无，本轮到你后将进入主持收束。", "Next role: none. After you, the host will compress the round."),
+      "你这次必须同时完成两件事：第一，输出你自己的正式发言；第二，给下一位角色留下结构化交接。",
+      "严格输出 JSON 对象，不要 Markdown，不要解释，不要补充多余文字。",
+      "JSON 必须包含字段：speaker_message, speaker_claims, speaker_risks, speaker_open_questions, handoff。",
+      "handoff 必须包含字段：next_role_id, next_role_focus, local_knowledge_needed, web_search_needed, preferred_categories, preferred_keywords, avoid_categories, missing_evidence_types, current_round_summary, recommended_counterpoints。",
+      "speaker_message 只写当前角色面向用户的正式发言正文。handoff 只写给系统和下一位角色的准备信息，不要把下一位正式发言写出来。",
+      "如果没有足够依据，就在 speaker_message 里明确承认；不要为了凑 JSON 字段而编造证据。数组字段没有内容时返回空数组。",
+      `speaker_message 篇幅要求：${budgetHint}`,
+      "绝对不要输出 thinking process、analyze user input、自检步骤、constraint list 或任何内部推理过程。",
+    ].filter(Boolean).join("\n\n"),
+  };
+  if (nextSpeakerPackage) {
+    nextSpeakerPackage.discussionStateLabel = buildDiscussionStateLabel(round, totalRounds, speakerRole, orderedSpeakers);
+    nextSpeakerPackage.historyDigest = summarizeText(compressedHistory || "", 180);
+    nextSpeakerPackage.liveContextDigest = summarizeText(discussionContextBlock || "", 220);
+    nextSpeakerPackage.preparedInput = preparedInput;
+  }
+  return preparedInput;
+}
+
 function hasMeaningfulNextSpeakerPackage(nextSpeakerPackage) {
   return !!(
     (nextSpeakerPackage?.retrievalStrategy && nextSpeakerPackage.retrievalStrategy !== "context_only")
     || nextSpeakerPackage?.handoffFocus
     || nextSpeakerPackage?.handoffSummary
+    || nextSpeakerPackage?.decisionRationale
+    || nextSpeakerPackage?.decisionReasons?.length
     || nextSpeakerPackage?.localKnowledgeHits?.length
     || nextSpeakerPackage?.webSearchSummary
     || nextSpeakerPackage?.evidenceGaps?.length
@@ -1624,12 +1779,22 @@ function buildNextSpeakerPackagePromptBlock(nextSpeakerPackage) {
   }
   return [
     `当前角色准备包目标：${nextSpeakerPackage.targetRoleName || langText("未命名角色", "Unnamed Role")}`,
+    nextSpeakerPackage.discussionStateLabel ? `当前轮次状态：${nextSpeakerPackage.discussionStateLabel}` : "",
     nextSpeakerPackage.retrievalStrategy ? `系统检索策略：${formatRetrievalStrategyLabel(nextSpeakerPackage.retrievalStrategy)}` : "",
+    nextSpeakerPackage.decisionRationale ? `策略说明：${nextSpeakerPackage.decisionRationale}` : "",
+    nextSpeakerPackage.decisionReasons?.length ? `触发依据：${nextSpeakerPackage.decisionReasons.join("；")}` : "",
     nextSpeakerPackage.sourceRoleName ? `上一位角色：${nextSpeakerPackage.sourceRoleName}` : "",
     nextSpeakerPackage.handoffFocus ? `上一位交接重点：${nextSpeakerPackage.handoffFocus}` : "",
     nextSpeakerPackage.handoffSummary ? `上一位交接摘要：${nextSpeakerPackage.handoffSummary}` : "",
+    nextSpeakerPackage.handoffKeywords?.length ? `上一位 handoff 关键词：${nextSpeakerPackage.handoffKeywords.join("、")}` : "",
+    nextSpeakerPackage.historyDigest ? `历史压缩摘要：${nextSpeakerPackage.historyDigest}` : "",
+    nextSpeakerPackage.liveContextDigest ? `当前轮次现场摘要：${nextSpeakerPackage.liveContextDigest}` : "",
+    nextSpeakerPackage.localKnowledgeQuery ? `本地检索查询：${nextSpeakerPackage.localKnowledgeQuery}` : "",
     nextSpeakerPackage.localKnowledgeHits?.length ? `系统补充的本地知识命中：\n${nextSpeakerPackage.localKnowledgeHits.map((item, index) => `${index + 1}. ${item}`).join("\n")}` : "",
+    nextSpeakerPackage.webSearchQueries?.length ? `建议补查网页线索：${nextSpeakerPackage.webSearchQueries.join("；")}` : "",
     nextSpeakerPackage.webSearchSummary ? `系统补充的网页摘要：${nextSpeakerPackage.webSearchSummary}` : "",
+    nextSpeakerPackage.preferredCategories?.length ? `优先目录：${nextSpeakerPackage.preferredCategories.join("、")}` : "",
+    nextSpeakerPackage.preferredKeywords?.length ? `优先关键词：${nextSpeakerPackage.preferredKeywords.join("、")}` : "",
     nextSpeakerPackage.evidenceGaps?.length ? `当前仍缺的证据：${nextSpeakerPackage.evidenceGaps.join("；")}` : "",
   ].filter(Boolean).join("\n");
 }
@@ -1641,6 +1806,7 @@ function buildNextSpeakerPackageMessageBody(nextSpeakerPackage) {
   return [
     `系统正在为 ${nextSpeakerPackage.targetRoleName || langText("下一位角色", "the next role")} 组装准备包。`,
     nextSpeakerPackage.retrievalStrategy ? `检索策略：${formatRetrievalStrategyLabel(nextSpeakerPackage.retrievalStrategy)}` : "",
+    nextSpeakerPackage.decisionRationale ? `策略说明：${nextSpeakerPackage.decisionRationale}` : "",
     nextSpeakerPackage.sourceRoleName ? `上一位来源：${nextSpeakerPackage.sourceRoleName}` : "",
     nextSpeakerPackage.handoffFocus ? `交接重点：${nextSpeakerPackage.handoffFocus}` : "",
     nextSpeakerPackage.localKnowledgeHits?.length ? `本地知识命中：${nextSpeakerPackage.localKnowledgeHits.join("；")}` : "",
@@ -2257,7 +2423,7 @@ function splitKnowledgeBlocks(text) {
   let currentLines = [];
   const flush = () => {
     const body = currentLines.join("\n").trim();
-    if (!body) {
+    if (!body && !currentHeading) {
       currentLines = [];
       return;
     }
@@ -2478,16 +2644,30 @@ function buildKnowledgeChunks(text, maxSize = KNOWLEDGE_CHUNK_SIZE, overlap = KN
 }
 
 function normalizeKnowledgeChunks(records, fallbackText = "") {
+  const fallbackNormalized = normalizeKnowledgeText(fallbackText);
   if (Array.isArray(records) && records.length) {
-    return records
+    const normalizedRecords = records
       .filter(Boolean)
       .map((record, index) => ({
         chunkIndex: Number(record.chunkIndex || index + 1),
         text: normalizeKnowledgeText(record.text || ""),
       }))
       .filter((record) => record.text);
+    if (fallbackNormalized && fallbackNormalized.length >= 240) {
+      const totalChunkLength = normalizedRecords.reduce((sum, record) => sum + record.text.length, 0);
+      const chunkCoverage = totalChunkLength / Math.max(fallbackNormalized.length, 1);
+      const hasMeaningfulChunk = normalizedRecords.some((record) => record.text.length >= Math.min(180, Math.floor(fallbackNormalized.length * 0.28)));
+      if (!normalizedRecords.length || chunkCoverage < 0.45 || !hasMeaningfulChunk) {
+        return buildKnowledgeChunks(fallbackNormalized);
+      }
+    }
+    return normalizedRecords;
   }
-  return buildKnowledgeChunks(fallbackText);
+  return buildKnowledgeChunks(fallbackNormalized);
+}
+
+function shouldExposeInternalWorkflow() {
+  return false;
 }
 
 function buildKnowledgeSnippet(text, matchedTerms = []) {
@@ -4763,6 +4943,20 @@ function buildKnowledgeGateDecision({ summary, speakerRole, nextRole, liveTurns 
   const retrievalStrategy = shouldUseLocalKnowledge
     ? (shouldUseWebSearch ? "local_first_web_supplement" : "local_only")
     : (shouldUseWebSearch ? "web_first" : "context_only");
+  const decisionReasons = uniqueStrings([
+    shouldUseLocalKnowledge ? `本地已命中 ${hits.length} 条相关知识` : "当前没有稳定本地命中",
+    previousTurn?.handoff?.next_role_focus ? `上一位 handoff 明确要求：${previousTurn.handoff.next_role_focus}` : "",
+    previousTurn?.handoff?.preferred_keywords?.length ? `上一位给出关键词：${previousTurn.handoff.preferred_keywords.join("、")}` : "",
+  ]).slice(0, 4);
+  const webSearchReasons = uniqueStrings([
+    handoffNeedsWeb ? "上一位 handoff 明确要求补网页公开资料" : "",
+    !hits.length ? "本地没有形成足够可用命中" : "",
+    hits.length < 2 && handoffMissingEvidence ? "本地命中偏少，且上一位指出仍缺关键证据" : "",
+  ]).slice(0, 3);
+  const skippedSignals = uniqueStrings([
+    shouldUseLocalKnowledge && !shouldUseWebSearch ? "当前本地命中已足够支撑本轮，暂不额外补网页" : "",
+    !shouldUseLocalKnowledge && !shouldUseWebSearch ? "当前没有明确检索信号，先只依赖上下文推进" : "",
+  ]).slice(0, 2);
   const categories = uniqueStrings(hits.map((entry) => getKnowledgeCategoryLabel(entry.category))).slice(0, 3);
   const keywords = uniqueStrings([
     getActiveRoleName(speakerRole),
@@ -4778,66 +4972,36 @@ function buildKnowledgeGateDecision({ summary, speakerRole, nextRole, liveTurns 
     preferredCategories: categories,
     preferredKeywords: keywords,
     localKnowledgeNeeded: hits.map((entry) => `${entry.title}｜${getKnowledgeCategoryLabel(entry.category)}`).slice(0, 3),
+    decisionReasons,
+    webSearchReasons,
+    skippedSignals,
     evidenceGaps: uniqueStrings([
       hits.length ? "还需要确认知识命中片段是否足够直接支撑本轮观点" : "当前没有明显本地知识命中，需要更多事实支撑",
       shouldUseWebSearch && shouldUseLocalKnowledge ? "可继续补公开网页来源，交叉验证本地命中是否足够稳" : "",
       nextRole ? `${getActiveRoleName(nextRole)} 下一轮最需要的关键证据是什么` : "当前轮最后一位发言后，仍需主持人做收束",
     ]).slice(0, 3),
+    localHitCount: hits.length,
+    rationaleSummary: uniqueStrings([
+      retrievalStrategy === "local_first_web_supplement" ? "先吃本地命中，再用网页公开材料做交叉验证。" : "",
+      retrievalStrategy === "local_only" ? "当前本地命中已足够，先不扩网页检索。" : "",
+      retrievalStrategy === "web_first" ? "当前本地命中不足，先依赖网页公开资料补证。" : "",
+      retrievalStrategy === "context_only" ? "当前没有明确检索触发信号，先沿上下文推进。" : "",
+    ]).join(" "),
   };
 }
 
 function buildSpeakerTurnPrompt({
-  round,
-  totalRounds,
-  speakerRole,
-  nextRole,
-  assignment,
-  summary,
-  roundNotes,
-  liveTurns,
-  compressedHistory,
-  speakerSearchDigest,
-  knowledgeGate,
-  nextSpeakerPackage,
-  orderedSpeakers,
-  budgetHint,
+  preparedTurnInput,
 }) {
-  const nextRoleBlock = nextRole
-    ? [
-      `下一位角色：${getActiveRoleName(nextRole)}`,
-      `下一位席位：${getActiveRoleSeat(nextRole)}`,
-      `下一位职责：${getActiveRoleDescription(nextRole)}`,
-    ].join("\n")
-    : langText("下一位角色：无，本轮到你后将进入主持收束。", "Next role: none. After you, the host will compress the round.");
-  const knowledgeGateBlock = [
-    `知识门控判断：${knowledgeGate.shouldUseLocalKnowledge ? langText("建议优先结合本地知识命中。", "Use local knowledge hits first.") : langText("当前没有稳定的本地知识命中，不要硬编引用。", "No stable local knowledge hit is available. Do not force citations.")}`,
-    knowledgeGate.retrievalStrategy ? `检索策略：${formatRetrievalStrategyLabel(knowledgeGate.retrievalStrategy)}` : "",
-    knowledgeGate.preferredCategories.length ? `优先目录：${knowledgeGate.preferredCategories.join("、")}` : "",
-    knowledgeGate.preferredKeywords.length ? `优先关键词：${knowledgeGate.preferredKeywords.join("、")}` : "",
-    knowledgeGate.localKnowledgeNeeded.length ? `已命中的本地知识：${knowledgeGate.localKnowledgeNeeded.join("；")}` : "",
-    knowledgeGate.evidenceGaps.length ? `当前证据缺口：${knowledgeGate.evidenceGaps.join("；")}` : "",
-  ].filter(Boolean).join("\n");
   return [
-    `你现在是本场讨论里的第 ${state.discussionOrder[speakerRole.id] || 1} 位发言者，第 ${round}/${totalRounds} 轮发言。`,
-    `当前讨论状态：${buildDiscussionStateLabel(round, totalRounds, speakerRole, orderedSpeakers)}`,
-    getAssignmentInstruction(assignment),
-    getSpeakerModeInstruction(assignment),
-    getModelOutputLanguageInstruction(),
-    "请只基于任务、共享事实包、前面轮次压缩记忆和本轮已经出现的发言继续往下讲。不要假装看到了还没发言的人。",
-    buildDiscussionContext(summary, roundNotes, liveTurns, compressedHistory),
-    speakerSearchDigest ? `你在发言前做了一次网页搜索，以下是你查到的参考资料，可以引用其中的事实或数据来支撑你的论点（如果相关）：\n${speakerSearchDigest}` : "",
-    rolePromptBlock(speakerRole),
-    nextSpeakerPackage ? `系统为你准备的输入包：\n${buildNextSpeakerPackagePromptBlock(nextSpeakerPackage)}` : "",
-    nextRoleBlock,
-    knowledgeGateBlock,
-    "你这次必须同时完成两件事：第一，输出你自己的正式发言；第二，给下一位角色留下结构化交接。",
-    "严格输出 JSON 对象，不要 Markdown，不要解释，不要补充多余文字。",
-    "JSON 必须包含字段：speaker_message, speaker_claims, speaker_risks, speaker_open_questions, handoff。",
-    "handoff 必须包含字段：next_role_id, next_role_focus, local_knowledge_needed, web_search_needed, preferred_categories, preferred_keywords, avoid_categories, missing_evidence_types, current_round_summary, recommended_counterpoints。",
-    "speaker_message 只写当前角色面向用户的正式发言正文。handoff 只写给系统和下一位角色的准备信息，不要把下一位正式发言写出来。",
-    "如果没有足够依据，就在 speaker_message 里明确承认；不要为了凑 JSON 字段而编造证据。数组字段没有内容时返回空数组。",
-    `speaker_message 篇幅要求：${budgetHint}`,
-    "绝对不要输出 thinking process、analyze user input、自检步骤、constraint list 或任何内部推理过程。",
+    preparedTurnInput?.identityBlock || "",
+    preparedTurnInput?.taskBlock || "",
+    preparedTurnInput?.historyBlock || "",
+    preparedTurnInput?.liveContextBlock || "",
+    preparedTurnInput?.retrievalBlock ? `系统检索决策：\n${preparedTurnInput.retrievalBlock}` : "",
+    preparedTurnInput?.packageBlock ? `系统为你准备的输入包：\n${preparedTurnInput.packageBlock}` : "",
+    preparedTurnInput?.roleBlock || "",
+    preparedTurnInput?.outputBlock || "",
   ].filter(Boolean).join("\n\n");
 }
 
@@ -4869,7 +5033,7 @@ function parseSpeakerTurnResponse(rawText, fallbackNextRole) {
   const jsonText = extractJsonObject(rawText);
   if (!jsonText) {
     return {
-      speakerMessage: sanitizeDisplayedModelText(rawText),
+      speakerMessage: sanitizeDisplayedModelText(extractJsonStringField(rawText, "speaker_message") || rawText),
       speakerClaims: [],
       speakerRisks: [],
       speakerOpenQuestions: [],
@@ -4891,8 +5055,9 @@ function parseSpeakerTurnResponse(rawText, fallbackNextRole) {
     return normalizeSpeakerTurnPayload(JSON.parse(jsonText), fallbackNextRole);
   } catch (error) {
     console.warn("speaker turn JSON parse failed", error);
+    const fallbackSpeakerMessage = extractJsonStringField(jsonText, "speaker_message") || extractJsonStringField(rawText, "speaker_message") || rawText;
     return {
-      speakerMessage: sanitizeDisplayedModelText(rawText),
+      speakerMessage: sanitizeDisplayedModelText(fallbackSpeakerMessage),
       speakerClaims: [],
       speakerRisks: [],
       speakerOpenQuestions: [],
@@ -7190,7 +7355,22 @@ async function runSingleDiscussionRound({
       liveTurns,
       roundNotes,
     });
-    if (hasMeaningfulNextSpeakerPackage(nextSpeakerPackage)) {
+    const preparedTurnInput = buildPreparedTurnInput({
+      round,
+      totalRounds,
+      speakerRole,
+      nextRole,
+      assignment,
+      summary,
+      roundNotes,
+      liveTurns,
+      compressedHistory,
+      knowledgeGate,
+      nextSpeakerPackage,
+      orderedSpeakers,
+      budgetHint: isLead ? budget.charHint : "控制在 280 到 520 字内。",
+    });
+    if (shouldExposeInternalWorkflow() && hasMeaningfulNextSpeakerPackage(nextSpeakerPackage)) {
       appendMarkup(
         createMessageMarkup({
           speakerId: `${speakerRole.id}-package-${round}`,
@@ -7205,20 +7385,7 @@ async function runSingleDiscussionRound({
     }
 
     const speakerPrompt = buildSpeakerTurnPrompt({
-      round,
-      totalRounds,
-      speakerRole,
-      nextRole,
-      assignment,
-      summary,
-      roundNotes,
-      liveTurns,
-      compressedHistory,
-      speakerSearchDigest,
-      knowledgeGate,
-      nextSpeakerPackage,
-      orderedSpeakers,
-      budgetHint: isLead ? budget.charHint : "控制在 280 到 520 字内。",
+      preparedTurnInput,
     });
 
     setSpeakerCardForRole(speakerRole, langText(`第 ${round} 轮 · 正在思考`, `Round ${round} · Thinking`), langText("正在读取任务和前面已发言内容，并准备按顺序接续。", "Reading the task and previous turns, then preparing to continue in order."));
@@ -7277,7 +7444,7 @@ async function runSingleDiscussionRound({
       handoff: speakerTurnPayload?.handoff || null,
     });
     appendRoleMessage(speakerRole, formatRoundSpeakerLabel(round, speakerRole), speakerText, discussionProfile.displayName);
-    if (speakerTurnPayload?.handoff) {
+    if (shouldExposeInternalWorkflow() && speakerTurnPayload?.handoff) {
       appendMarkup(
         createMessageMarkup({
           speakerId: `${speakerRole.id}-handoff-${round}`,
@@ -9361,6 +9528,25 @@ function extractJsonObject(text) {
     return trimmed.slice(start, end + 1);
   }
   return "";
+}
+
+function extractJsonStringField(text, fieldName) {
+  const rawText = String(text || "");
+  const escapedFieldName = String(fieldName || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = rawText.match(new RegExp(`"${escapedFieldName}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`, "i"));
+  if (!match?.[1]) {
+    return "";
+  }
+  try {
+    return JSON.parse(`"${match[1]}"`);
+  } catch {
+    return match[1]
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\r")
+      .replace(/\\t/g, "\t")
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, "\\");
+  }
 }
 
 function normalizeClarificationQuestions(questions) {
