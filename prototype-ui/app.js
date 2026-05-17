@@ -1415,6 +1415,7 @@ function buildSpeakerKnowledgeQuery({ summary, speakerRole, previousTurn, knowle
     getActiveRoleSeat(speakerRole),
     previousTurn?.handoff?.next_role_focus || "",
     previousTurn?.handoff?.current_round_summary || "",
+    ...(previousTurn?.handoff?.local_knowledge_needed || []),
     ...(knowledgeGate?.preferredKeywords || []),
     ...(knowledgeGate?.evidenceGaps || []),
   ].filter(Boolean).join("\n");
@@ -1444,6 +1445,7 @@ async function prepareNextSpeakerPackage({ summary, speakerRole, previousTurn, k
     targetRoleName: getActiveRoleName(speakerRole),
     sourceRoleId: previousTurn?.role?.id || "",
     sourceRoleName: previousTurn?.role ? getActiveRoleName(previousTurn.role) : "",
+    retrievalStrategy: String(knowledgeGate?.retrievalStrategy || "context_only").trim(),
     handoffFocus: String(previousTurn?.handoff?.next_role_focus || "").trim(),
     handoffSummary: String(previousTurn?.handoff?.current_round_summary || previousTurn?.text || "").trim(),
     localKnowledgeHits: [],
@@ -1465,12 +1467,26 @@ async function prepareNextSpeakerPackage({ summary, speakerRole, previousTurn, k
 
 function hasMeaningfulNextSpeakerPackage(nextSpeakerPackage) {
   return !!(
-    nextSpeakerPackage?.handoffFocus
+    (nextSpeakerPackage?.retrievalStrategy && nextSpeakerPackage.retrievalStrategy !== "context_only")
+    || nextSpeakerPackage?.handoffFocus
     || nextSpeakerPackage?.handoffSummary
     || nextSpeakerPackage?.localKnowledgeHits?.length
     || nextSpeakerPackage?.webSearchSummary
     || nextSpeakerPackage?.evidenceGaps?.length
   );
+}
+
+function formatRetrievalStrategyLabel(strategy) {
+  if (strategy === "local_first_web_supplement") {
+    return langText("本地优先，网页补充", "Local first, web supplement");
+  }
+  if (strategy === "local_only") {
+    return langText("仅本地知识", "Local knowledge only");
+  }
+  if (strategy === "web_first") {
+    return langText("网页优先", "Web first");
+  }
+  return langText("仅上下文", "Context only");
 }
 
 function buildNextSpeakerPackagePromptBlock(nextSpeakerPackage) {
@@ -1479,6 +1495,7 @@ function buildNextSpeakerPackagePromptBlock(nextSpeakerPackage) {
   }
   return [
     `当前角色准备包目标：${nextSpeakerPackage.targetRoleName || langText("未命名角色", "Unnamed Role")}`,
+    nextSpeakerPackage.retrievalStrategy ? `系统检索策略：${formatRetrievalStrategyLabel(nextSpeakerPackage.retrievalStrategy)}` : "",
     nextSpeakerPackage.sourceRoleName ? `上一位角色：${nextSpeakerPackage.sourceRoleName}` : "",
     nextSpeakerPackage.handoffFocus ? `上一位交接重点：${nextSpeakerPackage.handoffFocus}` : "",
     nextSpeakerPackage.handoffSummary ? `上一位交接摘要：${nextSpeakerPackage.handoffSummary}` : "",
@@ -1494,6 +1511,7 @@ function buildNextSpeakerPackageMessageBody(nextSpeakerPackage) {
   }
   return [
     `系统正在为 ${nextSpeakerPackage.targetRoleName || langText("下一位角色", "the next role")} 组装准备包。`,
+    nextSpeakerPackage.retrievalStrategy ? `检索策略：${formatRetrievalStrategyLabel(nextSpeakerPackage.retrievalStrategy)}` : "",
     nextSpeakerPackage.sourceRoleName ? `上一位来源：${nextSpeakerPackage.sourceRoleName}` : "",
     nextSpeakerPackage.handoffFocus ? `交接重点：${nextSpeakerPackage.handoffFocus}` : "",
     nextSpeakerPackage.localKnowledgeHits?.length ? `本地知识命中：${nextSpeakerPackage.localKnowledgeHits.join("；")}` : "",
@@ -4579,11 +4597,14 @@ function getNextSpeakerRole(orderedSpeakers, currentRole) {
 }
 
 function buildKnowledgeGateDecision({ summary, speakerRole, nextRole, liveTurns = [], roundNotes = [] }) {
+  const previousTurn = getLatestSpeakerTurn(roundNotes, liveTurns);
   const seedQuery = [
     summary,
     getActiveRoleName(speakerRole),
     getActiveRoleSeat(speakerRole),
     getActiveRoleDescription(speakerRole),
+    ...(previousTurn?.handoff?.local_knowledge_needed || []),
+    String(previousTurn?.handoff?.next_role_focus || "").trim(),
     ...liveTurns.slice(-2).map((turn) => turn?.text || ""),
     ...roundNotes.slice(-1).map((note) => note?.moderatorSummary || ""),
   ].filter(Boolean).join("\n");
@@ -4594,20 +4615,31 @@ function buildKnowledgeGateDecision({ summary, speakerRole, nextRole, liveTurns 
     })
     : { entries: [] };
   const hits = (knowledgeResult.entries || []).slice(0, 3);
+  const handoffNeedsWeb = !!previousTurn?.handoff?.web_search_needed?.length;
+  const handoffMissingEvidence = !!previousTurn?.handoff?.missing_evidence_types?.length;
+  const shouldUseLocalKnowledge = !!hits.length;
+  const shouldUseWebSearch = handoffNeedsWeb || !hits.length || (hits.length < 2 && handoffMissingEvidence);
+  const retrievalStrategy = shouldUseLocalKnowledge
+    ? (shouldUseWebSearch ? "local_first_web_supplement" : "local_only")
+    : (shouldUseWebSearch ? "web_first" : "context_only");
   const categories = uniqueStrings(hits.map((entry) => getKnowledgeCategoryLabel(entry.category))).slice(0, 3);
   const keywords = uniqueStrings([
     getActiveRoleName(speakerRole),
     getActiveRoleSeat(speakerRole),
     getActiveRoleName(nextRole),
+    ...(previousTurn?.handoff?.preferred_keywords || []),
     ...hits.map((entry) => entry.title),
   ]).slice(0, 6);
   return {
-    shouldUseLocalKnowledge: !!hits.length,
+    shouldUseLocalKnowledge,
+    shouldUseWebSearch,
+    retrievalStrategy,
     preferredCategories: categories,
     preferredKeywords: keywords,
     localKnowledgeNeeded: hits.map((entry) => `${entry.title}｜${getKnowledgeCategoryLabel(entry.category)}`).slice(0, 3),
     evidenceGaps: uniqueStrings([
       hits.length ? "还需要确认知识命中片段是否足够直接支撑本轮观点" : "当前没有明显本地知识命中，需要更多事实支撑",
+      shouldUseWebSearch && shouldUseLocalKnowledge ? "可继续补公开网页来源，交叉验证本地命中是否足够稳" : "",
       nextRole ? `${getActiveRoleName(nextRole)} 下一轮最需要的关键证据是什么` : "当前轮最后一位发言后，仍需主持人做收束",
     ]).slice(0, 3),
   };
@@ -4638,6 +4670,7 @@ function buildSpeakerTurnPrompt({
     : langText("下一位角色：无，本轮到你后将进入主持收束。", "Next role: none. After you, the host will compress the round.");
   const knowledgeGateBlock = [
     `知识门控判断：${knowledgeGate.shouldUseLocalKnowledge ? langText("建议优先结合本地知识命中。", "Use local knowledge hits first.") : langText("当前没有稳定的本地知识命中，不要硬编引用。", "No stable local knowledge hit is available. Do not force citations.")}`,
+    knowledgeGate.retrievalStrategy ? `检索策略：${formatRetrievalStrategyLabel(knowledgeGate.retrievalStrategy)}` : "",
     knowledgeGate.preferredCategories.length ? `优先目录：${knowledgeGate.preferredCategories.join("、")}` : "",
     knowledgeGate.preferredKeywords.length ? `优先关键词：${knowledgeGate.preferredKeywords.join("、")}` : "",
     knowledgeGate.localKnowledgeNeeded.length ? `已命中的本地知识：${knowledgeGate.localKnowledgeNeeded.join("；")}` : "",
@@ -6964,20 +6997,6 @@ async function runSingleDiscussionRound({
     const discussionProfile = getRoleModelProfile(speakerRole);
     const nextRole = getNextSpeakerRole(orderedSpeakers, speakerRole);
     const previousTurn = getLatestSpeakerTurn(roundNotes, liveTurns);
-
-    // 席位级即时搜索：发言前先根据角色立场搜索相关网页，把结果作为额外证据塞进 prompt
-    setSpeakerCardForRole(speakerRole, langText(`第 ${round} 轮 · 正在搜索`, `Round ${round} · Searching`), langText("正在搜索与本轮论点相关的网页资料...", "Searching for web references relevant to this turn..."));
-    updateLiveStatus(langText(`第 ${round} 轮：${getActiveRoleName(speakerRole)} 正在搜索网页`, `Round ${round}: ${getActiveRoleName(speakerRole)} is searching the web`), "pending");
-    setDiscussionRuntimeState({
-      phase: "retrieval_pending",
-      round,
-      totalRounds,
-      speakerRoleId: speakerRole.id,
-      nextRoleId: nextRole?.id || "",
-      retrievalStatus: "web_search_pending",
-      handoff: null,
-    });
-    const speakerSearchDigest = await runSpeakerWebSearch(speakerRole, summary, signal);
     const knowledgeGate = buildKnowledgeGateDecision({
       summary,
       speakerRole,
@@ -6985,6 +7004,41 @@ async function runSingleDiscussionRound({
       liveTurns,
       roundNotes,
     });
+    let speakerSearchDigest = "";
+
+    if (knowledgeGate.shouldUseWebSearch) {
+      setSpeakerCardForRole(
+        speakerRole,
+        langText(`第 ${round} 轮 · 正在检索`, `Round ${round} · Retrieving`),
+        knowledgeGate.shouldUseLocalKnowledge
+          ? langText("先看本地知识，再补查网页公开资料。", "Checking local knowledge first, then supplementing with web sources.")
+          : langText("当前缺少稳定本地命中，正在补查网页公开资料。", "No stable local hit was found. Searching public web sources.")
+      );
+      updateLiveStatus(
+        knowledgeGate.shouldUseLocalKnowledge
+          ? langText(`第 ${round} 轮：${getActiveRoleName(speakerRole)} 先用本地知识，再补网页资料`, `Round ${round}: ${getActiveRoleName(speakerRole)} is using local knowledge first, then supplementing with the web`)
+          : langText(`第 ${round} 轮：${getActiveRoleName(speakerRole)} 正在补查网页资料`, `Round ${round}: ${getActiveRoleName(speakerRole)} is searching the web`),
+        "pending"
+      );
+      setDiscussionRuntimeState({
+        phase: "retrieval_pending",
+        round,
+        totalRounds,
+        speakerRoleId: speakerRole.id,
+        nextRoleId: nextRole?.id || "",
+        retrievalStatus: knowledgeGate.retrievalStrategy,
+        knowledgeGate,
+        handoff: null,
+      });
+      speakerSearchDigest = await runSpeakerWebSearch(speakerRole, summary, signal, {
+        retrievalStrategy: knowledgeGate.retrievalStrategy,
+        queryHints: uniqueStrings([
+          ...(previousTurn?.handoff?.web_search_needed || []),
+          ...(previousTurn?.handoff?.preferred_keywords || []),
+          ...(knowledgeGate.preferredKeywords || []),
+        ]).slice(0, 6),
+      });
+    }
     const nextSpeakerPackage = await prepareNextSpeakerPackage({
       summary,
       speakerRole,
@@ -7034,7 +7088,7 @@ async function runSingleDiscussionRound({
       totalRounds,
       speakerRoleId: speakerRole.id,
       nextRoleId: nextRole?.id || "",
-      retrievalStatus: knowledgeGate.shouldUseLocalKnowledge ? "knowledge_gate_ready" : "idle",
+      retrievalStatus: knowledgeGate.retrievalStrategy || (knowledgeGate.shouldUseLocalKnowledge ? "knowledge_gate_ready" : "idle"),
       knowledgeGate,
       nextSpeakerPackage,
       handoff: null,
@@ -7075,7 +7129,7 @@ async function runSingleDiscussionRound({
       totalRounds,
       speakerRoleId: speakerRole.id,
       nextRoleId: nextRole?.id || "",
-      retrievalStatus: knowledgeGate.shouldUseLocalKnowledge ? "knowledge_gate_ready" : "idle",
+      retrievalStatus: knowledgeGate.retrievalStrategy || (knowledgeGate.shouldUseLocalKnowledge ? "knowledge_gate_ready" : "idle"),
       knowledgeGate,
       nextSpeakerPackage,
       handoff: speakerTurnPayload?.handoff || null,
@@ -9841,14 +9895,20 @@ async function collectPublicWebResearch(query, sourceUrls = []) {
 }
 
 // 席位级即时搜索：在发言前根据角色立场生成一个精准查询词，搜索 DuckDuckGo + Wikipedia，返回摘要字符串
-async function runSpeakerWebSearch(speakerRole, summary, signal) {
+async function runSpeakerWebSearch(speakerRole, summary, signal, options = {}) {
   try {
     const profile = getRoleModelProfile(speakerRole);
     if (!profile) return "";
     const speakerName = getActiveRoleName(speakerRole);
+    const queryHints = normalizeClarificationQuestions(options?.queryHints || []).slice(0, 6);
+    const retrievalStrategy = String(options?.retrievalStrategy || "web_first").trim();
     const queryPrompt = [
       `你是"${speakerName}"（${getActiveRoleSeat(speakerRole)}），你的立场是：${speakerRole.traits?.stance || getActiveRoleDescription(speakerRole) || ""}。`,
       `本次讨论话题：${summary}`,
+      retrievalStrategy === "local_first_web_supplement"
+        ? "你已经先看过一批本地知识命中，现在只需要补查公开网页材料来交叉验证、补足最新事实或补足缺失证据。"
+        : "你准备搜索一条能支撑你这一轮发言的网页。",
+      queryHints.length ? `优先围绕这些线索生成搜索词：${queryHints.join("；")}` : "",
       "你准备搜索一条能支撑你这一轮发言的网页。请用英文输出一个最有用的搜索关键词（3到8个英文单词）。",
       "只输出英文关键词本身，不要中文，不要任何解释。",
     ].join("\n");
