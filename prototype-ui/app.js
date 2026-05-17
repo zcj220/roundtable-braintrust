@@ -1331,6 +1331,7 @@ function buildEmptyDiscussionState() {
       localKnowledgeNeeded: [],
       evidenceGaps: [],
     },
+    nextSpeakerPackage: null,
     handoff: null,
     updatedAt: 0,
   };
@@ -1356,6 +1357,19 @@ function normalizeDiscussionState(runtimeState) {
       evidenceGaps: normalizeClarificationQuestions(nextState?.knowledgeGate?.evidenceGaps || []),
       shouldUseLocalKnowledge: !!nextState?.knowledgeGate?.shouldUseLocalKnowledge,
     },
+    nextSpeakerPackage: nextState?.nextSpeakerPackage && typeof nextState.nextSpeakerPackage === "object"
+      ? {
+        targetRoleId: String(nextState.nextSpeakerPackage.targetRoleId || "").trim(),
+        targetRoleName: String(nextState.nextSpeakerPackage.targetRoleName || "").trim(),
+        sourceRoleId: String(nextState.nextSpeakerPackage.sourceRoleId || "").trim(),
+        sourceRoleName: String(nextState.nextSpeakerPackage.sourceRoleName || "").trim(),
+        handoffFocus: String(nextState.nextSpeakerPackage.handoffFocus || "").trim(),
+        handoffSummary: String(nextState.nextSpeakerPackage.handoffSummary || "").trim(),
+        localKnowledgeHits: normalizeClarificationQuestions(nextState.nextSpeakerPackage.localKnowledgeHits || []),
+        webSearchSummary: String(nextState.nextSpeakerPackage.webSearchSummary || "").trim(),
+        evidenceGaps: normalizeClarificationQuestions(nextState.nextSpeakerPackage.evidenceGaps || []),
+      }
+      : null,
     handoff: nextState?.handoff && typeof nextState.handoff === "object"
       ? {
         next_role_id: String(nextState.handoff.next_role_id || "").trim(),
@@ -1380,6 +1394,112 @@ function setDiscussionRuntimeState(patch = {}) {
     ...patch,
     updatedAt: Date.now(),
   });
+}
+
+function getLatestSpeakerTurn(roundNotes = [], liveTurns = []) {
+  const liveCandidate = [...(liveTurns || [])].reverse().find((turn) => turn?.role?.id && turn.role.id !== "user-round-input");
+  if (liveCandidate) {
+    return liveCandidate;
+  }
+  const latestRound = [...(roundNotes || [])].reverse().find((note) => Array.isArray(note?.turns) && note.turns.length);
+  if (!latestRound) {
+    return null;
+  }
+  return [...latestRound.turns].reverse().find((turn) => turn?.role?.id && turn.role.id !== "user-round-input") || null;
+}
+
+function buildSpeakerKnowledgeQuery({ summary, speakerRole, previousTurn, knowledgeGate }) {
+  return [
+    summary,
+    getActiveRoleName(speakerRole),
+    getActiveRoleSeat(speakerRole),
+    previousTurn?.handoff?.next_role_focus || "",
+    previousTurn?.handoff?.current_round_summary || "",
+    ...(knowledgeGate?.preferredKeywords || []),
+    ...(knowledgeGate?.evidenceGaps || []),
+  ].filter(Boolean).join("\n");
+}
+
+function collectLocalKnowledgeHitsForSpeaker({ summary, speakerRole, previousTurn, knowledgeGate }) {
+  if (!state.knowledgeEnabled) {
+    return { query: "", hits: [] };
+  }
+  const query = buildSpeakerKnowledgeQuery({ summary, speakerRole, previousTurn, knowledgeGate });
+  if (!query.trim()) {
+    return { query: "", hits: [] };
+  }
+  const result = filterKnowledgeEntries(getKnowledgeScopeEntries(), {
+    queryOverride: query,
+    categoryOverride: "all",
+  });
+  return {
+    query,
+    hits: (result.entries || []).slice(0, 3),
+  };
+}
+
+async function prepareNextSpeakerPackage({ summary, speakerRole, previousTurn, knowledgeGate, speakerSearchDigest, liveTurns, roundNotes }) {
+  const nextPackage = {
+    targetRoleId: speakerRole?.id || "",
+    targetRoleName: getActiveRoleName(speakerRole),
+    sourceRoleId: previousTurn?.role?.id || "",
+    sourceRoleName: previousTurn?.role ? getActiveRoleName(previousTurn.role) : "",
+    handoffFocus: String(previousTurn?.handoff?.next_role_focus || "").trim(),
+    handoffSummary: String(previousTurn?.handoff?.current_round_summary || previousTurn?.text || "").trim(),
+    localKnowledgeHits: [],
+    webSearchSummary: summarizeText(speakerSearchDigest || previousTurn?.searchDigest || "", 220),
+    evidenceGaps: normalizeClarificationQuestions([
+      ...(previousTurn?.handoff?.missing_evidence_types || []),
+      ...(knowledgeGate?.evidenceGaps || []),
+    ]),
+  };
+  const localKnowledge = collectLocalKnowledgeHitsForSpeaker({ summary, speakerRole, previousTurn, knowledgeGate });
+  if (localKnowledge.hits.length) {
+    nextPackage.localKnowledgeHits = localKnowledge.hits.map((entry) => `${entry.title}｜${getKnowledgeCategoryLabel(entry.category)}｜${entry.searchSnippet || summarizeText(entry.summary || entry.textPreview || "", 72)}`);
+    await recordKnowledgeRetrievalHits(localKnowledge.query, localKnowledge.hits, "next_speaker_package");
+    appendSharedEvidenceEntries(buildKnowledgeEvidenceEntries(localKnowledge.hits, localKnowledge.query, "next_speaker_package"));
+    renderRoundtableEvidenceWorkspace();
+  }
+  return nextPackage;
+}
+
+function hasMeaningfulNextSpeakerPackage(nextSpeakerPackage) {
+  return !!(
+    nextSpeakerPackage?.handoffFocus
+    || nextSpeakerPackage?.handoffSummary
+    || nextSpeakerPackage?.localKnowledgeHits?.length
+    || nextSpeakerPackage?.webSearchSummary
+    || nextSpeakerPackage?.evidenceGaps?.length
+  );
+}
+
+function buildNextSpeakerPackagePromptBlock(nextSpeakerPackage) {
+  if (!nextSpeakerPackage) {
+    return "";
+  }
+  return [
+    `当前角色准备包目标：${nextSpeakerPackage.targetRoleName || langText("未命名角色", "Unnamed Role")}`,
+    nextSpeakerPackage.sourceRoleName ? `上一位角色：${nextSpeakerPackage.sourceRoleName}` : "",
+    nextSpeakerPackage.handoffFocus ? `上一位交接重点：${nextSpeakerPackage.handoffFocus}` : "",
+    nextSpeakerPackage.handoffSummary ? `上一位交接摘要：${nextSpeakerPackage.handoffSummary}` : "",
+    nextSpeakerPackage.localKnowledgeHits?.length ? `系统补充的本地知识命中：\n${nextSpeakerPackage.localKnowledgeHits.map((item, index) => `${index + 1}. ${item}`).join("\n")}` : "",
+    nextSpeakerPackage.webSearchSummary ? `系统补充的网页摘要：${nextSpeakerPackage.webSearchSummary}` : "",
+    nextSpeakerPackage.evidenceGaps?.length ? `当前仍缺的证据：${nextSpeakerPackage.evidenceGaps.join("；")}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function buildNextSpeakerPackageMessageBody(nextSpeakerPackage) {
+  if (!nextSpeakerPackage) {
+    return "";
+  }
+  return [
+    `系统正在为 ${nextSpeakerPackage.targetRoleName || langText("下一位角色", "the next role")} 组装准备包。`,
+    nextSpeakerPackage.sourceRoleName ? `上一位来源：${nextSpeakerPackage.sourceRoleName}` : "",
+    nextSpeakerPackage.handoffFocus ? `交接重点：${nextSpeakerPackage.handoffFocus}` : "",
+    nextSpeakerPackage.localKnowledgeHits?.length ? `本地知识命中：${nextSpeakerPackage.localKnowledgeHits.join("；")}` : "",
+    nextSpeakerPackage.webSearchSummary ? `网页摘要：${nextSpeakerPackage.webSearchSummary}` : "",
+    nextSpeakerPackage.evidenceGaps?.length ? `证据缺口：${nextSpeakerPackage.evidenceGaps.join("；")}` : "",
+  ].filter(Boolean).join("\n");
 }
 
 function buildHandoffMessageBody({ round, speakerRole, nextRole, handoff, knowledgeGate }) {
@@ -3101,6 +3221,9 @@ function formatKnowledgeRetrievalContext(context) {
   if (context === "shared_brief") {
     return langText("共享事实包", "Shared Brief");
   }
+  if (context === "next_speaker_package") {
+    return langText("下一位准备包", "Next Speaker Package");
+  }
   return String(context || "");
 }
 
@@ -4502,6 +4625,7 @@ function buildSpeakerTurnPrompt({
   compressedHistory,
   speakerSearchDigest,
   knowledgeGate,
+  nextSpeakerPackage,
   orderedSpeakers,
   budgetHint,
 }) {
@@ -4529,6 +4653,7 @@ function buildSpeakerTurnPrompt({
     buildDiscussionContext(summary, roundNotes, liveTurns, compressedHistory),
     speakerSearchDigest ? `你在发言前做了一次网页搜索，以下是你查到的参考资料，可以引用其中的事实或数据来支撑你的论点（如果相关）：\n${speakerSearchDigest}` : "",
     rolePromptBlock(speakerRole),
+    nextSpeakerPackage ? `系统为你准备的输入包：\n${buildNextSpeakerPackagePromptBlock(nextSpeakerPackage)}` : "",
     nextRoleBlock,
     knowledgeGateBlock,
     "你这次必须同时完成两件事：第一，输出你自己的正式发言；第二，给下一位角色留下结构化交接。",
@@ -6838,6 +6963,7 @@ async function runSingleDiscussionRound({
     const isLead = assignment === "challenger" || assignment === "rebuttal";
     const discussionProfile = getRoleModelProfile(speakerRole);
     const nextRole = getNextSpeakerRole(orderedSpeakers, speakerRole);
+    const previousTurn = getLatestSpeakerTurn(roundNotes, liveTurns);
 
     // 席位级即时搜索：发言前先根据角色立场搜索相关网页，把结果作为额外证据塞进 prompt
     setSpeakerCardForRole(speakerRole, langText(`第 ${round} 轮 · 正在搜索`, `Round ${round} · Searching`), langText("正在搜索与本轮论点相关的网页资料...", "Searching for web references relevant to this turn..."));
@@ -6859,6 +6985,28 @@ async function runSingleDiscussionRound({
       liveTurns,
       roundNotes,
     });
+    const nextSpeakerPackage = await prepareNextSpeakerPackage({
+      summary,
+      speakerRole,
+      previousTurn,
+      knowledgeGate,
+      speakerSearchDigest,
+      liveTurns,
+      roundNotes,
+    });
+    if (hasMeaningfulNextSpeakerPackage(nextSpeakerPackage)) {
+      appendMarkup(
+        createMessageMarkup({
+          speakerId: `${speakerRole.id}-package-${round}`,
+          label: "系",
+          sublabel: langText(`第 ${round} 轮 · 角色准备包`, `Round ${round} · Speaker Package`),
+          body: buildNextSpeakerPackageMessageBody(nextSpeakerPackage),
+          avatarLabel: "系",
+          avatarClass: "avatar-system",
+          tone: "system",
+        })
+      );
+    }
 
     const speakerPrompt = buildSpeakerTurnPrompt({
       round,
@@ -6872,6 +7020,7 @@ async function runSingleDiscussionRound({
       compressedHistory,
       speakerSearchDigest,
       knowledgeGate,
+      nextSpeakerPackage,
       orderedSpeakers,
       budgetHint: isLead ? budget.charHint : "控制在 280 到 520 字内。",
     });
@@ -6887,6 +7036,7 @@ async function runSingleDiscussionRound({
       nextRoleId: nextRole?.id || "",
       retrievalStatus: knowledgeGate.shouldUseLocalKnowledge ? "knowledge_gate_ready" : "idle",
       knowledgeGate,
+      nextSpeakerPackage,
       handoff: null,
     });
     let speakerText;
@@ -6927,6 +7077,7 @@ async function runSingleDiscussionRound({
       nextRoleId: nextRole?.id || "",
       retrievalStatus: knowledgeGate.shouldUseLocalKnowledge ? "knowledge_gate_ready" : "idle",
       knowledgeGate,
+      nextSpeakerPackage,
       handoff: speakerTurnPayload?.handoff || null,
     });
     appendRoleMessage(speakerRole, formatRoundSpeakerLabel(round, speakerRole), speakerText, discussionProfile.displayName);
@@ -6968,6 +7119,7 @@ async function runSingleDiscussionRound({
       nextRoleId: nextRole?.id || "",
       retrievalStatus: nextRole ? "handoff_ready" : "idle",
       knowledgeGate,
+      nextSpeakerPackage,
       handoff: speakerTurnPayload?.handoff || null,
     });
   }
