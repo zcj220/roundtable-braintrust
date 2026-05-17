@@ -1761,9 +1761,108 @@ function normalizeKnowledgeText(value) {
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
     .replace(/\u0000/g, " ")
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
     .replace(/\t+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function cleanKnowledgeLine(line) {
+  return String(line || "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/[│┃]/g, "|")
+    .replace(/^[|\s]+|[|\s]+$/g, "")
+    .trim();
+}
+
+function isKnowledgeHeadingLine(line) {
+  const cleaned = cleanKnowledgeLine(line);
+  if (!cleaned || cleaned.length > 48) {
+    return false;
+  }
+  return /^((第[一二三四五六七八九十百0-9]+[章节部分篇])|([0-9]+(\.[0-9]+){0,3})|([一二三四五六七八九十]+、))/.test(cleaned)
+    || /^(目录|概述|摘要|结论|附录|说明|设计和工艺标准)$/i.test(cleaned);
+}
+
+function looksLikeKnowledgeTableLine(line) {
+  const cleaned = cleanKnowledgeLine(line);
+  if (!cleaned) {
+    return false;
+  }
+  return cleaned.includes("|") || /([□●○]{2,}|\t|\s{2,})/.test(line);
+}
+
+function buildStructuredKnowledgeText(rawText) {
+  const normalized = normalizeKnowledgeText(rawText);
+  if (!normalized) {
+    return "";
+  }
+  const structuredLines = [];
+  let previousWasTable = false;
+  normalized.split("\n").forEach((line) => {
+    const cleaned = cleanKnowledgeLine(line);
+    if (!cleaned) {
+      if (structuredLines[structuredLines.length - 1] !== "") {
+        structuredLines.push("");
+      }
+      previousWasTable = false;
+      return;
+    }
+    const tableLike = looksLikeKnowledgeTableLine(line);
+    const prefixed = isKnowledgeHeadingLine(cleaned)
+      ? `## ${cleaned.replace(/^#+\s*/, "")}`
+      : tableLike
+        ? `| ${cleaned}`
+        : cleaned;
+    if (tableLike && previousWasTable) {
+      structuredLines.push(prefixed);
+    } else if (structuredLines[structuredLines.length - 1] && !isKnowledgeHeadingLine(cleaned) && !tableLike) {
+      structuredLines[structuredLines.length - 1] = `${structuredLines[structuredLines.length - 1]} ${prefixed}`.trim();
+    } else {
+      structuredLines.push(prefixed);
+    }
+    previousWasTable = tableLike;
+  });
+  return structuredLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function splitKnowledgeBlocks(text) {
+  const structured = buildStructuredKnowledgeText(text);
+  if (!structured) {
+    return [];
+  }
+  const blocks = [];
+  let currentHeading = "";
+  let currentLines = [];
+  const flush = () => {
+    const body = currentLines.join("\n").trim();
+    if (!body) {
+      currentLines = [];
+      return;
+    }
+    blocks.push({
+      heading: currentHeading,
+      text: [currentHeading, body].filter(Boolean).join("\n"),
+    });
+    currentLines = [];
+  };
+  structured.split("\n").forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flush();
+      return;
+    }
+    if (trimmed.startsWith("## ")) {
+      flush();
+      currentHeading = trimmed.replace(/^##\s*/, "").trim();
+      currentLines = [];
+      return;
+    }
+    currentLines.push(trimmed.startsWith("| ") ? trimmed.replace(/^\|\s*/, "") : trimmed);
+  });
+  flush();
+  return blocks;
 }
 
 function detectKnowledgeNormalizedFormat(fileName = "", fileType = "") {
@@ -1893,29 +1992,69 @@ function cosineSimilarity(left, right) {
 }
 
 function buildKnowledgeChunks(text, maxSize = KNOWLEDGE_CHUNK_SIZE, overlap = KNOWLEDGE_CHUNK_OVERLAP) {
-  const normalized = normalizeKnowledgeText(text);
-  if (!normalized) {
+  const blocks = splitKnowledgeBlocks(text);
+  if (!blocks.length) {
     return [];
   }
   const chunks = [];
-  let start = 0;
   let chunkIndex = 1;
-  while (start < normalized.length) {
-    const slice = normalized.slice(start, start + maxSize).trim();
-    if (!slice) {
-      break;
+  let currentText = "";
+  let carryHeading = "";
+  const flushChunk = () => {
+    const normalizedChunk = normalizeKnowledgeText(currentText);
+    if (!normalizedChunk) {
+      currentText = carryHeading ? `${carryHeading}\n` : "";
+      return;
     }
+    chunks.push({ chunkIndex, text: normalizedChunk });
+    chunkIndex += 1;
+    const overlapText = normalizedChunk.slice(Math.max(0, normalizedChunk.length - overlap)).trim();
+    currentText = [carryHeading, overlapText].filter(Boolean).join("\n").trim();
+    if (currentText) {
+      currentText += "\n";
+    }
+  };
+
+  blocks.forEach((block) => {
+    const blockText = normalizeKnowledgeText(block.text);
+    if (!blockText) {
+      return;
+    }
+    if (block.heading) {
+      carryHeading = block.heading;
+    }
+    const candidate = [currentText, blockText].filter(Boolean).join("\n").trim();
+    if (!currentText || candidate.length <= maxSize + 80) {
+      currentText = candidate;
+      return;
+    }
+    flushChunk();
+    currentText = [carryHeading, blockText].filter(Boolean).join("\n").trim();
+    if (currentText.length > maxSize + 120) {
+      let remaining = currentText;
+      while (remaining.length > maxSize + 120) {
+        const preferredBreak = Math.max(
+          remaining.lastIndexOf("\n", maxSize),
+          remaining.lastIndexOf("。", maxSize),
+          remaining.lastIndexOf("；", maxSize),
+          remaining.lastIndexOf(" ", maxSize)
+        );
+        const cutIndex = preferredBreak > 80 ? preferredBreak + 1 : maxSize;
+        chunks.push({ chunkIndex, text: remaining.slice(0, cutIndex).trim() });
+        chunkIndex += 1;
+        remaining = [carryHeading, remaining.slice(Math.max(0, cutIndex - overlap)).trim()].filter(Boolean).join("\n").trim();
+      }
+      currentText = remaining;
+    }
+  });
+
+  if (currentText.trim()) {
     chunks.push({
       chunkIndex,
-      text: slice,
+      text: normalizeKnowledgeText(currentText),
     });
-    if (start + maxSize >= normalized.length) {
-      break;
-    }
-    start += Math.max(80, maxSize - overlap);
-    chunkIndex += 1;
   }
-  return chunks;
+  return chunks.filter((chunk) => chunk.text);
 }
 
 function normalizeKnowledgeChunks(records, fallbackText = "") {
@@ -1950,6 +2089,17 @@ function buildKnowledgeSnippet(text, matchedTerms = []) {
   const end = Math.min(normalized.length, termIndex + firstTerm.length + 72);
   const snippet = normalized.slice(start, end).trim();
   return `${start > 0 ? "…" : ""}${snippet}${end < normalized.length ? "…" : ""}`;
+}
+
+function summarizeStructuredKnowledgeText(value, maxLength = 4000) {
+  const structured = buildStructuredKnowledgeText(value);
+  if (!structured) {
+    return "";
+  }
+  if (structured.length <= maxLength) {
+    return structured;
+  }
+  return `${structured.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
 }
 
 function getKnowledgeCategoryDefinition(categoryId) {
@@ -2427,7 +2577,38 @@ async function extractPdfTextPreview(file) {
   for (let index = 1; index <= pageCount; index += 1) {
     const page = await pdf.getPage(index);
     const content = await page.getTextContent();
-    const text = (content.items || []).map((item) => item?.str || "").join(" ").replace(/\s+/g, " ").trim();
+    const lines = [];
+    let currentLine = [];
+    let currentY = null;
+    [...(content.items || [])]
+      .filter((item) => String(item?.str || "").trim())
+      .sort((left, right) => {
+        const leftY = Number(left?.transform?.[5] || 0);
+        const rightY = Number(right?.transform?.[5] || 0);
+        if (Math.abs(rightY - leftY) > 2) {
+          return rightY - leftY;
+        }
+        const leftX = Number(left?.transform?.[4] || 0);
+        const rightX = Number(right?.transform?.[4] || 0);
+        return leftX - rightX;
+      })
+      .forEach((item) => {
+        const itemY = Number(item?.transform?.[5] || 0);
+        const itemText = cleanKnowledgeLine(item?.str || "");
+        if (!itemText) {
+          return;
+        }
+        if (currentY !== null && Math.abs(currentY - itemY) > 3) {
+          lines.push(currentLine.join(" ").trim());
+          currentLine = [];
+        }
+        currentY = itemY;
+        currentLine.push(itemText);
+      });
+    if (currentLine.length) {
+      lines.push(currentLine.join(" ").trim());
+    }
+    const text = [`## 第 ${index} 页`, ...lines.filter(Boolean)].join("\n").trim();
     if (text) {
       pages.push(text);
     }
@@ -2443,19 +2624,45 @@ async function extractDocxTextPreview(file) {
       const xmlParts = await Promise.all(
         ["word/document.xml", "word/footnotes.xml", "word/endnotes.xml", "word/header1.xml", "word/footer1.xml"]
           .filter((path) => zip.file(path))
-          .map((path) => zip.file(path).async("string"))
+          .map(async (path) => ({ path, xmlText: await zip.file(path).async("string") }))
       );
       const extractedText = xmlParts
-        .map((xmlText) => {
+        .map(({ path, xmlText }) => {
           const doc = new DOMParser().parseFromString(xmlText, "application/xml");
-          return [...doc.getElementsByTagName("*")]
-            .filter((node) => String(node.localName || "").toLowerCase() === "t")
-            .map((node) => node.textContent || "")
-            .join(" ");
+          const body = doc.getElementsByTagNameNS("*", "body")[0] || doc.documentElement;
+          const blocks = [];
+          [...(body?.childNodes || [])]
+            .filter((node) => node?.nodeType === Node.ELEMENT_NODE)
+            .forEach((node) => {
+              const localName = String(node.localName || "").toLowerCase();
+              if (localName === "p") {
+                const paragraphText = [...node.getElementsByTagNameNS("*", "t")].map((item) => item.textContent || "").join("").trim();
+                if (!paragraphText) {
+                  return;
+                }
+                const styleNode = node.getElementsByTagNameNS("*", "pStyle")[0];
+                const styleValue = String(styleNode?.getAttribute("w:val") || styleNode?.getAttribute("val") || "");
+                blocks.push(/heading/i.test(styleValue) ? `## ${paragraphText}` : paragraphText);
+                return;
+              }
+              if (localName === "tbl") {
+                const rows = [...node.getElementsByTagNameNS("*", "tr")]
+                  .map((row) => [...row.getElementsByTagNameNS("*", "tc")]
+                    .map((cell) => [...cell.getElementsByTagNameNS("*", "t")].map((item) => item.textContent || "").join("").trim())
+                    .filter(Boolean)
+                    .join(" | "))
+                  .filter(Boolean)
+                  .map((rowText) => `| ${rowText}`);
+                if (rows.length) {
+                  blocks.push(rows.join("\n"));
+                }
+              }
+            });
+          const prefix = path === "word/document.xml" ? "" : `## ${path.split("/").pop()}`;
+          return [prefix, ...blocks].filter(Boolean).join("\n\n").trim();
         })
-        .join("\n\n")
-        .replace(/\s+/g, " ")
-        .trim();
+        .filter(Boolean)
+        .join("\n\n");
       if (extractedText) {
         return extractedText;
       }
@@ -2501,16 +2708,16 @@ async function extractTextPreviewForFile(file) {
   const importProfile = detectKnowledgeNormalizedFormat(fileName, fileType);
   try {
     if (importProfile.supported && ["plain_text", "markdown", "json", "csv", "html", "yaml", "source_code"].includes(importProfile.normalizedFormat)) {
-      return summarizeText(await readFileAsText(file), 4000);
+      return summarizeStructuredKnowledgeText(await readFileAsText(file), 4000);
     }
     if (importProfile.normalizedFormat === "pdf") {
-      return summarizeText(await extractPdfTextPreview(file), 4000);
+      return summarizeStructuredKnowledgeText(await extractPdfTextPreview(file), 4000);
     }
     if (importProfile.normalizedFormat === "docx") {
-      return summarizeText(await extractDocxTextPreview(file), 4000);
+      return summarizeStructuredKnowledgeText(await extractDocxTextPreview(file), 4000);
     }
     if (importProfile.normalizedFormat === "spreadsheet") {
-      return summarizeText(await extractSpreadsheetTextPreview(file), 4000);
+      return summarizeStructuredKnowledgeText(await extractSpreadsheetTextPreview(file), 4000);
     }
   } catch (error) {
     console.warn("extractTextPreviewForFile failed", fileName, error);
@@ -2754,7 +2961,7 @@ function buildKnowledgeReferenceChipsMarkup(hits) {
     <div class="chat-evidence-strip">
       <div class="chat-evidence-strip-title">${escapeHtml(langText("本轮命中的本地知识", "Local Knowledge Used"))}</div>
       <div class="chat-evidence-chip-list">
-        ${hits.map((entry) => `<button class="chat-evidence-chip" type="button" data-open-knowledge-id="${entry.id}">${escapeHtml(`${entry.title} · ${getKnowledgeCategoryLabel(entry.category)}${entry.searchChunkIndex ? ` · Chunk ${entry.searchChunkIndex}` : ""}`)}</button>`).join("")}
+        ${hits.map((entry) => `<button class="chat-evidence-chip" type="button" data-open-knowledge-id="${entry.id}" title="${escapeHtml(langText("点击打开知识库并定位到该条资料", "Open this document in the knowledge base"))}"><span class="chat-evidence-chip-title">${escapeHtml(entry.title)}</span><span class="chat-evidence-chip-meta">${escapeHtml(`${getKnowledgeCategoryLabel(entry.category)}${entry.searchChunkIndex ? ` · Chunk ${entry.searchChunkIndex}` : ""} · ${langText("点击打开", "Open")}`)}</span></button>`).join("")}
       </div>
     </div>
   `;

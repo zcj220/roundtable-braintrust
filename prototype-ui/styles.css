@@ -1389,30 +1389,46 @@ button {
 }
 
 .chat-evidence-strip-title {
-  font-size: 11px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
   color: var(--warm-soft);
 }
 
 .chat-evidence-chip-list {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
 }
 
 .chat-evidence-chip {
   appearance: none;
   border: 1px solid rgba(94, 199, 212, 0.18);
-  background: rgba(94, 199, 212, 0.08);
+  background: rgba(94, 199, 212, 0.07);
   color: var(--text);
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 11px;
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-size: 10px;
+  line-height: 1.45;
   cursor: pointer;
+  display: grid;
+  gap: 3px;
+  text-align: left;
 }
 
 .chat-evidence-chip:hover {
   border-color: rgba(94, 199, 212, 0.35);
   background: rgba(94, 199, 212, 0.14);
+}
+
+.chat-evidence-chip-title {
+  font-size: 10px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.chat-evidence-chip-meta {
+  font-size: 9px;
+  color: var(--muted);
 }
 .evidence-detail-surface {
   display: grid;
