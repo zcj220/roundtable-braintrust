@@ -1394,6 +1394,84 @@ function setDiscussionRuntimeState(patch = {}) {
     ...patch,
     updatedAt: Date.now(),
   });
+  renderDiscussionStatusPanel();
+}
+
+function formatDiscussionPhaseLabel(phase) {
+  const phaseMap = {
+    idle: langText("空闲", "Idle"),
+    topic_ready: langText("话题就绪", "Topic Ready"),
+    shared_brief_preparing: langText("整理事实包", "Shared Brief"),
+    retrieval_pending: langText("检索中", "Retrieving"),
+    retrieval_ready: langText("检索完成", "Retrieval Ready"),
+    speaker_preparing: langText("角色准备中", "Preparing"),
+    speaker_speaking: langText("角色发言中", "Speaking"),
+    handoff_planning: langText("交接规划", "Handoff"),
+    speaker_resume_ready: langText("下一位可接续", "Resume Ready"),
+    round_summary_pending: langText("等待轮次总结", "Round Summary"),
+    round_complete: langText("本轮完成", "Round Complete"),
+    discussion_complete: langText("讨论完成", "Completed"),
+  };
+  return phaseMap[phase] || langText("运行中", "Running");
+}
+
+function formatDiscussionRetrievalStatusLabel(status) {
+  const statusMap = {
+    idle: langText("未触发检索", "No retrieval"),
+    context_only: langText("仅靠上下文", "Context only"),
+    local_only: langText("只使用本地知识", "Local only"),
+    local_first_web_supplement: langText("先本地后网页", "Local then web"),
+    web_first: langText("优先网页补查", "Web first"),
+    knowledge_gate_ready: langText("知识门控已完成", "Gate ready"),
+    handoff_ready: langText("交接已就绪", "Handoff ready"),
+    shared_brief_pending: langText("共享事实包整理中", "Shared brief pending"),
+  };
+  return statusMap[status] || String(status || langText("未触发检索", "No retrieval"));
+}
+
+function renderDiscussionStatusPanel() {
+  if (!discussionStatusPanel) {
+    return;
+  }
+  const runtimeState = normalizeDiscussionState(state.discussionState || buildEmptyDiscussionState());
+  const nextSpeakerPackage = runtimeState.nextSpeakerPackage || null;
+  const targetRole = runtimeState.speakerRoleId
+    ? getRoleById(runtimeState.speakerRoleId)
+    : (nextSpeakerPackage?.targetRoleId ? getRoleById(nextSpeakerPackage.targetRoleId) : null);
+  const nextRole = runtimeState.nextRoleId ? getRoleById(runtimeState.nextRoleId) : null;
+  const knowledgeHits = Array.isArray(nextSpeakerPackage?.localKnowledgeHits) ? nextSpeakerPackage.localKnowledgeHits : [];
+  const evidenceGaps = uniqueStrings(normalizeClarificationQuestions([
+    ...(runtimeState.knowledgeGate?.evidenceGaps || []),
+    ...(nextSpeakerPackage?.evidenceGaps || []),
+  ])).slice(0, 3);
+  const shouldShow = runtimeState.phase !== "idle"
+    || runtimeState.round > 0
+    || !!nextSpeakerPackage
+    || !!runtimeState.handoff;
+  discussionStatusPanel.classList.toggle("hidden", !shouldShow);
+  if (!shouldShow) {
+    return;
+  }
+  discussionStatusPhase.textContent = formatDiscussionPhaseLabel(runtimeState.phase);
+  const targetRoleLabel = targetRole
+    ? `${getActiveRoleName(targetRole)}（${getActiveRoleSeat(targetRole)}）`
+    : String(nextSpeakerPackage?.targetRoleName || "").trim();
+  discussionStatusTarget.textContent = targetRoleLabel || langText("等待角色进入", "Waiting for role");
+  discussionStatusRound.textContent = runtimeState.round > 0
+    ? langText(`第 ${runtimeState.round}/${runtimeState.totalRounds || "-"} 轮${nextRole ? `，下一位 ${getActiveRoleName(nextRole)}` : ""}`, `Round ${runtimeState.round}/${runtimeState.totalRounds || "-"}${nextRole ? `, next ${getActiveRoleName(nextRole)}` : ""}`)
+    : langText("尚未进入轮次", "No round yet");
+  discussionStatusStrategy.textContent = formatRetrievalStrategyLabel(nextSpeakerPackage?.retrievalStrategy || runtimeState.knowledgeGate?.retrievalStrategy || "context_only");
+  discussionStatusRetrieval.textContent = formatDiscussionRetrievalStatusLabel(runtimeState.retrievalStatus);
+  discussionStatusKnowledge.textContent = langText(`本地命中 ${knowledgeHits.length} 条`, `${knowledgeHits.length} local hits`);
+  discussionStatusGaps.textContent = evidenceGaps.length
+    ? evidenceGaps.join("；")
+    : langText("当前没有明显证据缺口", "No clear evidence gap right now");
+  discussionStatusSummary.textContent = [
+    nextSpeakerPackage?.handoffFocus ? `当前重点：${nextSpeakerPackage.handoffFocus}` : "",
+    knowledgeHits.length ? `本地知识：${knowledgeHits.slice(0, 2).join("；")}` : "",
+    nextSpeakerPackage?.webSearchSummary ? `网页补充：${summarizeText(nextSpeakerPackage.webSearchSummary, 140)}` : "",
+    runtimeState.handoff?.current_round_summary ? `上一位交接：${runtimeState.handoff.current_round_summary}` : "",
+  ].filter(Boolean).join("\n") || langText("系统还没有开始为任何角色准备资料。", "The system has not started preparing materials for any role yet.");
 }
 
 function getLatestSpeakerTurn(roundNotes = [], liveTurns = []) {
@@ -1713,6 +1791,15 @@ const speakerName = document.getElementById("speaker-name");
 const speakerRole = document.getElementById("speaker-role");
 const speakerDescription = document.getElementById("speaker-description");
 const liveStatusBanner = document.getElementById("live-status-banner");
+const discussionStatusPanel = document.getElementById("discussion-status-panel");
+const discussionStatusPhase = document.getElementById("discussion-status-phase");
+const discussionStatusTarget = document.getElementById("discussion-status-target");
+const discussionStatusRound = document.getElementById("discussion-status-round");
+const discussionStatusStrategy = document.getElementById("discussion-status-strategy");
+const discussionStatusRetrieval = document.getElementById("discussion-status-retrieval");
+const discussionStatusKnowledge = document.getElementById("discussion-status-knowledge");
+const discussionStatusGaps = document.getElementById("discussion-status-gaps");
+const discussionStatusSummary = document.getElementById("discussion-status-summary");
 const cycleModeButton = document.getElementById("cycle-mode");
 const configMode = document.getElementById("config-mode");
 const configModeTooltip = document.getElementById("config-mode-tooltip");
@@ -5247,6 +5334,7 @@ function applyTopicSnapshot(snapshot) {
   seatPickerFeedback.textContent = seatFeedback.textContent;
   seatPickerFeedback.className = `drawer-feedback ${snapshot.feedback?.className?.replace("seat-feedback", "").trim() || ""}`.trim();
   updateLiveStatus(snapshot.liveStatus?.text || langText("等待开始讨论", "Waiting to start discussion"), snapshot.liveStatus?.className?.split(" ").slice(1).join(" ") || "");
+  renderDiscussionStatusPanel();
   updateCompactSummary();
   renderAiRoleRecommendationToggle();
   updateCurrentTopicTitle(deriveTopicTitle());
@@ -12333,6 +12421,7 @@ function seedConversation() {
   setSpeakerCard(langText("任务整理中", "Task Intake"), langText("等待用户输入", "Waiting for user input"), langText("先整理，再确认，再生成人物。", "First organize, then confirm, then generate participants."), "系");
   updateLiveStatus(langText("目前无任务", "No task yet"), "");
   updateSeatFeedback(langText("无任务", "No task"), "");
+  renderDiscussionStatusPanel();
   renderSeatStack();
   renderSeatPicker();
   renderAttachmentStrip();

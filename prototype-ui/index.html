@@ -488,6 +488,30 @@
 
         <section class="chat-shell">
           <div class="live-status-banner" id="live-status-banner">等待开始讨论</div>
+          <section class="discussion-status-panel hidden" id="discussion-status-panel" aria-live="polite">
+            <div class="discussion-status-head">
+              <p class="topic-tag">讨论状态</p>
+              <span class="discussion-status-phase" id="discussion-status-phase">空闲</span>
+            </div>
+            <div class="discussion-status-grid">
+              <article class="discussion-status-card">
+                <span class="discussion-status-label">当前目标</span>
+                <strong id="discussion-status-target">等待开始</strong>
+                <p id="discussion-status-round">尚未进入轮次</p>
+              </article>
+              <article class="discussion-status-card">
+                <span class="discussion-status-label">检索策略</span>
+                <strong id="discussion-status-strategy">仅上下文</strong>
+                <p id="discussion-status-retrieval">未触发检索</p>
+              </article>
+              <article class="discussion-status-card">
+                <span class="discussion-status-label">证据情况</span>
+                <strong id="discussion-status-knowledge">本地命中 0 条</strong>
+                <p id="discussion-status-gaps">当前没有证据缺口</p>
+              </article>
+            </div>
+            <div class="discussion-status-summary" id="discussion-status-summary">系统还没有开始为任何角色准备资料。</div>
+          </section>
           <section class="discussion-stream chat-stream" id="discussion-stream"></section>
 
           <footer class="composer-shell compact-composer">
