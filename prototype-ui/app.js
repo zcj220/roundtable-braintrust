@@ -1316,6 +1316,87 @@ function buildEmptyProjectMemory() {
   };
 }
 
+function buildEmptyDiscussionState() {
+  return {
+    phase: "idle",
+    round: 0,
+    totalRounds: 0,
+    speakerRoleId: "",
+    nextRoleId: "",
+    retrievalStatus: "idle",
+    knowledgeGate: {
+      shouldUseLocalKnowledge: false,
+      preferredCategories: [],
+      preferredKeywords: [],
+      localKnowledgeNeeded: [],
+      evidenceGaps: [],
+    },
+    handoff: null,
+    updatedAt: 0,
+  };
+}
+
+function normalizeDiscussionState(runtimeState) {
+  const base = buildEmptyDiscussionState();
+  const nextState = runtimeState && typeof runtimeState === "object" ? runtimeState : {};
+  return {
+    ...base,
+    ...nextState,
+    round: Math.max(0, Number(nextState.round ?? base.round) || 0),
+    totalRounds: Math.max(0, Number(nextState.totalRounds ?? base.totalRounds) || 0),
+    speakerRoleId: String(nextState.speakerRoleId || base.speakerRoleId || "").trim(),
+    nextRoleId: String(nextState.nextRoleId || base.nextRoleId || "").trim(),
+    retrievalStatus: String(nextState.retrievalStatus || base.retrievalStatus || "idle").trim() || "idle",
+    knowledgeGate: {
+      ...base.knowledgeGate,
+      ...(nextState.knowledgeGate && typeof nextState.knowledgeGate === "object" ? nextState.knowledgeGate : {}),
+      preferredCategories: normalizeClarificationQuestions(nextState?.knowledgeGate?.preferredCategories || []),
+      preferredKeywords: normalizeClarificationQuestions(nextState?.knowledgeGate?.preferredKeywords || []),
+      localKnowledgeNeeded: normalizeClarificationQuestions(nextState?.knowledgeGate?.localKnowledgeNeeded || []),
+      evidenceGaps: normalizeClarificationQuestions(nextState?.knowledgeGate?.evidenceGaps || []),
+      shouldUseLocalKnowledge: !!nextState?.knowledgeGate?.shouldUseLocalKnowledge,
+    },
+    handoff: nextState?.handoff && typeof nextState.handoff === "object"
+      ? {
+        next_role_id: String(nextState.handoff.next_role_id || "").trim(),
+        next_role_focus: String(nextState.handoff.next_role_focus || "").trim(),
+        local_knowledge_needed: normalizeClarificationQuestions(nextState.handoff.local_knowledge_needed || []),
+        web_search_needed: normalizeClarificationQuestions(nextState.handoff.web_search_needed || []),
+        preferred_categories: normalizeClarificationQuestions(nextState.handoff.preferred_categories || []),
+        preferred_keywords: normalizeClarificationQuestions(nextState.handoff.preferred_keywords || []),
+        avoid_categories: normalizeClarificationQuestions(nextState.handoff.avoid_categories || []),
+        missing_evidence_types: normalizeClarificationQuestions(nextState.handoff.missing_evidence_types || []),
+        current_round_summary: String(nextState.handoff.current_round_summary || "").trim(),
+        recommended_counterpoints: normalizeClarificationQuestions(nextState.handoff.recommended_counterpoints || []),
+      }
+      : null,
+    updatedAt: Number(nextState.updatedAt || Date.now()) || Date.now(),
+  };
+}
+
+function setDiscussionRuntimeState(patch = {}) {
+  state.discussionState = normalizeDiscussionState({
+    ...state.discussionState,
+    ...patch,
+    updatedAt: Date.now(),
+  });
+}
+
+function buildHandoffMessageBody({ round, speakerRole, nextRole, handoff, knowledgeGate }) {
+  return [
+    `第 ${round} 轮交接：${getActiveRoleName(speakerRole)} 已完成本轮发言，系统开始为下一位准备资料。`,
+    nextRole ? `下一位角色：${getActiveRoleName(nextRole)}（${getActiveRoleSeat(nextRole)}）` : "下一位角色：本轮发言已到末位，接下来进入主持压缩。",
+    handoff?.next_role_focus ? `下一位重点：${handoff.next_role_focus}` : "",
+    handoff?.current_round_summary ? `当前轮次交接摘要：${handoff.current_round_summary}` : "",
+    handoff?.local_knowledge_needed?.length ? `建议优先看的本地知识：${handoff.local_knowledge_needed.join("、")}` : "",
+    handoff?.web_search_needed?.length ? `建议补查的网页线索：${handoff.web_search_needed.join("；")}` : "",
+    handoff?.recommended_counterpoints?.length ? `建议下一位优先反打：${handoff.recommended_counterpoints.join("；")}` : "",
+    knowledgeGate?.preferredCategories?.length ? `知识门控目录：${knowledgeGate.preferredCategories.join("、")}` : "",
+    knowledgeGate?.preferredKeywords?.length ? `知识门控关键词：${knowledgeGate.preferredKeywords.join("、")}` : "",
+    knowledgeGate?.evidenceGaps?.length ? `当前证据缺口：${knowledgeGate.evidenceGaps.join("；")}` : "",
+  ].filter(Boolean).join("\n");
+}
+
 const state = {
   appLanguage: "zh",
   appTheme: "dark",
@@ -1335,6 +1416,7 @@ const state = {
   latestReportText: "",
   latestReportFileName: "",
   discussionRoundNotes: [],
+  discussionState: buildEmptyDiscussionState(),
   recommendedRoleGenerationMeta: null,
   aiAutoRecommendEnabled: true,
   knowledgeEnabled: true,
@@ -4841,6 +4923,7 @@ function buildCurrentTopicSnapshot() {
     latestReportText: state.latestReportText,
     latestReportFileName: state.latestReportFileName,
     discussionRoundNotes: state.discussionRoundNotes,
+    discussionState: state.discussionState,
     recommendedRoleGenerationMeta: state.recommendedRoleGenerationMeta,
     aiAutoRecommendEnabled: state.aiAutoRecommendEnabled,
     seatSource: state.seatSource,
@@ -4969,6 +5052,7 @@ function applyTopicSnapshot(snapshot) {
   state.latestReportText = snapshot.latestReportText || "";
   state.latestReportFileName = snapshot.latestReportFileName || "";
   state.discussionRoundNotes = Array.isArray(snapshot.discussionRoundNotes) ? snapshot.discussionRoundNotes : [];
+  state.discussionState = normalizeDiscussionState(snapshot.discussionState || buildEmptyDiscussionState());
   state.recommendedRoleGenerationMeta = snapshot.recommendedRoleGenerationMeta || null;
   state.aiAutoRecommendEnabled = snapshot.aiAutoRecommendEnabled !== false;
   state.seatSource = snapshot.seatSource || "recommended";
@@ -6758,6 +6842,15 @@ async function runSingleDiscussionRound({
     // 席位级即时搜索：发言前先根据角色立场搜索相关网页，把结果作为额外证据塞进 prompt
     setSpeakerCardForRole(speakerRole, langText(`第 ${round} 轮 · 正在搜索`, `Round ${round} · Searching`), langText("正在搜索与本轮论点相关的网页资料...", "Searching for web references relevant to this turn..."));
     updateLiveStatus(langText(`第 ${round} 轮：${getActiveRoleName(speakerRole)} 正在搜索网页`, `Round ${round}: ${getActiveRoleName(speakerRole)} is searching the web`), "pending");
+    setDiscussionRuntimeState({
+      phase: "retrieval_pending",
+      round,
+      totalRounds,
+      speakerRoleId: speakerRole.id,
+      nextRoleId: nextRole?.id || "",
+      retrievalStatus: "web_search_pending",
+      handoff: null,
+    });
     const speakerSearchDigest = await runSpeakerWebSearch(speakerRole, summary, signal);
     const knowledgeGate = buildKnowledgeGateDecision({
       summary,
@@ -6786,6 +6879,16 @@ async function runSingleDiscussionRound({
     setSpeakerCardForRole(speakerRole, langText(`第 ${round} 轮 · 正在思考`, `Round ${round} · Thinking`), langText("正在读取任务和前面已发言内容，并准备按顺序接续。", "Reading the task and previous turns, then preparing to continue in order."));
     updateLiveStatus(langText(`第 ${round} 轮：${getActiveRoleName(speakerRole)} 正在思考`, `Round ${round}: ${getActiveRoleName(speakerRole)} is thinking`), "pending");
     updateSeatFeedback(langText(`第 ${round} 轮：${getActiveRoleName(speakerRole)} 正在思考`, `Round ${round}: ${getActiveRoleName(speakerRole)} is thinking`), "pending");
+    setDiscussionRuntimeState({
+      phase: "speaker_preparing",
+      round,
+      totalRounds,
+      speakerRoleId: speakerRole.id,
+      nextRoleId: nextRole?.id || "",
+      retrievalStatus: knowledgeGate.shouldUseLocalKnowledge ? "knowledge_gate_ready" : "idle",
+      knowledgeGate,
+      handoff: null,
+    });
     let speakerText;
     let speakerTurnPayload;
     try {
@@ -6816,7 +6919,36 @@ async function runSingleDiscussionRound({
     }
     setSpeakerCardForRole(speakerRole, langText(`第 ${round} 轮 · 正在发言`, `Round ${round} · Speaking`), langText("当前顺序发言已生成，马上写入讨论流。", "The current turn has been generated and will be written into the discussion stream next."));
     updateLiveStatus(langText(`第 ${round} 轮：${getActiveRoleName(speakerRole)} 正在发言`, `Round ${round}: ${getActiveRoleName(speakerRole)} is speaking`), "pending");
+    setDiscussionRuntimeState({
+      phase: "speaker_speaking",
+      round,
+      totalRounds,
+      speakerRoleId: speakerRole.id,
+      nextRoleId: nextRole?.id || "",
+      retrievalStatus: knowledgeGate.shouldUseLocalKnowledge ? "knowledge_gate_ready" : "idle",
+      knowledgeGate,
+      handoff: speakerTurnPayload?.handoff || null,
+    });
     appendRoleMessage(speakerRole, formatRoundSpeakerLabel(round, speakerRole), speakerText, discussionProfile.displayName);
+    if (speakerTurnPayload?.handoff) {
+      appendMarkup(
+        createMessageMarkup({
+          speakerId: `${speakerRole.id}-handoff-${round}`,
+          label: "系",
+          sublabel: langText(`第 ${round} 轮 · 交接准备`, `Round ${round} · Handoff Prep`),
+          body: buildHandoffMessageBody({
+            round,
+            speakerRole,
+            nextRole,
+            handoff: speakerTurnPayload.handoff,
+            knowledgeGate,
+          }),
+          avatarLabel: "系",
+          avatarClass: "avatar-system",
+          tone: "system",
+        })
+      );
+    }
     liveTurns.push({
       role: speakerRole,
       assignmentLabel: formatRoundSpeakerLabel(round, speakerRole),
@@ -6827,6 +6959,16 @@ async function runSingleDiscussionRound({
       speakerRisks: speakerTurnPayload?.speakerRisks || [],
       speakerOpenQuestions: speakerTurnPayload?.speakerOpenQuestions || [],
       knowledgeGate,
+    });
+    setDiscussionRuntimeState({
+      phase: nextRole ? "speaker_resume_ready" : "round_summary_pending",
+      round,
+      totalRounds,
+      speakerRoleId: speakerRole.id,
+      nextRoleId: nextRole?.id || "",
+      retrievalStatus: nextRole ? "handoff_ready" : "idle",
+      knowledgeGate,
+      handoff: speakerTurnPayload?.handoff || null,
     });
   }
 
@@ -6848,6 +6990,14 @@ async function runSingleDiscussionRound({
   ].join("\n\n");
   setSpeakerCardForRole(moderatorRole, langText(`第 ${round} 轮后 · 正在思考`, `After Round ${round} · Thinking`), langText("正在压缩本轮发言，整理谁说了什么、哪里有争议。", "Compressing this round and organizing who said what and where the disagreements are."));
   updateLiveStatus(langText(`第 ${round} 轮后：主持AI 正在总结`, `After round ${round}: Host AI is summarizing`), "pending");
+  setDiscussionRuntimeState({
+    phase: "round_complete",
+    round,
+    totalRounds,
+    speakerRoleId: moderatorRole.id,
+    nextRoleId: "",
+    retrievalStatus: "idle",
+  });
   const moderatorSummary = await requestModelText(moderatorProfile, moderatorRoundSummaryPrompt, Math.min(700, budget.participant), signal);
   appendRoleMessage(moderatorRole, formatModeratorSummaryLabel(round, moderatorRole), moderatorSummary, moderatorProfile.displayName);
 
@@ -6951,6 +7101,15 @@ async function runDiscussionFlow() {
   let targetRounds = Math.max(completedRounds + 1, Number(discussionRoundsInput.value || state.discussionRounds || 1));
   let currentRound = completedRounds + 1;
   state.discussionRounds = targetRounds;
+  setDiscussionRuntimeState({
+    phase: "topic_ready",
+    round: completedRounds,
+    totalRounds: targetRounds,
+    speakerRoleId: moderatorRole.id,
+    nextRoleId: orderedSpeakers[0]?.id || "",
+    retrievalStatus: "idle",
+    handoff: null,
+  });
   setSpeakerCard(langText("讨论进行中", "Discussion In Progress"), langText("主持AI按顺序推进", "Host AI is advancing in order"), langText(`将按你设定的顺序逐位发言；每轮末由主持AI做压缩小结，最后由裁判定稿。${getDensityDescription()}`, `Speakers will follow your chosen order. The host AI will compress each round, and the judge will finalize the conclusion. ${getDensityDescription()}`), "系");
   updateLiveStatus(langText(`准备开始：本次先执行到第 ${targetRounds} 轮。主持AI模型为 ${moderatorProfile.displayName}。`, `Ready to start: the system will run through round ${targetRounds}. Host model: ${moderatorProfile.displayName}.`), "pending");
   updateSeatFeedback(langText(`开始讨论，当前先执行到第 ${targetRounds} 轮。主持AI：${moderatorProfile.displayName}。${getDensityDescription()}`, `Discussion started. The system will run through round ${targetRounds}. Host AI: ${moderatorProfile.displayName}. ${getDensityDescription()}`), "success");
@@ -6967,6 +7126,15 @@ async function runDiscussionFlow() {
   };
 
   try {
+    setDiscussionRuntimeState({
+      phase: "shared_brief_preparing",
+      round: 0,
+      totalRounds: targetRounds,
+      speakerRoleId: moderatorRole.id,
+      nextRoleId: orderedSpeakers[0]?.id || "",
+      retrievalStatus: "shared_brief_pending",
+      handoff: null,
+    });
     state.sharedResearchBrief = "";
     setSpeakerCardForRole(moderatorRole, langText("开场前 · 正在整理事实包", "Before Opening · Building Shared Brief"), langText("先为整张桌子整理一份可共享的背景事实、约束和未决问题。", "Building one shared brief of facts, constraints, and unresolved questions for the whole table."));
     updateLiveStatus(langText("开场前：共享 research agent 正在整理事实包", "Before opening: the shared research agent is building the brief"), "pending");
