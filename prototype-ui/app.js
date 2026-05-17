@@ -1527,7 +1527,6 @@ const knowledgeSelectionPanel = document.getElementById("knowledge-selection-pan
 const knowledgeEditorPanel = document.getElementById("knowledge-editor-panel");
 const knowledgeSearchInputField = document.getElementById("knowledge-search");
 const knowledgeCategoryFilterSelect = document.getElementById("knowledge-category-filter");
-const knowledgeTagFilterSelect = document.getElementById("knowledge-tag-filter");
 const knowledgeUploadCategorySelect = document.getElementById("knowledge-upload-category");
 const knowledgeCategoryAddButton = document.getElementById("knowledge-category-add");
 const knowledgeCategoryRenameButton = document.getElementById("knowledge-category-rename");
@@ -2531,32 +2530,15 @@ function getKnowledgeScopeEntries() {
   return normalizeKnowledgeEntries(state.globalKnowledgeEntries);
 }
 
-function buildKnowledgeTagOptions(entries) {
-  return uniqueStrings(entries.flatMap((entry) => Array.isArray(entry.tags) ? entry.tags : []));
-}
-
 function renderKnowledgeTagFilterOptions(entries) {
-  if (!knowledgeTagFilterSelect) {
-    return;
-  }
-  const selectedValue = knowledgeTagFilterSelect.value || "all";
-  const tags = buildKnowledgeTagOptions(entries);
-  knowledgeTagFilterSelect.innerHTML = [
-    `<option value="all">${escapeHtml(langText("全部标签", "All Tags"))}</option>`,
-    ...tags.map((tag) => `<option value="${escapeHtml(tag)}">${escapeHtml(tag)}</option>`),
-  ].join("");
-  knowledgeTagFilterSelect.value = tags.includes(selectedValue) ? selectedValue : "all";
+  return entries;
 }
 
 function filterKnowledgeEntries(entries, options = {}) {
   const searchTerm = String(options.queryOverride ?? knowledgeSearchInputField?.value ?? "").trim();
   const category = options.categoryOverride ?? knowledgeCategoryFilterSelect?.value ?? "all";
-  const tag = options.tagOverride ?? knowledgeTagFilterSelect?.value ?? "all";
   const filteredEntries = entries.filter((entry) => {
     if (category !== "all" && entry.category !== category) {
-      return false;
-    }
-    if (tag !== "all" && !(entry.tags || []).includes(tag)) {
       return false;
     }
     return true;
@@ -2655,7 +2637,6 @@ function buildKnowledgeNormalizedPayload(entry) {
     mimeType: entry.type,
     category: entry.category,
     categoryLabel: getKnowledgeCategoryLabel(entry.category),
-    tags: uniqueStrings(entry.tags || []),
     normalizedFormat: entry.normalizedFormat || "",
     conversionStatus: entry.conversionStatus || "limited",
     summary: entry.summary || "",
@@ -2728,6 +2709,57 @@ async function recordKnowledgeRetrievalHits(query, hits, context = "shared_brief
   await saveGlobalKnowledgeEntries(state.globalKnowledgeEntries);
 }
 
+function buildKnowledgeEvidenceEntries(hits, query, context = "shared_brief") {
+  const createdAtBase = Date.now();
+  return (Array.isArray(hits) ? hits : []).map((entry, index) => ({
+    id: `knowledge-hit:${entry.id}:${createdAtBase}:${index}`,
+    label: entry.title || langText("知识片段", "Knowledge Hit"),
+    kind: langText("知识库", "Knowledge Base"),
+    filterType: "knowledge",
+    summary: summarizeText(entry.searchSnippet || entry.summary || entry.textPreview || "", 82),
+    createdAt: createdAtBase + index,
+    detail: [
+      `目录：${getKnowledgeCategoryLabel(entry.category)}`,
+      entry.searchChunkIndex ? `Chunk：${entry.searchChunkIndex}` : "",
+      query ? `检索词：${query}` : "",
+      entry.searchSnippet || entry.summary || entry.textPreview || "",
+    ].filter(Boolean).join("\n"),
+    imageUrl: "",
+    videoUrl: "",
+    analysis: "",
+    sourceUrl: "",
+    previewUrl: "",
+    meta: [getKnowledgeCategoryLabel(entry.category), entry.searchChunkIndex ? `Chunk ${entry.searchChunkIndex}` : ""].filter(Boolean),
+    formatLabel: getKnowledgeEntryFormatLabel(entry),
+    listKindLabel: langText("知识", "Knowledge"),
+    sourceLabel: langText(`本地知识库 · ${formatKnowledgeRetrievalContext(context)}`, `Local Knowledge · ${formatKnowledgeRetrievalContext(context)}`),
+  }));
+}
+
+function appendSharedEvidenceEntries(entries, limit = 40) {
+  if (!Array.isArray(entries) || !entries.length) {
+    return;
+  }
+  state.sharedEvidenceEntries = [
+    ...(Array.isArray(state.sharedEvidenceEntries) ? state.sharedEvidenceEntries : []).filter(Boolean),
+    ...entries,
+  ].slice(-limit);
+}
+
+function buildKnowledgeReferenceChipsMarkup(hits) {
+  if (!Array.isArray(hits) || !hits.length) {
+    return "";
+  }
+  return `
+    <div class="chat-evidence-strip">
+      <div class="chat-evidence-strip-title">${escapeHtml(langText("本轮命中的本地知识", "Local Knowledge Used"))}</div>
+      <div class="chat-evidence-chip-list">
+        ${hits.map((entry) => `<button class="chat-evidence-chip" type="button" data-open-knowledge-id="${entry.id}">${escapeHtml(`${entry.title} · ${getKnowledgeCategoryLabel(entry.category)}${entry.searchChunkIndex ? ` · Chunk ${entry.searchChunkIndex}` : ""}`)}</button>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function buildLocalKnowledgeDigest(query, limit = 4) {
   if (!state.knowledgeEnabled) {
     return "";
@@ -2739,7 +2771,6 @@ function buildLocalKnowledgeDigest(query, limit = 4) {
   const result = filterKnowledgeEntries(allEntries, {
     queryOverride: query,
     categoryOverride: "all",
-    tagOverride: "all",
   });
   const hits = result.entries.slice(0, limit);
   if (!hits.length) {
@@ -2780,9 +2811,8 @@ function renderKnowledgeBaseWorkspace() {
   if (!entries.length) {
     activeKnowledgeEntryId = "";
     const hasActiveFilters = Boolean(filteredResult.searchTerm)
-      || (knowledgeCategoryFilterSelect?.value || "all") !== "all"
-      || (knowledgeTagFilterSelect?.value || "all") !== "all";
-    knowledgeList.innerHTML = `<div class="empty-panel">${escapeHtml(hasActiveFilters ? langText("当前筛选条件下没有命中资料。可以清空检索词或切换目录、标签后再试。", "No knowledge items matched the current filters. Clear the search or switch folder/tag filters and try again.") : langText("当前知识库还是空的。先上传文档。", "The knowledge base is empty. Upload documents to get started."))}</div>`;
+      || (knowledgeCategoryFilterSelect?.value || "all") !== "all";
+    knowledgeList.innerHTML = `<div class="empty-panel">${escapeHtml(hasActiveFilters ? langText("当前筛选条件下没有命中资料。可以清空检索词或切换目录后再试。", "No knowledge items matched the current filters. Clear the search or switch folders and try again.") : langText("当前知识库还是空的。先上传文档。", "The knowledge base is empty. Upload documents to get started."))}</div>`;
     knowledgeDetail.innerHTML = `<div class="evidence-detail-empty">${escapeHtml(hasActiveFilters ? langText("命中片段、摘要和基础信息会在这里显示。", "Matched snippets, summaries, and metadata will appear here.") : langText("右侧会显示文档摘要、提取文本和基础信息。", "Document summary, extracted text, and metadata will appear here."))}</div>`;
     if (knowledgeSelectionPanel) {
       knowledgeSelectionPanel.innerHTML = "";
@@ -2812,7 +2842,7 @@ function renderKnowledgeBaseWorkspace() {
   }
   if (knowledgeEditorPanel) {
     knowledgeEditorPanel.innerHTML = [
-      `<div class="knowledge-summary-line">${escapeHtml(langText(`标签：${(activeEntry.tags || []).join(" / ") || "无"}`, `Tags: ${(activeEntry.tags || []).join(" / ") || "none"}`))}</div>`,
+      `<div class="knowledge-summary-line">${escapeHtml(langText(`原文件格式：${getKnowledgeEntryFormatLabel(activeEntry)}`, `Original format: ${getKnowledgeEntryFormatLabel(activeEntry)}`))}</div>`,
       `<div class="knowledge-summary-line">${escapeHtml(langText(`状态：${getKnowledgeConversionStatusLabel(activeEntry.conversionStatus)} · 分片 ${activeEntry.chunks?.length || 0} 段`, `Status: ${getKnowledgeConversionStatusLabel(activeEntry.conversionStatus)} · ${activeEntry.chunks?.length || 0} chunks`))}</div>`,
       `<div class="knowledge-summary-line">${escapeHtml(langText(`回溯：累计命中 ${activeEntry.retrievalCount || 0} 次${activeEntry.lastRetrievedAt ? ` · 最近 ${formatEvidenceCreatedAt(activeEntry.lastRetrievedAt)}` : ""}`, `History: ${activeEntry.retrievalCount || 0} hit(s)${activeEntry.lastRetrievedAt ? ` · Latest ${formatEvidenceCreatedAt(activeEntry.lastRetrievedAt)}` : ""}`))}</div>`,
       `<div class="knowledge-action-row">
@@ -2861,7 +2891,6 @@ async function buildKnowledgeEntryFromFile(file, options = {}) {
     importProfile.supported ? extractTextPreviewForFile(file) : Promise.resolve(""),
     readFileAsDataUrl(file).catch(() => ""),
   ]);
-  const extension = (String(file.name || "").match(/\.([A-Za-z0-9]+)$/)?.[1] || "").toUpperCase();
   const conversionStatus = !importProfile.supported
     ? "unsupported"
     : textPreview
@@ -2882,7 +2911,7 @@ async function buildKnowledgeEntryFromFile(file, options = {}) {
     type: file.type || "application/octet-stream",
     size: file.size || 0,
     category,
-    tags: uniqueStrings([extension].filter(Boolean)),
+    tags: [],
     summary,
     textPreview,
     normalizedFormat: importProfile.normalizedFormat,
@@ -4892,7 +4921,6 @@ function applyLanguageToStaticUi() {
   const knowledgeTitle = document.getElementById("knowledge-base-title");
   const knowledgeSearchLabel = document.getElementById("knowledge-search-label");
   const knowledgeCategoryFilterLabel = document.getElementById("knowledge-category-filter-label");
-  const knowledgeTagFilterLabel = document.getElementById("knowledge-tag-filter-label");
   const knowledgeUploadCategoryLabel = document.getElementById("knowledge-upload-category-label");
   const knowledgeListTitle = document.getElementById("knowledge-list-title");
   const knowledgeDetailTitle = document.getElementById("knowledge-detail-title");
@@ -4924,9 +4952,6 @@ function applyLanguageToStaticUi() {
   if (knowledgeCategoryFilterLabel) {
     knowledgeCategoryFilterLabel.textContent = langText("目录", "Folder");
   }
-  if (knowledgeTagFilterLabel) {
-    knowledgeTagFilterLabel.textContent = langText("标签", "Tags");
-  }
   if (knowledgeUploadCategoryLabel) {
     knowledgeUploadCategoryLabel.textContent = langText("上传到目录", "Upload to folder");
   }
@@ -4937,7 +4962,7 @@ function applyLanguageToStaticUi() {
     knowledgeDetailTitle.textContent = langText("详情", "Detail");
   }
   if (knowledgeSearchInput) {
-    knowledgeSearchInput.placeholder = langText("搜索标题、摘要、标签、正文", "Search title, summary, tags, or content");
+    knowledgeSearchInput.placeholder = langText("搜索标题、摘要、正文", "Search title, summary, or content");
   }
   const roundtableSectionLabel = document.getElementById("roundtable-workbench-section-label");
   const roundtableTitle = document.getElementById("roundtable-workbench-title");
@@ -4984,15 +5009,13 @@ function applyLanguageToStaticUi() {
   localizeSelectOptions(roundtableEvidenceFilterSelect, {
     all: langText("全部", "All"),
     web: langText("网页", "Web"),
+    knowledge: langText("知识", "Knowledge"),
     image: langText("图片", "Images"),
     video: langText("视频", "Video"),
     file: langText("文件", "Files"),
     text: langText("文本", "Text"),
   });
   renderKnowledgeCategoryOptions();
-  localizeSelectOptions(document.getElementById("knowledge-tag-filter"), {
-    all: langText("全部标签", "All Tags"),
-  });
   renderKnowledgeScopeUi();
   renderKnowledgeEnabledToggle();
   updateProfileTemplateHint(defaultProfileMap.get(providerTemplateSelect?.value) || null);
@@ -6284,6 +6307,10 @@ async function runDiscussionFlow() {
           label: "研",
           sublabel: langText("共享事实包", "Shared Brief"),
           body: state.sharedResearchBrief,
+          actions: buildKnowledgeReferenceChipsMarkup(filterKnowledgeEntries(getKnowledgeScopeEntries(), {
+            queryOverride: state.lastSummary || "",
+            categoryOverride: "all",
+          }).entries.slice(0, 4)),
           avatarLabel: "研",
           avatarClass: "avatar-system",
           tone: "system",
@@ -7395,6 +7422,9 @@ function getEvidenceListKindLabel(filterType) {
   if (filterType === "image") {
     return langText("图片", "Image");
   }
+  if (filterType === "knowledge") {
+    return langText("知识", "Knowledge");
+  }
   if (filterType === "file") {
     return langText("文件", "File");
   }
@@ -7484,7 +7514,7 @@ function getImageEvidenceAnalysisText() {
 
 function getSharedResearchEvidenceEntries() {
   return Array.isArray(state.sharedEvidenceEntries)
-    ? state.sharedEvidenceEntries.filter((entry) => entry && entry.sourceUrl)
+    ? state.sharedEvidenceEntries.filter(Boolean)
     : [];
 }
 
@@ -7521,7 +7551,7 @@ function getRoundtableEvidenceEntries() {
   const sharedEvidenceEntries = getSharedResearchEvidenceEntries().map((entry) => ({
     ...entry,
     listKindLabel: getEvidenceListKindLabel(entry.filterType),
-    sourceLabel: entry.sourceLabel || langText("网页搜索", "Web Search"),
+    sourceLabel: entry.sourceLabel || (entry.filterType === "knowledge" ? langText("本地知识库", "Local Knowledge") : langText("网页搜索", "Web Search")),
   }));
 
   const briefEntry = state.sharedResearchBrief ? [{
@@ -8421,7 +8451,6 @@ async function buildSharedResearchBriefFromSources(summary, moderatorProfile, or
     ? filterKnowledgeEntries(getKnowledgeScopeEntries(), {
       queryOverride: summary,
       categoryOverride: "all",
-      tagOverride: "all",
     })
     : { entries: [] };
   const localKnowledgeHits = (localKnowledgeResult.entries || []).slice(0, 4);
@@ -8433,6 +8462,8 @@ async function buildSharedResearchBriefFromSources(summary, moderatorProfile, or
     : "";
   if (localKnowledgeHits.length) {
     await recordKnowledgeRetrievalHits(summary, localKnowledgeHits, "shared_brief");
+    appendSharedEvidenceEntries(buildKnowledgeEvidenceEntries(localKnowledgeHits, summary, "shared_brief"));
+    renderRoundtableEvidenceWorkspace();
   }
   const prompt = [
     "你现在是这张圆桌唯一的共享 research agent。",
@@ -11355,7 +11386,6 @@ function bindEvents() {
   });
   knowledgeSearchInputField?.addEventListener("input", renderKnowledgeBaseWorkspace);
   knowledgeCategoryFilterSelect?.addEventListener("change", renderKnowledgeBaseWorkspace);
-  knowledgeTagFilterSelect?.addEventListener("change", renderKnowledgeBaseWorkspace);
   knowledgeList?.addEventListener("click", (event) => {
     const trigger = event.target.closest("[data-knowledge-id]");
     if (!trigger) {
@@ -11871,6 +11901,13 @@ function bindEvents() {
   });
 
   discussionStream.addEventListener("click", (event) => {
+    const knowledgeTrigger = event.target.closest("[data-open-knowledge-id]");
+    if (knowledgeTrigger) {
+      activeKnowledgeEntryId = knowledgeTrigger.dataset.openKnowledgeId || "";
+      openKnowledgeBase();
+      renderKnowledgeBaseWorkspace();
+      return;
+    }
     // 每条讨论消息的朗读控制按钮
     const msgItem = event.target.closest(".chat-item[data-has-voice]");
     if (msgItem) {

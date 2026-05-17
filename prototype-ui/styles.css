@@ -1102,6 +1102,10 @@ button {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+.roundtable-workbench-column .memory-card.knowledge-list-card {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
 .roundtable-workbench-column .memory-card-head {
   margin-bottom: 0;
   padding: 10px 12px 6px;
@@ -1374,6 +1378,41 @@ button {
 
 .knowledge-ingestion-copy.is-muted {
   color: var(--muted);
+}
+
+.chat-evidence-strip {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.chat-evidence-strip-title {
+  font-size: 11px;
+  color: var(--warm-soft);
+}
+
+.chat-evidence-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-evidence-chip {
+  appearance: none;
+  border: 1px solid rgba(94, 199, 212, 0.18);
+  background: rgba(94, 199, 212, 0.08);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.chat-evidence-chip:hover {
+  border-color: rgba(94, 199, 212, 0.35);
+  background: rgba(94, 199, 212, 0.14);
 }
 .evidence-detail-surface {
   display: grid;
