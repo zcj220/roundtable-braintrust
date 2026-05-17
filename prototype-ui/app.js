@@ -1429,6 +1429,43 @@ function formatDiscussionRetrievalStatusLabel(status) {
   return statusMap[status] || String(status || langText("未触发检索", "No retrieval"));
 }
 
+function buildDiscussionStatusDetailMarkup({ runtimeState, nextSpeakerPackage, knowledgeHits, evidenceGaps }) {
+  const sections = [];
+  if (nextSpeakerPackage?.handoffSummary || runtimeState.handoff?.current_round_summary) {
+    sections.push(`
+      <section class="discussion-status-detail-section">
+        <div class="discussion-status-detail-title">${escapeHtml(langText("交接摘要", "Handoff Summary"))}</div>
+        <div class="discussion-status-detail-copy">${escapeHtml(nextSpeakerPackage?.handoffSummary || runtimeState.handoff?.current_round_summary || "")}</div>
+      </section>
+    `);
+  }
+  if (knowledgeHits.length) {
+    sections.push(`
+      <section class="discussion-status-detail-section">
+        <div class="discussion-status-detail-title">${escapeHtml(langText("本地知识命中", "Local Knowledge Hits"))}</div>
+        <div class="discussion-status-detail-list">${knowledgeHits.map((item) => `<div>${escapeHtml(item)}</div>`).join("")}</div>
+      </section>
+    `);
+  }
+  if (nextSpeakerPackage?.webSearchSummary) {
+    sections.push(`
+      <section class="discussion-status-detail-section">
+        <div class="discussion-status-detail-title">${escapeHtml(langText("网页补充摘要", "Web Supplement"))}</div>
+        <div class="discussion-status-detail-copy">${escapeHtml(nextSpeakerPackage.webSearchSummary)}</div>
+      </section>
+    `);
+  }
+  if (evidenceGaps.length) {
+    sections.push(`
+      <section class="discussion-status-detail-section">
+        <div class="discussion-status-detail-title">${escapeHtml(langText("证据缺口", "Evidence Gaps"))}</div>
+        <div class="discussion-status-detail-list">${evidenceGaps.map((item) => `<div>${escapeHtml(item)}</div>`).join("")}</div>
+      </section>
+    `);
+  }
+  return sections.join("");
+}
+
 function renderDiscussionStatusPanel() {
   if (!discussionStatusPanel) {
     return;
@@ -1448,8 +1485,11 @@ function renderDiscussionStatusPanel() {
     || runtimeState.round > 0
     || !!nextSpeakerPackage
     || !!runtimeState.handoff;
+  const detailMarkup = buildDiscussionStatusDetailMarkup({ runtimeState, nextSpeakerPackage, knowledgeHits, evidenceGaps });
+  const hasDetail = !!detailMarkup.trim();
   discussionStatusPanel.classList.toggle("hidden", !shouldShow);
   if (!shouldShow) {
+    discussionStatusExpanded = false;
     return;
   }
   discussionStatusPhase.textContent = formatDiscussionPhaseLabel(runtimeState.phase);
@@ -1472,6 +1512,17 @@ function renderDiscussionStatusPanel() {
     nextSpeakerPackage?.webSearchSummary ? `网页补充：${summarizeText(nextSpeakerPackage.webSearchSummary, 140)}` : "",
     runtimeState.handoff?.current_round_summary ? `上一位交接：${runtimeState.handoff.current_round_summary}` : "",
   ].filter(Boolean).join("\n") || langText("系统还没有开始为任何角色准备资料。", "The system has not started preparing materials for any role yet.");
+  if (discussionStatusToggle) {
+    discussionStatusToggle.classList.toggle("hidden", !hasDetail);
+    discussionStatusToggle.setAttribute("aria-expanded", hasDetail && discussionStatusExpanded ? "true" : "false");
+    discussionStatusToggle.textContent = discussionStatusExpanded
+      ? langText("收起准备包", "Collapse Package")
+      : langText("展开准备包", "Expand Package");
+  }
+  if (discussionStatusDetail) {
+    discussionStatusDetail.classList.toggle("hidden", !hasDetail || !discussionStatusExpanded);
+    discussionStatusDetail.innerHTML = hasDetail && discussionStatusExpanded ? detailMarkup : "";
+  }
 }
 
 function getLatestSpeakerTurn(roundNotes = [], liveTurns = []) {
@@ -1683,6 +1734,7 @@ let activeRoundtableEvidenceId = "";
 let activeRoundtableEvidenceFilter = "all";
 let activeKnowledgeEntryId = "";
 let activeKnowledgePreviewMode = "normalized";
+let discussionStatusExpanded = false;
 const pendingEvidenceAnalysisIds = new Set();
 
 const peopleLibraryBackdrop = document.getElementById("people-library-backdrop");
@@ -1800,6 +1852,8 @@ const discussionStatusRetrieval = document.getElementById("discussion-status-ret
 const discussionStatusKnowledge = document.getElementById("discussion-status-knowledge");
 const discussionStatusGaps = document.getElementById("discussion-status-gaps");
 const discussionStatusSummary = document.getElementById("discussion-status-summary");
+const discussionStatusToggle = document.getElementById("discussion-status-toggle");
+const discussionStatusDetail = document.getElementById("discussion-status-detail");
 const cycleModeButton = document.getElementById("cycle-mode");
 const configMode = document.getElementById("config-mode");
 const configModeTooltip = document.getElementById("config-mode-tooltip");
@@ -12579,6 +12633,10 @@ function bindEvents() {
     }
     activeKnowledgePreviewMode = trigger.dataset.knowledgePreviewMode || "normalized";
     renderKnowledgeBaseWorkspace();
+  });
+  discussionStatusToggle?.addEventListener("click", () => {
+    discussionStatusExpanded = !discussionStatusExpanded;
+    renderDiscussionStatusPanel();
   });
 
   openRoundtableWorkbenchButton?.addEventListener("click", () => {

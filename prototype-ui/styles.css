@@ -861,6 +861,28 @@ button {
   gap: 12px;
 }
 
+.discussion-status-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.discussion-status-toggle {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.discussion-status-toggle:hover {
+  border-color: rgba(94, 199, 212, 0.35);
+  color: var(--text);
+}
+
 .discussion-status-phase {
   padding: 5px 10px;
   border-radius: 999px;
@@ -914,6 +936,39 @@ button {
   background: rgba(255, 255, 255, 0.025);
 }
 
+.discussion-status-detail {
+  display: grid;
+  gap: 10px;
+  padding: 12px 13px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.discussion-status-detail-section {
+  display: grid;
+  gap: 6px;
+}
+
+.discussion-status-detail-title {
+  color: var(--warm-soft);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.discussion-status-detail-copy,
+.discussion-status-detail-list {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.discussion-status-detail-list {
+  display: grid;
+  gap: 6px;
+}
+
 body.theme-light .discussion-status-panel {
   border-color: rgba(10, 127, 142, 0.14);
   background:
@@ -922,7 +977,8 @@ body.theme-light .discussion-status-panel {
 }
 
 body.theme-light .discussion-status-card,
-body.theme-light .discussion-status-summary {
+body.theme-light .discussion-status-summary,
+body.theme-light .discussion-status-detail {
   border-color: rgba(169, 121, 65, 0.12);
   background: rgba(255, 252, 247, 0.72);
 }
@@ -1204,7 +1260,7 @@ body.theme-light .discussion-status-phase {
 .knowledge-editor-panel {
   flex: 0 0 auto;
   height: auto;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .knowledge-detail {
@@ -1224,8 +1280,19 @@ body.theme-light .discussion-status-phase {
   align-items: stretch;
   align-content: start;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   gap: 0;
+}
+
+.knowledge-summary-strip,
+.knowledge-selection-panel,
+.knowledge-editor-panel {
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.knowledge-list {
+  overflow: auto;
 }
 
 .evidence-list {
@@ -1392,7 +1459,7 @@ body.theme-light .discussion-status-phase {
   display: block;
   min-height: 0;
   height: 100%;
-  overflow: auto;
+  overflow: hidden;
   padding: 6px 10px 10px;
 }
 
@@ -1400,7 +1467,7 @@ body.theme-light .discussion-status-phase {
   display: grid;
   gap: 6px;
   height: 100%;
-  min-height: 100%;
+  min-height: 0;
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
@@ -1533,7 +1600,7 @@ body.theme-light .discussion-status-phase {
 .knowledge-preview-viewport {
   min-height: 0;
   height: 100%;
-  overflow: auto;
+  overflow: hidden;
   padding: 12px;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -1541,6 +1608,9 @@ body.theme-light .discussion-status-phase {
 }
 
 .knowledge-preview-scroll {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--text);
@@ -1552,6 +1622,9 @@ body.theme-light .discussion-status-phase {
   display: grid;
   align-content: start;
   gap: 8px;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
 }
 
 .knowledge-preview-empty-title {
@@ -1569,6 +1642,9 @@ body.theme-light .discussion-status-phase {
 .knowledge-chunk-list {
   display: grid;
   gap: 12px;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
 }
 
 .knowledge-chunk-card {
@@ -1589,7 +1665,7 @@ body.theme-light .discussion-status-phase {
 .knowledge-source-image {
   width: 100%;
   height: 100%;
-  min-height: 520px;
+  min-height: 0;
   border: 0;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.02);
@@ -2456,6 +2532,17 @@ body.theme-light .knowledge-toolbar-fields .roundtable-filter-field {
 }
 
 #roundtable-workbench-modal .roundtable-workbench-grid {
+  min-height: 0;
+  height: 100%;
+  align-self: stretch;
+}
+
+#knowledge-base-modal {
+  overflow: hidden;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+
+#knowledge-base-modal .roundtable-workbench-grid {
   min-height: 0;
   height: 100%;
   align-self: stretch;

@@ -491,7 +491,10 @@
           <section class="discussion-status-panel hidden" id="discussion-status-panel" aria-live="polite">
             <div class="discussion-status-head">
               <p class="topic-tag">讨论状态</p>
-              <span class="discussion-status-phase" id="discussion-status-phase">空闲</span>
+              <div class="discussion-status-head-actions">
+                <button class="discussion-status-toggle hidden" id="discussion-status-toggle" type="button" aria-expanded="false">展开准备包</button>
+                <span class="discussion-status-phase" id="discussion-status-phase">空闲</span>
+              </div>
             </div>
             <div class="discussion-status-grid">
               <article class="discussion-status-card">
@@ -511,6 +514,7 @@
               </article>
             </div>
             <div class="discussion-status-summary" id="discussion-status-summary">系统还没有开始为任何角色准备资料。</div>
+            <div class="discussion-status-detail hidden" id="discussion-status-detail"></div>
           </section>
           <section class="discussion-stream chat-stream" id="discussion-stream"></section>
 
