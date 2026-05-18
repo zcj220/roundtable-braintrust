@@ -348,6 +348,25 @@ button {
   border-bottom: 1px solid var(--line);
 }
 
+.brand-copy {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.brand-topline {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.brand-topline .icon-button {
+  margin-left: auto;
+  flex: 0 0 auto;
+  align-self: flex-start;
+}
+
 .brand-topline,
 .side-title-row,
 .stage-header,
@@ -370,6 +389,18 @@ button {
   gap: 10px;
   flex-wrap: wrap;
 }
+.brand-topline {
+  position: relative;
+  display: block;
+  min-height: 34px;
+  padding-right: 48px;
+}
+.brand-topline .icon-button {
+  position: absolute;
+  top: 0;
+  right: 0;
+  margin-left: 0;
+}
 
 .brand-topline,
 .side-title-row,
@@ -387,16 +418,47 @@ button {
 .brand-cn {
   margin: 0;
   color: var(--warm-soft);
-  font-size: 19px;
-  letter-spacing: 0.08em;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1.08;
 }
 
 .brand-en {
-  margin: 4px 0 0;
+  margin: 0;
   color: var(--muted);
-  font-size: 11px;
-  letter-spacing: 0.18em;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  line-height: 1.1;
   text-transform: uppercase;
+}
+
+body.app-lang-zh .brand-en {
+  display: none;
+}
+
+body.app-lang-en .brand-cn {
+  display: none;
+}
+
+body.app-lang-en .brand-copy {
+  gap: 0;
+}
+
+body.app-lang-en .brand-en {
+  color: var(--warm-soft);
+  font-size: 19px;
+  letter-spacing: 0.1em;
+  line-height: 1.02;
+}
+
+body.app-lang-en .brand-block {
+  padding-bottom: 10px;
+}
+
+body.app-lang-en .icon-button {
+  margin-top: 0;
 }
 
 .icon-button,

@@ -3649,6 +3649,9 @@ function appendSharedEvidenceEntries(entries, limit = 40) {
 }
 
 function buildKnowledgeReferenceChipsMarkup(hits) {
+  if (!shouldExposeInternalWorkflow()) {
+    return "";
+  }
   if (!Array.isArray(hits) || !hits.length) {
     return "";
   }
@@ -5566,6 +5569,7 @@ function applyTopicSnapshot(snapshot) {
   state.pendingAttachments = snapshot.pendingAttachments || [];
   userInput.value = snapshot.userInput || "";
   discussionStream.innerHTML = snapshot.discussionHtml || "";
+  pruneHiddenWorkflowMessages();
   relocalizeDiscussionMessages();
   refreshTaskSummaryMessages();
   setSpeakerCard(
@@ -5778,6 +5782,13 @@ function pickFirstMatchingSegment(segments, patterns) {
 const UI_TEXT = {
   zh: {
     currentTopicLabel: "当前话题",
+    documentTitle: "圆桌智囊团 - 讨论工作台原型",
+    currentTopicFallbackTitle: "请先新建并确认一个话题",
+    liveStatusWaiting: "等待开始讨论",
+    discussionStatusTitle: "讨论状态",
+    discussionStatusTargetLabel: "当前目标",
+    discussionStatusStrategyLabel: "检索策略",
+    discussionStatusEvidenceLabel: "证据情况",
     followToggle: "跟随新消息",
     languageToggle: "EN",
     userInputPlaceholder: "直接输入你的要求。主 AI 会先在这里帮你整理、追问、确认。",
@@ -5901,6 +5912,13 @@ const UI_TEXT = {
   },
   en: {
     currentTopicLabel: "Current Topic",
+    documentTitle: "Roundtable Braintrust - Discussion Workspace Prototype",
+    currentTopicFallbackTitle: "Create and confirm a topic first",
+    liveStatusWaiting: "Waiting to start discussion",
+    discussionStatusTitle: "Discussion Status",
+    discussionStatusTargetLabel: "Current Target",
+    discussionStatusStrategyLabel: "Retrieval Strategy",
+    discussionStatusEvidenceLabel: "Evidence Status",
     followToggle: "Follow New Messages",
     languageToggle: "CN",
     userInputPlaceholder: "Type your request directly. The primary AI will first organize, question, and confirm it here.",
@@ -6085,6 +6103,7 @@ function getExpandedTaskSummaryLabels() {
 
 function applyLanguageToStaticUi() {
   document.documentElement.lang = state.appLanguage === "en" ? "en" : "zh-CN";
+  document.title = t("documentTitle");
   if (speakerAvatar && /^[\u7cfbS]$/.test((speakerAvatar.textContent || "").trim())) {
     speakerAvatar.textContent = langText("\u7cfb", "S");
   }
@@ -6094,6 +6113,18 @@ function applyLanguageToStaticUi() {
   const confirmSectionLabel = document.getElementById("confirm-section-label");
   if (confirmSectionLabel) {
     confirmSectionLabel.textContent = langText("确认操作", "Confirm Action");
+  }
+  if (confirmTitle && (/^(请确认这次操作|Please confirm this action)$/.test((confirmTitle.textContent || "").trim()) || !(confirmTitle.textContent || "").trim())) {
+    confirmTitle.textContent = langText("请确认这次操作", "Please confirm this action");
+  }
+  if (confirmMessage && (/^(这项操作会直接生效。|This action will take effect immediately\.)$/.test((confirmMessage.textContent || "").trim()) || !(confirmMessage.textContent || "").trim())) {
+    confirmMessage.textContent = langText("这项操作会直接生效。", "This action will take effect immediately.");
+  }
+  if (confirmCancel && (/^(取消|Cancel)$/.test((confirmCancel.textContent || "").trim()) || !(confirmCancel.textContent || "").trim())) {
+    confirmCancel.textContent = langText("取消", "Cancel");
+  }
+  if (confirmAccept && (/^(确认|Confirm)$/.test((confirmAccept.textContent || "").trim()) || !(confirmAccept.textContent || "").trim())) {
+    confirmAccept.textContent = langText("确认", "Confirm");
   }
   if (confirmModal?.classList.contains("open")) {
     if ((confirmCancel?.textContent || "").trim() === "取消" || (confirmCancel?.textContent || "").trim() === "Cancel") {
@@ -6106,11 +6137,36 @@ function applyLanguageToStaticUi() {
   if (currentTopicLabel) {
     currentTopicLabel.textContent = t("currentTopicLabel");
   }
+  const openSettingsDrawerButton = document.getElementById("open-settings-drawer");
+  if (openSettingsDrawerButton) {
+    openSettingsDrawerButton.setAttribute("aria-label", langText("打开设置", "Open Settings"));
+    openSettingsDrawerButton.title = langText("打开设置", "Open Settings");
+  }
   if (followToggle) {
     followToggle.textContent = t("followToggle");
   }
   if (appLanguageToggle) {
     appLanguageToggle.textContent = t("languageToggle");
+  }
+  if (speakerName && /^(任务整理中|Task Intake)$/.test((speakerName.textContent || "").trim())) {
+    speakerName.textContent = langText("任务整理中", "Task Intake");
+  }
+  if (speakerRole && /^(等待用户输入|Waiting for user input)$/.test((speakerRole.textContent || "").trim())) {
+    speakerRole.textContent = langText("等待用户输入", "Waiting for user input");
+  }
+  if (speakerDescription && /^(先整理，再确认，再生成人物。|First organize, then confirm, then generate participants\.)$/.test((speakerDescription.textContent || "").trim())) {
+    speakerDescription.textContent = langText("先整理，再确认，再生成人物。", "First organize, then confirm, then generate participants.");
+  }
+  if (currentTopicTitle && !state.activeTopicId) {
+    currentTopicTitle.textContent = t("currentTopicFallbackTitle");
+  }
+  if (liveStatusBanner) {
+    const liveStatusText = (liveStatusBanner.textContent || "").trim();
+    if (!liveStatusText || /^(等待开始讨论|Waiting to start discussion)$/.test(liveStatusText)) {
+      liveStatusBanner.textContent = t("liveStatusWaiting");
+    } else if (/^(目前无任务|目前还没有任务|No task yet)$/.test(liveStatusText)) {
+      liveStatusBanner.textContent = t("currentTaskEmpty");
+    }
   }
   if (userInput) {
     userInput.placeholder = t("userInputPlaceholder");
@@ -6364,6 +6420,17 @@ function applyLanguageToStaticUi() {
   setElementText("cycle-model-label", "cycleModelLabel");
   setElementText("discussion-rounds-label", "discussionRoundsLabel");
   setElementText("discussion-size-label", "discussionSizeLabel");
+  setElementText("discussion-status-title", "discussionStatusTitle");
+  setElementText("discussion-status-target-label", "discussionStatusTargetLabel");
+  setElementText("discussion-status-strategy-label", "discussionStatusStrategyLabel");
+  setElementText("discussion-status-evidence-label", "discussionStatusEvidenceLabel");
+  localizeSelectOptions(discussionSizeSelect, {
+    4: state.appLanguage === "en" ? "4 people" : "4 人",
+    5: state.appLanguage === "en" ? "5 people" : "5 人",
+    6: state.appLanguage === "en" ? "6 people" : "6 人",
+    7: state.appLanguage === "en" ? "7 people" : "7 人",
+    8: state.appLanguage === "en" ? "8 people" : "8 人",
+  });
   if (toggleTopicsButton) {
     toggleTopicsButton.textContent = topicList.classList.contains("expanded") ? t("toggleTopicsLess") : t("toggleTopicsMore");
   }
@@ -7892,22 +7959,24 @@ async function runDiscussionFlow() {
     updateSeatFeedback(langText("正在整理共享事实包，后续所有席位会共用这一份材料。", "Building a shared brief that all seats will use."), "pending");
     try {
       state.sharedResearchBrief = await buildSharedResearchBrief(state.lastSummary, moderatorProfile, orderedSpeakers, signal);
-      appendMarkup(
-        createMessageMarkup({
-          speakerId: "shared-research-agent",
-          label: "研",
-          sublabel: langText("共享事实包", "Shared Brief"),
-          body: state.sharedResearchBrief,
-          actions: buildKnowledgeReferenceChipsMarkup(filterKnowledgeEntries(getKnowledgeScopeEntries(), {
-            queryOverride: state.lastSummary || "",
-            categoryOverride: "all",
-          }).entries.slice(0, 4)),
-          avatarLabel: "研",
-          avatarClass: "avatar-system",
-          tone: "system",
-          showVoiceControls: true,
-        })
-      );
+      if (shouldExposeInternalWorkflow()) {
+        appendMarkup(
+          createMessageMarkup({
+            speakerId: "shared-research-agent",
+            label: "研",
+            sublabel: langText("共享事实包", "Shared Brief"),
+            body: state.sharedResearchBrief,
+            actions: buildKnowledgeReferenceChipsMarkup(filterKnowledgeEntries(getKnowledgeScopeEntries(), {
+              queryOverride: state.lastSummary || "",
+              categoryOverride: "all",
+            }).entries.slice(0, 4)),
+            avatarLabel: "研",
+            avatarClass: "avatar-system",
+            tone: "system",
+            showVoiceControls: true,
+          })
+        );
+      }
       void syncCurrentTopicSnapshot();
     } catch (error) {
       if (error?.name === "AbortError") throw error;
@@ -8048,10 +8117,16 @@ async function runDiscussionFlow() {
     setSpeakerCardForRole(moderatorRole, langText(`结束致辞 · ${getActiveRoleName(moderatorRole)}`, `Closing · ${getActiveRoleName(moderatorRole)}`), langText("所有轮次已完整结束，主持AI正在致辞。", "All rounds complete. Host AI is delivering closing remarks."));
     updateLiveStatus(langText("主持AI正在说结束致辞", "Host AI is delivering closing remarks"), "pending");
     const closingPrompt = [
-      `你是本场圆桌讨论的主持人，经过 ${targetRounds} 轮讨论，所有轮次已完整结束。`,
-      "请用 2 到 3 句话做简短的结束致辞：感谢各位参与，点明本次讨论到此圆满结束。语气真诚，简洁自然，不要重复已经说过的结论内容。",
+      langText(
+        `你是本场圆桌讨论的主持人，经过 ${targetRounds} 轮讨论，所有轮次已完整结束。`,
+        `You are the host of this roundtable discussion. All ${targetRounds} rounds have been completed.`
+      ),
+      langText(
+        "请用 2 到 3 句话做简短的结束致辞：感谢各位参与，点明本次讨论到此结束。语气真诚，简洁自然，不要重复已经说过的结论内容。",
+        "Write a brief closing in 2 to 3 sentences. Thank everyone for participating and make it clear that this discussion is now concluded. Keep the tone sincere, natural, and concise. Do not repeat the conclusions that were already given."
+      ),
       getModelOutputLanguageInstruction(),
-      state.lastSummary ? `本次话题：${state.lastSummary}` : "",
+      state.lastSummary ? langText(`本次话题：${state.lastSummary}`, `Topic: ${state.lastSummary}`) : "",
     ].filter(Boolean).join("\n\n");
     let closingText;
     try {
@@ -8060,6 +8135,7 @@ async function runDiscussionFlow() {
       if (closingErr?.name === "AbortError") throw closingErr;
       closingText = langText("本次圆桌讨论至此圆满结束。感谢各位的精彩发言，希望这场对话有所启发。", "This roundtable discussion has now come to a close. Thank you all for your insightful contributions — I hope this conversation has been illuminating.");
     }
+    closingText = sanitizeClosingTextForLanguage(closingText) || langText("本次圆桌讨论至此圆满结束。感谢各位的精彩发言，希望这场对话有所启发。", "This roundtable discussion has now come to a close. Thank you all for your thoughtful contributions.");
     appendRoleMessage(moderatorRole, langText(`结束致辞 · ${getActiveRoleName(moderatorRole)}`, `Closing · ${getActiveRoleName(moderatorRole)}`), closingText, moderatorProfile.displayName);
 
     state.discussionRounds = targetRounds;
@@ -8361,6 +8437,14 @@ function appendMarkup(markup) {
   if (state.autoFollow && !(state.voiceReadEnabled && (activeReadAloudUtterance || readAloudQueue.length))) {
     scrollToLatest();
   }
+}
+
+function pruneHiddenWorkflowMessages() {
+  if (!discussionStream || shouldExposeInternalWorkflow()) {
+    return;
+  }
+  discussionStream.querySelectorAll('.chat-item[data-speaker-id="shared-research-agent"]').forEach((item) => item.remove());
+  discussionStream.querySelectorAll(".chat-evidence-strip").forEach((item) => item.remove());
 }
 
 function getPeopleRoleById(roleId) {
@@ -9461,7 +9545,12 @@ function closeModelProfileModal() {
 
 async function setAppLanguage(nextLanguage) {
   state.appLanguage = nextLanguage === "en" ? "en" : "zh";
+  applyLanguageToBody();
   applyLanguageToStaticUi();
+  pruneHiddenWorkflowMessages();
+  renderKnowledgeBaseWorkspace();
+  renderRoundtableEvidenceWorkspace();
+  renderDiscussionStatusPanel();
   setRoleEditorFieldVisibility();
   renderThemeToggle();
   updateCompactSummary();
@@ -9479,6 +9568,22 @@ async function setAppLanguage(nextLanguage) {
 
 function applyThemeToBody() {
   document.body.classList.toggle("theme-light", state.appTheme === "light");
+}
+
+function applyLanguageToBody() {
+  document.body.classList.toggle("app-lang-en", state.appLanguage === "en");
+  document.body.classList.toggle("app-lang-zh", state.appLanguage !== "en");
+}
+
+function sanitizeClosingTextForLanguage(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (state.appLanguage === "en" && /[\u4e00-\u9fff]/.test(normalized)) {
+    return "This roundtable discussion has now come to a close. Thank you all for your thoughtful contributions.";
+  }
+  return normalized;
 }
 
 function renderThemeToggle() {
@@ -13947,6 +14052,7 @@ async function init() {
     window.speechSynthesis.getVoices();
   }
   applyThemeToBody();
+  applyLanguageToBody();
   applyLanguageToStaticUi();
   setRoleEditorFieldVisibility();
   renderThemeToggle();
