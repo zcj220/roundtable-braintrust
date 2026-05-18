@@ -1601,7 +1601,8 @@ function getLatestSpeakerTurn(roundNotes = [], liveTurns = []) {
   }
   const latestRound = [...(roundNotes || [])].reverse().find((note) => Array.isArray(note?.turns) && note.turns.length);
   if (!latestRound) {
-    return null;
+    // 第 1 轮第 1 位发言者：使用主持人开场生成的 handoff 作为初始 previousTurn
+    return state.openingHandoffTurn || null;
   }
   return [...latestRound.turns].reverse().find((turn) => turn?.role?.id && turn.role.id !== "user-round-input") || null;
 }
@@ -1859,6 +1860,7 @@ const state = {
   generatingSeats: false,
   lastSummary: "",
   sharedResearchBrief: "",
+  openingHandoffTurn: null,
   sharedEvidenceEntries: [],
   autoTranslateEvidence: true,
   pendingRoleClarification: [],
@@ -2255,6 +2257,7 @@ function normalizeKnowledgeEntries(records) {
         type: record.type || "application/octet-stream",
         size: Number(record.size || 0),
         category: record.category || "reference",
+        description: record.description || "",
         tags: Array.isArray(record.tags) ? record.tags.filter(Boolean) : [],
         summary: record.summary || "",
         textPreview: record.textPreview || "",
@@ -3513,6 +3516,34 @@ function buildKnowledgeCatalogSummary(entries) {
     .map((item) => `${getKnowledgeCategoryLabel(item.categoryKey)} ${item.ready}/${item.total}`)
     .slice(0, 5)
     .join(" · ");
+}
+
+// 为 AI prompt 生成可读的知识库目录（含每条文件的说明/摘要），让 AI 在写 handoff 时知道本地有什么可以检索
+function buildKnowledgeCatalogForAI(entries) {
+  if (!Array.isArray(entries) || !entries.length) {
+    return "";
+  }
+  const readyEntries = entries.filter((e) => e.conversionStatus === "ready");
+  if (!readyEntries.length) {
+    return "";
+  }
+  // 按目录分组
+  const grouped = new Map();
+  readyEntries.forEach((entry) => {
+    const cat = entry.category || "reference";
+    if (!grouped.has(cat)) grouped.set(cat, []);
+    grouped.get(cat).push(entry);
+  });
+  const lines = [`本地知识库（已入库 ${readyEntries.length} 条）：`];
+  [...grouped.entries()].sort((a, b) => b[1].length - a[1].length).forEach(([cat, catEntries]) => {
+    const label = getKnowledgeCategoryLabel(cat);
+    catEntries.slice(0, 8).forEach((entry) => {
+      const desc = entry.description || entry.summary || summarizeText(entry.textPreview || "", 60);
+      const descPart = desc ? ` — ${desc}` : "";
+      lines.push(`[${label}] ${entry.title}${descPart}`);
+    });
+  });
+  return lines.join("\n");
 }
 
 function buildKnowledgeNormalizedPayload(entry) {
@@ -7678,24 +7709,77 @@ async function runDiscussionFlow() {
       state.sharedResearchBrief = "";
     }
 
+    const firstSpeakerRole = orderedSpeakers[0] || null;
+    const knowledgeCatalogBlock = state.knowledgeEnabled ? buildKnowledgeCatalogForAI(getKnowledgeScopeEntries()) : "";
+    const firstSpeakerHandoffInstruction = firstSpeakerRole
+      ? [
+          `开场发言完毕后，请你立刻切换身份，站在第一位发言者「${getActiveRoleName(firstSpeakerRole)}」`,
+          `（${getActiveRoleDescription(firstSpeakerRole) || getActiveRoleSeat(firstSpeakerRole)}）的角度，`,
+          `为系统生成一份资料准备需求。这份需求只给系统用，用户看不到。`,
+          `\n\n请以如下 JSON 格式输出（先输出开场发言，然后紧跟一段裸 JSON，不加 Markdown 代码块标记）:\n`,
+          `{"opening_message":"...开场发言正文，180-320字，段落间用换行...",`,
+          `"first_speaker_handoff":{"next_role_id":"${firstSpeakerRole.id}",`,
+          `"next_role_focus":"一句话说明${getActiveRoleName(firstSpeakerRole)}最应聚焦的角度",`,
+          `"local_knowledge_needed":["本地知识库里最有帮助的条目标题，最多3条"],`,
+          `"web_search_needed":["如本地不足则补查的英文关键词，最多2条"],`,
+          `"preferred_categories":["优先目录，如product、company"],`,
+          `"preferred_keywords":["检索关键词，最多4个"]}}`,
+        ].join("")
+      : "篇幅控制在 180 到 320 字，不要写成提纲，每个自然段之间用换行分隔。";
     const openingPrompt = [
-      `你现在是本场圆桌的主持人，需要在正式讨论前做开场。`,
+      `你现在是本场圆桐的主持人，需要在正式讨论前做开场。`,
       `任务定义：${state.lastSummary}`,
       state.sharedResearchBrief ? `共享事实包：${state.sharedResearchBrief}` : "",
+      knowledgeCatalogBlock ? `本地知识库目录（供你决定检索方向）:\n${knowledgeCatalogBlock}` : "",
       getOpeningModeInstruction(),
       getModelOutputLanguageInstruction(),
       rolePromptBlock(moderatorRole),
       `本次讨论顺序：${orderedSpeakers.map((role, index) => `${index + 1}.${getActiveRoleName(role)}`).join("，")}`,
-      "请先说明今天讨论的主题、基本规则和切入方式，再邀请各位嘉宾按自己的身份先抛出最值得优先展开的问题、证据或解释方向。",
-      "不要在开场里预先给每位嘉宾分配固定子题，也不要提前规定谁只能讲哪个角度，更不要用“首先、其次、最后”把整场讨论定死。你只负责打开讨论场，让桌上的人自己往外长。",
+      "请先说明今天讨论的主题、基本规则和切入方式，再邀请各位嵌宾按自己的身份先抛出最值得优先展开的问题、证据或解释方向。",
+      "不要在开场里预先给每位嵌宾分配固定子题，也不要提前规定谁只能讲哪个角度，更不要用“首先、其次、最后”把整场讨论定死。你只负责打开讨论场，让桌上的人自己往外长。",
       "绝对不要输出 thinking process、英文分析草稿、自检步骤、constraint list 或任何内部推理过程。",
-      "篇幅控制在 180 到 320 字，不要写成提纲，每个自然段之间用换行分隔。",
-    ].join("\n\n");
+      firstSpeakerHandoffInstruction,
+    ].filter(Boolean).join("\n\n");
     setSpeakerCardForRole(moderatorRole, langText("开场前 · 正在思考", "Before Opening · Thinking"), langText("正在整理今天这场讨论的主题、顺序和焦点。", "Organizing the topic, order, and focal tensions for today's discussion."));
     updateLiveStatus(langText(`开场：${getActiveRoleName(moderatorRole)} 正在思考`, `Opening: ${getActiveRoleName(moderatorRole)} is thinking`), "pending");
-    const openingText = await requestModelText(moderatorProfile, openingPrompt, Math.min(520, budget.participant), signal);
+    const rawOpeningResponse = await requestModelText(moderatorProfile, openingPrompt, Math.min(860, budget.participant + 360), signal);
+    // 尝试解析结构化输出，提取开场文字和给第一位发言者的资料准备 handoff
+    let openingText = rawOpeningResponse;
+    state.openingHandoffTurn = null;
+    try {
+      const jsonMatch = rawOpeningResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed && parsed.opening_message) {
+          openingText = sanitizeDisplayedModelText(String(parsed.opening_message).trim());
+          if (firstSpeakerRole && parsed.first_speaker_handoff && typeof parsed.first_speaker_handoff === "object") {
+            const h = parsed.first_speaker_handoff;
+            state.openingHandoffTurn = {
+              role: moderatorRole,
+              text: openingText,
+              searchDigest: "",
+              handoff: {
+                next_role_id: String(h.next_role_id || firstSpeakerRole.id || "").trim(),
+                next_role_focus: String(h.next_role_focus || "").trim(),
+                local_knowledge_needed: normalizeClarificationQuestions(h.local_knowledge_needed || []),
+                web_search_needed: normalizeClarificationQuestions(h.web_search_needed || []),
+                preferred_categories: normalizeClarificationQuestions(h.preferred_categories || []),
+                preferred_keywords: normalizeClarificationQuestions(h.preferred_keywords || []),
+                avoid_categories: [],
+                missing_evidence_types: [],
+                current_round_summary: "",
+                recommended_counterpoints: [],
+              },
+            };
+            console.log("[opening-handoff] 主持人已为第一位发言者生成资料准备需求", state.openingHandoffTurn.handoff);
+          }
+        }
+      }
+    } catch (parseErr) {
+      console.warn("[opening-handoff] JSON 解析失败，退化为纯文本开场", parseErr);
+      openingText = rawOpeningResponse;
+    }
     appendRoleMessage(moderatorRole, formatOpeningMessageLabel(moderatorRole), openingText, moderatorProfile.displayName);
-
     let compressedHistory = "";
 
     while (currentRound <= targetRounds) {
