@@ -1,0 +1,69 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'memory_ai_flutter/**'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      
+    - name: 设置Flutter环境
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.24.0'
+        channel: 'stable'
+        
+    - name: 获取Flutter依赖
+      working-directory: ./memory_ai_flutter
+      run: flutter pub get
+      
+    - name: 构建iOS IPA (无签名)
+      working-directory: ./memory_ai_flutter
+      run: |
+        flutter build ios --release --no-codesign
+        
+    - name: 创建IPA包
+      working-directory: ./memory_ai_flutter
+      run: |
+        mkdir -p Payload
+        cp -r build/ios/iphoneos/Runner.app Payload/
+        zip -r app-release.ipa Payload
+        
+    - name: 上传IPA到Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ios-ipa
+        path: memory_ai_flutter/app-release.ipa
+        retention-days: 30
+        
+    - name: 创建Release (仅在推送到main/master时)
+      if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ github.run_number }}-ios
+        name: iOS Release v${{ github.run_number }}
+        body: |
+          ## 追忆彼岸 iOS 版本
+          
+          **构建时间**: ${{ github.event.head_commit.timestamp }}
+          **提交信息**: ${{ github.event.head_commit.message }}
+          
+          ### 下载说明
+          - 下载 `app-release.ipa` 文件
+          - ⚠️ 此IPA未签名,需要自行签名后才能安装
+          - 或使用AltStore/Sideloadly等工具安装
+          
+        files: |
+          memory_ai_flutter/app-release.ipa
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
