@@ -3673,3 +3673,33 @@ body.theme-light .compact-composer {
     font-size: 11px;
   }
 }
+
+/* ── 背景补充文本框 ── */
+.role-background-textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  box-sizing: border-box;
+  margin-top: 6px;
+  font-family: inherit;
+}
+
+.role-background-textarea::placeholder {
+  color: var(--text-dim, rgba(255, 255, 255, 0.3));
+}
+
+/* ── 续轮决策按钮行 ── */
+.continuation-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 8px;
+}

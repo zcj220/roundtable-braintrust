@@ -3,7 +3,8 @@ const DB_VERSION = 1;
 const ROLE_STORE = "peopleRoles";
 const PROFILE_STORE = "modelProfiles";
 const APP_STATE_STORE = "appState";
-const MODEL_REQUEST_TIMEOUT_MS = 90000;
+const MODEL_REQUEST_TIMEOUT_MS = 120000;
+const JUDGE_REQUEST_TIMEOUT_MS = 180000;
 const ROLE_PLANNING_TIMEOUT_MS = 45000;
 const ROLE_GENERATION_TIMEOUT_MS = 120000;
 const ROLE_EMERGENCY_TIMEOUT_MS = 120000;
@@ -1529,69 +1530,9 @@ function renderDiscussionStatusPanel() {
   if (!discussionStatusPanel) {
     return;
   }
-  const runtimeState = normalizeDiscussionState(state.discussionState || buildEmptyDiscussionState());
-  const nextSpeakerPackage = runtimeState.nextSpeakerPackage || null;
-  const targetRole = runtimeState.speakerRoleId
-    ? getRoleById(runtimeState.speakerRoleId)
-    : (nextSpeakerPackage?.targetRoleId ? getRoleById(nextSpeakerPackage.targetRoleId) : null);
-  const nextRole = runtimeState.nextRoleId ? getRoleById(runtimeState.nextRoleId) : null;
-  const knowledgeHits = Array.isArray(nextSpeakerPackage?.localKnowledgeHits) ? nextSpeakerPackage.localKnowledgeHits : [];
-  const evidenceGaps = uniqueStrings(normalizeClarificationQuestions([
-    ...(runtimeState.knowledgeGate?.evidenceGaps || []),
-    ...(nextSpeakerPackage?.evidenceGaps || []),
-  ])).slice(0, 3);
-  const shouldShow = runtimeState.phase !== "idle"
-    || runtimeState.round > 0
-    || !!nextSpeakerPackage
-    || !!runtimeState.handoff;
-  const detailMarkup = buildDiscussionStatusDetailMarkup({ runtimeState, nextSpeakerPackage, knowledgeHits, evidenceGaps });
-  const hasDetail = !!detailMarkup.trim();
-  discussionStatusPanel.classList.toggle("hidden", !shouldShow);
-  if (!shouldShow) {
-    discussionStatusExpanded = false;
-    return;
-  }
-  discussionStatusPhase.textContent = formatDiscussionPhaseLabel(runtimeState.phase);
-  const targetRoleLabel = targetRole
-    ? `${getActiveRoleName(targetRole)}（${getActiveRoleSeat(targetRole)}）`
-    : String(nextSpeakerPackage?.targetRoleName || "").trim();
-  discussionStatusTarget.textContent = targetRoleLabel || langText("等待角色进入", "Waiting for role");
-  discussionStatusRound.textContent = runtimeState.round > 0
-    ? langText(`第 ${runtimeState.round}/${runtimeState.totalRounds || "-"} 轮${nextRole ? `，下一位 ${getActiveRoleName(nextRole)}` : ""}`, `Round ${runtimeState.round}/${runtimeState.totalRounds || "-"}${nextRole ? `, next ${getActiveRoleName(nextRole)}` : ""}`)
-    : langText("尚未进入轮次", "No round yet");
-  discussionStatusStrategy.textContent = formatRetrievalStrategyLabel(nextSpeakerPackage?.retrievalStrategy || runtimeState.knowledgeGate?.retrievalStrategy || "context_only");
-  discussionStatusRetrieval.textContent = formatDiscussionRetrievalStatusLabel(runtimeState.retrievalStatus);
-  discussionStatusKnowledge.textContent = langText(`本地命中 ${knowledgeHits.length} 条`, `${knowledgeHits.length} local hits`);
-  discussionStatusGaps.textContent = evidenceGaps.length
-    ? evidenceGaps.join("；")
-    : langText("当前没有明显证据缺口", "No clear evidence gap right now");
-  discussionStatusSummary.textContent = shouldExposeInternalWorkflow()
-    ? ([
-      nextSpeakerPackage?.handoffFocus ? `当前重点：${nextSpeakerPackage.handoffFocus}` : "",
-      nextSpeakerPackage?.decisionRationale ? `策略说明：${nextSpeakerPackage.decisionRationale}` : "",
-      knowledgeHits.length ? `本地知识：${knowledgeHits.slice(0, 2).join("；")}` : "",
-      nextSpeakerPackage?.webSearchSummary ? `网页补充：${summarizeText(nextSpeakerPackage.webSearchSummary, 140)}` : "",
-      runtimeState.handoff?.current_round_summary ? `上一位交接：${runtimeState.handoff.current_round_summary}` : "",
-    ].filter(Boolean).join("\n") || langText("系统还没有开始为任何角色准备资料。", "The system has not started preparing materials for any role yet."))
-    : ([
-      runtimeState.phase === "speaker_preparing" ? langText("系统正在为当前角色整理参考材料。", "The system is preparing references for the current role.") : "",
-      runtimeState.phase === "speaker_speaking" ? langText("当前角色已进入正式发言阶段。", "The current role has entered the speaking phase.") : "",
-      runtimeState.retrievalStatus === "local_only" ? langText("已优先结合本地知识。", "Local knowledge has been applied first.") : "",
-      runtimeState.retrievalStatus === "local_first_web_supplement" ? langText("已先结合本地知识，再补充公开资料。", "Local knowledge has been applied first, then public sources were added.") : "",
-      runtimeState.retrievalStatus === "web_first" ? langText("当前主要依赖公开资料补充判断。", "The current role is relying mainly on public sources.") : "",
-      knowledgeHits.length ? langText(`当前已命中 ${knowledgeHits.length} 条本地知识。`, `${knowledgeHits.length} local knowledge hits are currently available.`) : "",
-    ].filter(Boolean).join("\n") || langText("系统会在讨论推进时自动整理相关参考材料。", "The system will automatically prepare relevant references as the discussion advances."));
-  if (discussionStatusToggle) {
-    discussionStatusToggle.classList.toggle("hidden", !hasDetail || !shouldExposeInternalWorkflow());
-    discussionStatusToggle.setAttribute("aria-expanded", hasDetail && discussionStatusExpanded ? "true" : "false");
-    discussionStatusToggle.textContent = discussionStatusExpanded
-      ? langText("收起准备包", "Collapse Package")
-      : langText("展开准备包", "Expand Package");
-  }
-  if (discussionStatusDetail) {
-    discussionStatusDetail.classList.toggle("hidden", !hasDetail || !discussionStatusExpanded);
-    discussionStatusDetail.innerHTML = hasDetail && discussionStatusExpanded ? detailMarkup : "";
-  }
+  // 讨论状态面板属于内部运行元数据（检索策略、命中条数等），对用户无实际意义，始终隐藏
+  discussionStatusPanel.classList.add("hidden");
+  discussionStatusExpanded = false;
 }
 
 function getLatestSpeakerTurn(roundNotes = [], liveTurns = []) {
@@ -1632,10 +1573,21 @@ function collectLocalKnowledgeHitsForSpeaker({ summary, speakerRole, previousTur
     queryOverride: query,
     categoryOverride: "all",
   });
-  return {
-    query,
-    hits: (result.entries || []).slice(0, 3),
-  };
+  const rawHits = (result.entries || []).slice(0, 3);
+  // 锚点补丁：若命中的不是第1块，附加第1块文本作为文档定义锚点，防止 AI 误读项目性质
+  const hits = rawHits.map((entry) => {
+    const chunkIdx = entry.searchChunkIndex || 1;
+    if (chunkIdx <= 1) return entry;
+    const chunks = Array.isArray(entry.chunks) ? entry.chunks : [];
+    const anchorChunk = chunks.find((c) => (c.chunkIndex || 1) === 1);
+    if (!anchorChunk?.text) return entry;
+    const anchorText = summarizeText(anchorChunk.text, 150);
+    return {
+      ...entry,
+      searchSnippet: `[文档定义·第1段] ${anchorText}\n[命中段落·第${chunkIdx}段] ${entry.searchSnippet || ""}`,
+    };
+  });
+  return { query, hits };
 }
 
 async function prepareNextSpeakerPackage({ summary, speakerRole, previousTurn, knowledgeGate, speakerSearchDigest, liveTurns, roundNotes }) {
@@ -1740,6 +1692,7 @@ function buildPreparedTurnInput({
       "JSON 必须包含字段：speaker_message, speaker_claims, speaker_risks, speaker_open_questions, handoff。",
       "handoff 必须包含字段：next_role_id, next_role_focus, local_knowledge_needed, web_search_needed, preferred_categories, preferred_keywords, avoid_categories, missing_evidence_types, current_round_summary, recommended_counterpoints。",
       "speaker_message 只写当前角色面向用户的正式发言正文，不要泄露 handoff 内容。handoff 只写给系统和下一位的资料准备信息，不要把下一位的正式发言写出来。",
+      "speaker_message 不要以『我是…』『大家好，我是…』等方式开头自我介绍，其他人已经知道你是谁，直接切入你的论点或观察。",
       "如果没有足够依据，就在 speaker_message 里明确承认；不要为了凑 JSON 字段而编造证据。数组字段没有内容时返回空数组。",
       `speaker_message 篇幅要求：${budgetHint}`,
       "绝对不要输出 thinking process、analyze user input、自检步骤、constraint list 或任何内部推理过程。",
@@ -1856,6 +1809,8 @@ const state = {
   latestReportText: "",
   latestReportFileName: "",
   discussionRoundNotes: [],
+  judgeLog: [],
+  roleBackgroundContext: "",
   discussionState: buildEmptyDiscussionState(),
   recommendedRoleGenerationMeta: null,
   aiAutoRecommendEnabled: true,
@@ -1904,6 +1859,7 @@ const state = {
 let pendingConfirmResolver = null;
 let pendingUserParticipationResolver = null;
 let pendingDiscussionContinuationResolver = null;
+let pendingContinuationButtonCard = null;
 let activeRoundtableEvidenceId = "";
 let activeRoundtableEvidenceFilter = "all";
 let activeKnowledgeEntryId = "";
@@ -3544,7 +3500,11 @@ function buildKnowledgeCatalogForAI(entries) {
   [...grouped.entries()].sort((a, b) => b[1].length - a[1].length).forEach(([cat, catEntries]) => {
     const label = getKnowledgeCategoryLabel(cat);
     catEntries.slice(0, 8).forEach((entry) => {
-      const desc = entry.description || entry.summary || summarizeText(entry.textPreview || "", 60);
+      // 优先用用户写的 description，其次 summary，最后用第1块原文作为文档定义
+      const chunk1Text = Array.isArray(entry.chunks)
+        ? (entry.chunks.find((c) => (c.chunkIndex || 1) === 1)?.text || "")
+        : "";
+      const desc = entry.description || entry.summary || summarizeText(chunk1Text || entry.textPreview || "", 80);
       const descPart = desc ? ` — ${desc}` : "";
       lines.push(`[${label}] ${entry.title}${descPart}`);
     });
@@ -3639,7 +3599,7 @@ async function recordKnowledgeRetrievalHits(query, hits, context = "shared_brief
 function buildKnowledgeEvidenceEntries(hits, query, context = "shared_brief") {
   const createdAtBase = Date.now();
   return (Array.isArray(hits) ? hits : []).map((entry, index) => ({
-    id: `knowledge-hit:${entry.id}:${createdAtBase}:${index}`,
+    id: `knowledge-hit:${entry.id}:chunk${entry.searchChunkIndex || 0}`,
     label: entry.title || langText("知识片段", "Knowledge Hit"),
     kind: langText("知识库", "Knowledge Base"),
     filterType: "knowledge",
@@ -3667,10 +3627,25 @@ function appendSharedEvidenceEntries(entries, limit = 40) {
   if (!Array.isArray(entries) || !entries.length) {
     return;
   }
-  state.sharedEvidenceEntries = [
-    ...(Array.isArray(state.sharedEvidenceEntries) ? state.sharedEvidenceEntries : []).filter(Boolean),
-    ...entries,
-  ].slice(-limit);
+  const existing = (Array.isArray(state.sharedEvidenceEntries) ? state.sharedEvidenceEntries : []).filter(Boolean);
+  const merged = [...existing];
+  for (const entry of entries) {
+    const existingIdx = merged.findIndex((e) => e.id === entry.id);
+    if (existingIdx >= 0) {
+      const prev = merged[existingIdx];
+      const refCount = (prev._refCount || 1) + 1;
+      const baseLabel = prev._baseSourceLabel || prev.sourceLabel;
+      merged[existingIdx] = {
+        ...prev,
+        _refCount: refCount,
+        _baseSourceLabel: baseLabel,
+        sourceLabel: `${baseLabel} · 被 ${refCount} 位发言者引用`,
+      };
+    } else {
+      merged.push({ ...entry, _refCount: 1, _baseSourceLabel: entry.sourceLabel });
+    }
+  }
+  state.sharedEvidenceEntries = merged.slice(-limit);
 }
 
 function buildKnowledgeReferenceChipsMarkup(hits) {
@@ -4976,7 +4951,8 @@ function buildKnowledgeGateDecision({ summary, speakerRole, nextRole, liveTurns 
   const handoffNeedsWeb = !!previousTurn?.handoff?.web_search_needed?.length;
   const handoffMissingEvidence = !!previousTurn?.handoff?.missing_evidence_types?.length;
   const shouldUseLocalKnowledge = !!hits.length;
-  const shouldUseWebSearch = handoffNeedsWeb || !hits.length || (hits.length < 2 && handoffMissingEvidence);
+  // 本地命中不压制网搜：知识库通常存内部规则/私有数据，网络提供公开事实，两者互补
+  const shouldUseWebSearch = shouldUseLocalKnowledge || handoffNeedsWeb || handoffMissingEvidence;
   const retrievalStrategy = shouldUseLocalKnowledge
     ? (shouldUseWebSearch ? "local_first_web_supplement" : "local_only")
     : (shouldUseWebSearch ? "web_first" : "context_only");
@@ -4987,12 +4963,12 @@ function buildKnowledgeGateDecision({ summary, speakerRole, nextRole, liveTurns 
   ]).slice(0, 4);
   const webSearchReasons = uniqueStrings([
     handoffNeedsWeb ? "上一位 handoff 明确要求补网页公开资料" : "",
+    shouldUseLocalKnowledge ? "本地知识库命中，同步补查网页公开事实做交叉验证" : "",
     !hits.length ? "本地没有形成足够可用命中" : "",
-    hits.length < 2 && handoffMissingEvidence ? "本地命中偏少，且上一位指出仍缺关键证据" : "",
+    handoffMissingEvidence ? "上一位指出仍缺关键公开证据" : "",
   ]).slice(0, 3);
   const skippedSignals = uniqueStrings([
-    shouldUseLocalKnowledge && !shouldUseWebSearch ? "当前本地命中已足够支撑本轮，暂不额外补网页" : "",
-    !shouldUseLocalKnowledge && !shouldUseWebSearch ? "当前没有明确检索信号，先只依赖上下文推进" : "",
+    !shouldUseLocalKnowledge && !shouldUseWebSearch ? "当前没有明确检索触发信号，先只依赖上下文推进" : "",
   ]).slice(0, 2);
   const categories = uniqueStrings(hits.map((entry) => getKnowledgeCategoryLabel(entry.category))).slice(0, 3);
   const keywords = uniqueStrings([
@@ -5180,6 +5156,15 @@ function sanitizeDisplayedModelText(text) {
       text = text.slice(chineseParagraph.index).trim();
     }
   }
+  // 剥离 markdown 代码围栏（整段包裹在 ```json ... ``` 或 ``` ... ``` 里）
+  const fencedBlock = text.match(/^```[a-z]*\s*\n([\s\S]*?)\n?```\s*$/i);
+  if (fencedBlock?.[1]) {
+    text = fencedBlock[1].trim();
+  }
+  // 截断响应：只有开头围栏、没有结尾围栏（模型回复被截断）
+  if (/^```[a-z]*\s*\n/i.test(text)) {
+    text = text.replace(/^```[a-z]*\s*\n/i, "").trim();
+  }
   return text
     .replace(/^here'?s a thinking process:?.*$/gim, "")
     .replace(/^thinking process:?.*$/gim, "")
@@ -5349,6 +5334,8 @@ function stopDiscussionFlow() {
     pendingUserParticipationResolver({ aborted: true });
   }
   if (pendingDiscussionContinuationResolver) {
+    pendingContinuationButtonCard?.remove();
+    pendingContinuationButtonCard = null;
     pendingDiscussionContinuationResolver({ aborted: true });
   }
   state.discussionAbortController?.abort();
@@ -5416,6 +5403,7 @@ function buildCurrentTopicSnapshot() {
     sharedResearchBrief: state.sharedResearchBrief,
     sharedEvidenceEntries: Array.isArray(state.sharedEvidenceEntries) ? state.sharedEvidenceEntries : [],
     rolePlanningBrief: state.rolePlanningBrief,
+    roleBackgroundContext: state.roleBackgroundContext,
     projectMemory: normalizeProjectMemory(state.projectMemory),
     pendingRoleClarification: [...state.pendingRoleClarification],
     taskSupplementMode: state.taskSupplementMode,
@@ -5545,6 +5533,7 @@ function applyTopicSnapshot(snapshot) {
   state.sharedResearchBrief = snapshot.sharedResearchBrief || "";
   state.sharedEvidenceEntries = Array.isArray(snapshot.sharedEvidenceEntries) ? snapshot.sharedEvidenceEntries.filter(Boolean) : [];
   state.rolePlanningBrief = snapshot.rolePlanningBrief || "";
+  state.roleBackgroundContext = snapshot.roleBackgroundContext || "";
   state.projectMemory = normalizeProjectMemory(snapshot.projectMemory || buildEmptyProjectMemory());
   state.pendingRoleClarification = Array.isArray(snapshot.pendingRoleClarification) ? snapshot.pendingRoleClarification.filter(Boolean) : [];
   state.taskSupplementMode = !!snapshot.taskSupplementMode;
@@ -5913,7 +5902,7 @@ const UI_TEXT = {
   en: {
     currentTopicLabel: "Current Topic",
     followToggle: "Follow New Messages",
-    languageToggle: "中文",
+    languageToggle: "CN",
     userInputPlaceholder: "Type your request directly. The primary AI will first organize, question, and confirm it here.",
     attachFiles: "Attach Files",
     sendCommand: "Send",
@@ -7096,6 +7085,12 @@ async function requestModelText(profile, prompt, maxTokens = 420, signal, timeou
 
   for (let attempt = 0; attempt <= MAX_NETWORK_RETRIES; attempt += 1) {
     if (signal?.aborted) {
+      console.error("[requestModelText] 信号在循环顶部已中止", {
+        profile: profile?.displayName,
+        attempt,
+        discussionAbortRequested: typeof state !== "undefined" ? state.discussionAbortRequested : "unknown",
+        stack: new Error().stack,
+      });
       throw new DOMException(langText("请求已中止。", "Request aborted."), "AbortError");
     }
     if (attempt > 0) {
@@ -7227,14 +7222,14 @@ async function waitForUserParticipation(round, totalRounds, moderatorRole) {
     moderatorRole,
     langText(`第 ${round} 轮后 · 等待用户`, `After Round ${round} · Waiting for User`),
     isFinalConfiguredRound
-      ? langText(`第 ${round} 轮已经是当前预设的最后一轮。现在请用户先表态。你可以补充证据、指出谁说得不对、表达你的判断，或者说明你还想深挖哪一条线。系统会先停在这里，等你说完后再生成阶段性结论，并请你决定现在结束，还是再追加几轮。`, `Round ${round} is the last round in the current plan. It is now the user's turn. You can add evidence, point out who was off, give your own judgment, or name the thread you still want to probe. The system will pause here, then generate a stage conclusion and ask whether to stop now or add more rounds.`)
+      ? langText(`第 ${round} 轮已经是当前预设的最后一轮。现在请用户先表态。你可以补充证据、指出谁说得不对、表达你的判断，或者说明你还想深挖哪一条线。你发言后，系统将直接生成阶段性结论和结束致辞，完成本次讨论。`, `Round ${round} is the last round in the current plan. It is now the user's turn. You can add evidence, point out who was off, give your own judgment, or name the thread you still want to probe. After you respond, the system will generate the final conclusion and closing remarks to wrap up the discussion.`)
       : langText(`第 ${round} 轮讨论已经结束。现在请用户发言。你可以补充证据、表达倾向、指出谁说得不对，或者要求下一轮重点追问某个点。系统会停在这里，等你说完再继续第 ${round + 1} 轮。`, `Round ${round} is complete. It is now the user's turn. You can add evidence, express a preference, point out who was off, or tell the system what to probe in the next round. The system will pause here and continue with round ${round + 1} after you respond.`),
     langText("系统主持", "System Host")
   );
   state.awaitingUserParticipation = true;
-  setSpeakerCardForRole(moderatorRole, langText(`第 ${round} 轮后 · 等待用户`, `After Round ${round} · Waiting for User`), isFinalConfiguredRound ? langText("当前已到预设最后一轮，正在等待用户先表态，再决定是否收尾或追加轮次。", "The planned final round is complete. Waiting for the user's reaction before deciding whether to stop or add more rounds.") : langText("当前轮次已结束，正在等待用户补充意见后再继续。", "This round is complete. Waiting for the user's follow-up before continuing."));
+  setSpeakerCardForRole(moderatorRole, langText(`第 ${round} 轮后 · 等待用户`, `After Round ${round} · Waiting for User`), isFinalConfiguredRound ? langText("已到预设最后一轮，等待用户发言后将直接生成结论和结束致辞。", "Final round complete. Waiting for the user's input, then the system will generate the conclusion and closing remarks.") : langText("当前轮次已结束，正在等待用户补充意见后再继续。", "This round is complete. Waiting for the user's follow-up before continuing."));
   updateLiveStatus(langText(`第 ${round} 轮后暂停：等待用户发言`, `Paused after round ${round}: waiting for user input`), "pending");
-  updateSeatFeedback(isFinalConfiguredRound ? langText(`第 ${round} 轮已结束，等待用户表态并决定是否追加轮次。`, `Round ${round} is complete. Waiting for the user's reaction and whether to add more rounds.`) : langText(`第 ${round} 轮已结束，等待用户发言。`, `Round ${round} is complete. Waiting for user input.`), "pending");
+  updateSeatFeedback(isFinalConfiguredRound ? langText(`第 ${round} 轮已结束，等待用户发言，之后将直接生成结论和结束致辞。`, `Round ${round} is complete. Waiting for the user's input before generating the conclusion and closing remarks.`) : langText(`第 ${round} 轮已结束，等待用户发言。`, `Round ${round} is complete. Waiting for user input.`), "pending");
 
   const userTurn = await new Promise((resolve) => {
     pendingUserParticipationResolver = resolve;
@@ -7294,30 +7289,150 @@ function parseDiscussionContinuationDecision(userTurn) {
 }
 
 async function waitForDiscussionContinuationDecision(completedRounds, moderatorRole) {
-  appendRoleMessage(
-    moderatorRole,
-    langText(`第 ${completedRounds} 轮后 · 是否继续`, `After Round ${completedRounds} · Continue?`),
-    langText("本轮讨论已经达到预设轮数。现在请用户决定：如果你认为可以收束，就直接回复“结束”；如果你还想继续，就回复“继续 1 轮”“继续 2 轮”之类的说法，或者直接写你下一轮最想追问的点。若你只写新的追问点，系统默认再追加 1 轮。", "The planned rounds are complete. Decide whether to stop or continue: reply “end” to wrap up, or say something like “continue for 1 round” or “continue for 2 rounds”. You can also write the issue you want to probe next. If you only provide a new probe point, the system will add 1 more round by default."),
-    langText("系统主持", "System Host")
-  );
   state.awaitingDiscussionContinuation = true;
-  setSpeakerCardForRole(moderatorRole, langText(`第 ${completedRounds} 轮后 · 等待决定`, `After Round ${completedRounds} · Waiting for Decision`), langText("最终结论和报告已经给出，正在等待用户决定现在结束还是继续。", "The stage conclusion and report are ready. Waiting for the user's decision to end or continue."));
-  updateLiveStatus(langText(`第 ${completedRounds} 轮后暂停：等待用户决定结束或继续`, `Paused after round ${completedRounds}: waiting for user decision`), "pending");
-  updateSeatFeedback(langText("已生成阶段性结论，等待用户决定是否继续。", "A stage conclusion is ready. Waiting for the user to decide whether to continue."), "pending");
+  setSpeakerCardForRole(moderatorRole, langText(`第 ${completedRounds} 轮后 · 等待决定`, `After Round ${completedRounds} · Waiting for Decision`), langText("阶段性结论已给出，等待你决定现在结束还是再追加一轮。", "The stage conclusion is ready. Waiting for your decision to end or add one more round."));
+  updateLiveStatus(langText(`第 ${completedRounds} 轮后暂停：等待用户决定`, `Paused after round ${completedRounds}: waiting for your decision`), "pending");
+  updateSeatFeedback(langText("阶段性结论已生成，等待你决定是否继续。", "Stage conclusion ready. Decide whether to continue."), "pending");
 
-  const userTurn = await new Promise((resolve) => {
-    pendingDiscussionContinuationResolver = resolve;
+  const decision = await new Promise((resolve) => {
+    pendingDiscussionContinuationResolver = (turn) => {
+      pendingContinuationButtonCard?.remove();
+      pendingContinuationButtonCard = null;
+      resolve(turn);
+    };
+    const card = document.createElement("article");
+    card.className = "chat-item system";
+    const avatarLabel = langText("系", "S");
+    const cardTitle = langText(`第 ${completedRounds} 轮后 · 等待用户 · 系统主持`, `After Round ${completedRounds} · Waiting for User · System Host`);
+    const cardBody = langText("阶段性结论已生成。现在结束，还是再追加一轮？", "Stage conclusion ready. End here, or add one more round?");
+    const continueLabel = langText("追加一轮", "Add 1 Round");
+    const stopLabel = langText("结束讨论", "End Discussion");
+    card.innerHTML = `
+      <div class="avatar-badge avatar-system">${avatarLabel}</div>
+      <div class="chat-content">
+        <div class="chat-meta"><strong>${cardTitle}</strong></div>
+        <div class="chat-bubble">
+          <p style="margin:0 0 10px">${cardBody}</p>
+          <div class="continuation-buttons">
+            <button class="action-primary compact-primary continuation-continue-btn" type="button">${continueLabel}</button>
+            <button class="action-secondary compact-primary continuation-stop-btn" type="button">${stopLabel}</button>
+          </div>
+        </div>
+      </div>
+    `;
+    pendingContinuationButtonCard = card;
+    card.querySelector(".continuation-continue-btn").addEventListener("click", () => {
+      pendingContinuationButtonCard = null;
+      pendingDiscussionContinuationResolver = null;
+      card.remove();
+      resolve({ continueDiscussion: true, additionalRounds: 1, content: langText("继续，请围绕当前最大分歧追问下一轮。", "Continue. Please probe the largest remaining disagreement in the next round.") });
+    });
+    card.querySelector(".continuation-stop-btn").addEventListener("click", () => {
+      pendingContinuationButtonCard = null;
+      pendingDiscussionContinuationResolver = null;
+      card.remove();
+      resolve({ continueDiscussion: false, additionalRounds: 0, content: "结束" });
+    });
+    discussionStream.appendChild(card);
+    if (state.autoFollow) scrollToLatest();
   });
 
   pendingDiscussionContinuationResolver = null;
   state.awaitingDiscussionContinuation = false;
 
-  if (!userTurn || userTurn.aborted) {
+  if (!decision || decision.aborted) {
     throw new DOMException("用户结束了当前讨论。", "AbortError");
   }
-
-  return parseDiscussionContinuationDecision(userTurn);
+  if (typeof decision.continueDiscussion !== "boolean") {
+    return parseDiscussionContinuationDecision(decision);
+  }
+  return decision;
 }
+
+// ─── 实时证据裁判机制 ──────────────────────────────────────────────────────────
+
+function buildJudgeFactCheckPrompt(speakerTurn, evidenceSummary, nextSpeakerRole) {
+  const speakerName = getActiveRoleName(speakerTurn.role);
+  const speakerSeat = getActiveRoleSeat(speakerTurn.role);
+  const nextName = getActiveRoleName(nextSpeakerRole);
+  const nextSeat = getActiveRoleSeat(nextSpeakerRole);
+  const nextDesc = nextSpeakerRole?.traits?.stance || getActiveRoleDescription(nextSpeakerRole) || "";
+  return [
+    "═══════════════════════════════════",
+    "【阶段一】你的身份：独立证据裁判",
+    "═══════════════════════════════════",
+    `以下是发言者 ${speakerName}（${speakerSeat}）在本轮中收到的证据摘要：`,
+    evidenceSummary
+      ? `---\n${evidenceSummary}\n---`
+      : "（本轮发言者未使用任何检索证据）",
+    "",
+    `以下是 ${speakerName} 的正式发言：`,
+    `---\n${speakerTurn.text}\n---`,
+    "",
+    "你的任务：判断发言者的核心论断是否超出或扭曲了所提供的证据范围，是否存在无中生有的数据、伪造的因果链、或对来源的实质性曲解。",
+    "如果你发现了明确的事实问题，输出 verdict=\"issue_found\"，并用简洁中文写出公开纠正（public_correction），控制在 80 到 150 字以内，直接点出哪条论断有问题、问题性质是什么。",
+    "如果没有明确的事实问题，或者仅属于推断分歧而非事实错误，输出 verdict=\"ok\"，无需其他字段。",
+    getModelOutputLanguageInstruction(),
+    "",
+    "═══════════════════════════════════",
+    "【阶段二】裁判身份在此完全终止。",
+    `你现在是：${nextName}（${nextSeat}）`,
+    nextDesc ? `你的专业立场：${nextDesc}` : "",
+    "═══════════════════════════════════",
+    `你刚刚看到了 ${speakerName} 的发言以及上方的裁判纠正（如有）。`,
+    `站在你自己（${nextName}）的专业立场，你接下来最需要搜索哪些公开资料来作出有力回应？`,
+    "输出 corrected_search_hints：3 到 5 条具体英文搜索词，帮助系统为你检索最相关的公开证据。",
+    "严格禁止：阶段二中出现「裁判认为」「根据裁判」「纠错」等字样。阶段二内容只供系统使用，不对用户展示。",
+    "",
+    "请以 JSON 格式输出（直接输出 JSON，不要包裹在代码块中）：",
+    "verdict 为 ok 时：{\"verdict\":\"ok\",\"corrected_search_hints\":[\"...\",\"...\"]}",
+    "verdict 为 issue_found 时：{\"verdict\":\"issue_found\",\"confidence\":\"high|medium\",\"public_correction\":\"...\",\"issue_summary\":\"...\",\"affected_claim\":\"...\",\"corrected_search_hints\":[\"...\",\"...\"]}",
+    "绝对不要输出 thinking process、英文分析草稿、自检步骤或任何内部推理过程。",
+  ].filter((line) => line !== undefined).join("\n");
+}
+
+function parseJudgeFactCheckResponse(rawText) {
+  const jsonText = extractJsonObject(rawText);
+  if (!jsonText) {
+    return { verdict: "ok" };
+  }
+  try {
+    const parsed = JSON.parse(jsonText);
+    const verdict = String(parsed?.verdict || "ok").trim().toLowerCase();
+    const correctedSearchHints = normalizeClarificationQuestions(parsed?.corrected_search_hints || []);
+    if (verdict !== "issue_found") {
+      return { verdict: "ok", correctedSearchHints };
+    }
+    return {
+      verdict: "issue_found",
+      confidence: String(parsed?.confidence || "medium").trim(),
+      publicCorrection: String(parsed?.public_correction || "").trim(),
+      issueSummary: String(parsed?.issue_summary || "").trim(),
+      affectedClaim: String(parsed?.affected_claim || "").trim(),
+      correctedSearchHints,
+    };
+  } catch {
+    return { verdict: "ok" };
+  }
+}
+
+async function runJudgeFactCheck({ speakerRole, speakerText, evidenceSummary, nextSpeakerRole, moderatorProfile, signal }) {
+  if (!moderatorProfile || !speakerRole || !nextSpeakerRole) {
+    return { verdict: "ok" };
+  }
+  try {
+    const speakerTurn = { role: speakerRole, text: speakerText };
+    const prompt = buildJudgeFactCheckPrompt(speakerTurn, evidenceSummary || "", nextSpeakerRole);
+    const raw = await requestModelText(moderatorProfile, prompt, 400, signal, 20000);
+    return parseJudgeFactCheckResponse(raw);
+  } catch (err) {
+    if (err?.name === "AbortError") throw err;
+    console.warn("[judge-fact-check] 裁判调用失败，已跳过", err);
+    return { verdict: "ok" };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function runSingleDiscussionRound({
   round,
@@ -7334,6 +7449,8 @@ async function runSingleDiscussionRound({
 }) {
   const summary = state.lastSummary;
   const liveTurns = [];
+  // 上一位发言者结束后异步启动的裁判校验 Promise（在下一位检索时并行等待）
+  let pendingJudgePromise = null;
 
   for (const speakerRole of orderedSpeakers) {
     const assignment = getRoleAssignment(speakerRole);
@@ -7349,6 +7466,8 @@ async function runSingleDiscussionRound({
       roundNotes,
     });
     let speakerSearchDigest = "";
+    // 与裁判并行处理：裁判 Promise（上一位结束时启动）与本位搜索同步竞跑
+    let currentJudgeResult = null;
 
     if (knowledgeGate.shouldUseWebSearch) {
       setSpeakerCardForRole(
@@ -7374,13 +7493,72 @@ async function runSingleDiscussionRound({
         knowledgeGate,
         handoff: null,
       });
-      speakerSearchDigest = await runSpeakerWebSearch(speakerRole, summary, signal, {
+      // 裁判与搜索并行，避免额外等待
+      const webSearchPromise = runSpeakerWebSearch(speakerRole, summary, signal, {
         retrievalStrategy: knowledgeGate.retrievalStrategy,
         queryHints: uniqueStrings([
           ...(previousTurn?.handoff?.web_search_needed || []),
           ...(previousTurn?.handoff?.preferred_keywords || []),
           ...(knowledgeGate.preferredKeywords || []),
         ]).slice(0, 6),
+      });
+      const [judgeResolved, rawSearchDigest] = await Promise.all([
+        pendingJudgePromise || Promise.resolve(null),
+        webSearchPromise,
+      ]);
+      currentJudgeResult = judgeResolved;
+      speakerSearchDigest = rawSearchDigest;
+    } else if (pendingJudgePromise) {
+      // 本位无需搜索，但仍需等待上一轮的裁判结果
+      currentJudgeResult = await pendingJudgePromise;
+    }
+    pendingJudgePromise = null;
+
+    // 处理裁判结果：发现问题时插入公开纠正卡片，并用修正搜索词重新检索
+    if (currentJudgeResult?.verdict === "issue_found") {
+      const correctionText = currentJudgeResult.publicCorrection || langText("裁判发现上一位发言者的论断存在证据问题。", "The judge found an evidence issue with the previous speaker's claim.");
+      appendMarkup(
+        createMessageMarkup({
+          speakerId: `judge-correction-r${round}-${speakerRole.id}`,
+          label: langText("裁", "Judge"),
+          sublabel: langText("裁判纠错", "Judge Correction"),
+          body: correctionText,
+          avatarLabel: langText("裁", "J"),
+          avatarClass: "avatar-system",
+          tone: "system",
+        })
+      );
+      // 记录到 judgeLog，供后续发言者提示词引用
+      if (Array.isArray(state.judgeLog)) {
+        const previousLiveTurn = liveTurns[liveTurns.length - 1];
+        state.judgeLog.push({
+          round,
+          speakerId: previousLiveTurn?.role?.id || "",
+          speakerName: previousLiveTurn?.role ? getActiveRoleName(previousLiveTurn.role) : "",
+          verdict: "issue_found",
+          issueSummary: currentJudgeResult.issueSummary || "",
+          affectedClaim: currentJudgeResult.affectedClaim || "",
+        });
+      }
+      // 弃用原始搜索，用裁判提供的修正搜索词重新检索
+      const correctedHints = currentJudgeResult.correctedSearchHints || [];
+      if (correctedHints.length) {
+        updateLiveStatus(
+          langText(`第 ${round} 轮：${getActiveRoleName(speakerRole)} 裁判修正检索中`, `Round ${round}: ${getActiveRoleName(speakerRole)} re-searching with judge's corrected hints`),
+          "pending"
+        );
+        speakerSearchDigest = await runSpeakerWebSearch(speakerRole, summary, signal, {
+          retrievalStrategy: "web_first",
+          queryHints: correctedHints.slice(0, 5),
+        });
+      } else {
+        speakerSearchDigest = "";
+      }
+    } else if (currentJudgeResult?.verdict === "ok" && currentJudgeResult?.correctedSearchHints?.length && !speakerSearchDigest) {
+      // 裁判无问题但提供了更好的搜索方向，且本位原本未做检索 → 补充搜索
+      speakerSearchDigest = await runSpeakerWebSearch(speakerRole, summary, signal, {
+        retrievalStrategy: "web_first",
+        queryHints: currentJudgeResult.correctedSearchHints.slice(0, 5),
       });
     }
     const nextSpeakerPackage = await prepareNextSpeakerPackage({
@@ -7522,6 +7700,17 @@ async function runSingleDiscussionRound({
       nextSpeakerPackage,
       handoff: speakerTurnPayload?.handoff || null,
     });
+    // 当前发言者结束后，为下一位异步启动裁判校验（不 await，让下一轮搜索并行）
+    if (nextRole) {
+      pendingJudgePromise = runJudgeFactCheck({
+        speakerRole,
+        speakerText,
+        evidenceSummary: speakerSearchDigest || "",
+        nextSpeakerRole: nextRole,
+        moderatorProfile,
+        signal,
+      });
+    }
   }
 
   const isFinalRound = round >= totalRounds;
@@ -7583,7 +7772,17 @@ async function generateStageConclusion({ targetRounds, judgeRole, judgeProfile, 
   setSpeakerCardForRole(judgeRole, langText(`第 ${targetRounds} 轮后 · 正在思考`, `After Round ${targetRounds} · Thinking`), langText("正在综合全部轮次，判断哪些说法更有依据，哪些地方仍然不能下结论。", "Reviewing all rounds to judge which claims are best supported and which points still remain unresolved."));
   updateLiveStatus(langText(`最终总结前：${getActiveRoleName(judgeRole)} 正在思考`, `Before the final summary: ${getActiveRoleName(judgeRole)} is thinking`), "pending");
   updateSeatFeedback(langText(`${getActiveRoleName(judgeRole)} 正在做最终裁判`, `${getActiveRoleName(judgeRole)} is preparing the final judgment`), "pending");
-  const judgeText = await requestModelText(judgeProfile, judgePrompt, budget.judge, signal);
+  // 裁判使用专属超时，并在首次超时后自动重试一次
+  let judgeText;
+  try {
+    judgeText = await requestModelText(judgeProfile, judgePrompt, budget.judge, signal, JUDGE_REQUEST_TIMEOUT_MS);
+  } catch (firstErr) {
+    if (firstErr?.name === "AbortError") throw firstErr;
+    console.warn("[judge] 首次调用超时，3 秒后自动重试", firstErr);
+    updateLiveStatus(langText(`最终总结：${getActiveRoleName(judgeRole)} 首次超时，正在重试…`, `Final summary: ${getActiveRoleName(judgeRole)} timed out, retrying…`), "pending");
+    await new Promise((res) => setTimeout(res, 3000));
+    judgeText = await requestModelText(judgeProfile, judgePrompt, budget.judge, signal, JUDGE_REQUEST_TIMEOUT_MS);
+  }
   setSpeakerCardForRole(judgeRole, langText(`第 ${targetRounds} 轮后 · 正在发言`, `After Round ${targetRounds} · Speaking`), langText("最终裁判已生成，马上写入讨论流。", "The final judgment has been generated and will be written into the discussion stream next."));
   updateLiveStatus(langText(`最终总结：${getActiveRoleName(judgeRole)} 正在发言`, `Final summary: ${getActiveRoleName(judgeRole)} is speaking`), "pending");
   appendRoleMessage(judgeRole, formatFinalJudgeLabel(judgeRole), judgeText, judgeProfile.displayName);
@@ -7711,6 +7910,7 @@ async function runDiscussionFlow() {
       );
       void syncCurrentTopicSnapshot();
     } catch (error) {
+      if (error?.name === "AbortError") throw error;
       console.warn("shared research brief failed", error);
       state.sharedResearchBrief = "";
     }
@@ -7834,64 +8034,33 @@ async function runDiscussionFlow() {
       currentRound += 1;
     }
 
-    while (true) {
-      await generateStageConclusion({
-        targetRounds,
-        judgeRole,
-        judgeProfile,
-        moderatorProfile,
-        roundNotes,
-        budget,
-        signal,
-      });
+    await generateStageConclusion({
+      targetRounds,
+      judgeRole,
+      judgeProfile,
+      moderatorProfile,
+      roundNotes,
+      budget,
+      signal,
+    });
 
-      const continuationDecision = await waitForDiscussionContinuationDecision(targetRounds, moderatorRole);
-      if (!continuationDecision.continueDiscussion) {
-        break;
-      }
-
-      roundNotes.push({
-        round: `${targetRounds} 轮后续谈`,
-        turns: [
-          {
-            role: userRoundRole,
-            assignmentLabel: `第 ${targetRounds} 轮后 · 用户续谈要求`,
-            text: continuationDecision.content,
-          },
-        ],
-        moderatorSummary: `用户选择继续讨论。下一轮要重点追问：${continuationDecision.content}`,
-      });
-      state.discussionRoundNotes = [...roundNotes];
-      void syncCurrentTopicSnapshot();
-      targetRounds += Math.max(1, Number(continuationDecision.additionalRounds || 1));
-      state.discussionRounds = targetRounds;
-      discussionRoundsInput.value = String(targetRounds);
-      setSpeakerCard(langText("继续讨论中", "Continuing Discussion"), langText("主持AI准备追加轮次", "Host AI is preparing an extra round"), langText(`用户要求继续，系统将进入第 ${targetRounds} 轮。${getDensityDescription()}`, `The user asked to continue. The system will move into round ${targetRounds}. ${getDensityDescription()}`), "系");
-      updateLiveStatus(langText(`用户要求继续，准备进入第 ${targetRounds} 轮。`, `The user asked to continue. Preparing round ${targetRounds}.`), "pending");
-      updateSeatFeedback(langText(`已收到继续讨论指令，正在追加第 ${targetRounds} 轮。`, `Continue instruction received. Adding round ${targetRounds}.`), "success");
-
-      while (currentRound <= targetRounds) {
-        if (state.discussionAbortRequested) {
-          throw new DOMException("用户结束了本轮讨论。", "AbortError");
-        }
-        const roundNote = await runSingleDiscussionRound({
-          round: currentRound,
-          totalRounds: targetRounds,
-          orderedSpeakers,
-          moderatorRole,
-          moderatorProfile,
-          roundNotes,
-          budget,
-          signal,
-          userParticipationEnabled,
-          userRoundRole,
-        });
-        roundNotes.push(roundNote);
-        state.discussionRoundNotes = [...roundNotes];
-        void syncCurrentTopicSnapshot();
-        currentRound += 1;
-      }
+    // 主持人结束致辞
+    setSpeakerCardForRole(moderatorRole, langText(`结束致辞 · ${getActiveRoleName(moderatorRole)}`, `Closing · ${getActiveRoleName(moderatorRole)}`), langText("所有轮次已完整结束，主持AI正在致辞。", "All rounds complete. Host AI is delivering closing remarks."));
+    updateLiveStatus(langText("主持AI正在说结束致辞", "Host AI is delivering closing remarks"), "pending");
+    const closingPrompt = [
+      `你是本场圆桌讨论的主持人，经过 ${targetRounds} 轮讨论，所有轮次已完整结束。`,
+      "请用 2 到 3 句话做简短的结束致辞：感谢各位参与，点明本次讨论到此圆满结束。语气真诚，简洁自然，不要重复已经说过的结论内容。",
+      getModelOutputLanguageInstruction(),
+      state.lastSummary ? `本次话题：${state.lastSummary}` : "",
+    ].filter(Boolean).join("\n\n");
+    let closingText;
+    try {
+      closingText = await requestModelText(moderatorProfile, closingPrompt, 150, signal, MODEL_REQUEST_TIMEOUT_MS);
+    } catch (closingErr) {
+      if (closingErr?.name === "AbortError") throw closingErr;
+      closingText = langText("本次圆桌讨论至此圆满结束。感谢各位的精彩发言，希望这场对话有所启发。", "This roundtable discussion has now come to a close. Thank you all for your insightful contributions — I hope this conversation has been illuminating.");
     }
+    appendRoleMessage(moderatorRole, langText(`结束致辞 · ${getActiveRoleName(moderatorRole)}`, `Closing · ${getActiveRoleName(moderatorRole)}`), closingText, moderatorProfile.displayName);
 
     state.discussionRounds = targetRounds;
     state.discussionRoundNotes = [...roundNotes];
@@ -7906,8 +8075,18 @@ async function runDiscussionFlow() {
     updateSeatFeedback(langText("本轮讨论已完成。你可以继续补充任务，或调整角色后再来一轮。", "This discussion is complete. You can add more task details or adjust personas and run another round."), "success");
     await syncCurrentTopicSnapshot();
   } catch (error) {
-    console.error(error);
     const aborted = state.discussionAbortRequested;
+    if (error?.name === "AbortError" && !aborted) {
+      console.error("[runDiscussionFlow] 意外的 AbortError：signal 被中止但 discussionAbortRequested=false", {
+        errorMessage: error.message,
+        errorStack: error.stack,
+        controllerAborted: state.discussionAbortController?.signal?.aborted,
+        discussionRunning: state.discussionRunning,
+        appLanguage: state.appLanguage,
+      });
+    } else {
+      console.error(error);
+    }
     const localizedErrorMessage = error?.name === "AbortError"
       ? langText("请求已中止。", "Request aborted.")
       : (error?.message || langText("执行多角色讨论时失败。", "The multi-person discussion failed."));
@@ -9624,19 +9803,31 @@ function extractJsonStringField(text, fieldName) {
   const rawText = String(text || "");
   const escapedFieldName = String(fieldName || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = rawText.match(new RegExp(`"${escapedFieldName}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`, "i"));
-  if (!match?.[1]) {
-    return "";
+  if (match?.[1]) {
+    try {
+      return JSON.parse(`"${match[1]}"`);
+    } catch {
+      return match[1]
+        .replace(/\\n/g, "\n")
+        .replace(/\\r/g, "\r")
+        .replace(/\\t/g, "\t")
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, "\\");
+    }
   }
-  try {
-    return JSON.parse(`"${match[1]}"`);
-  } catch {
-    return match[1]
+  // 截断响应兜底：模型回复被截断、字段值没有闭合引号时，捕获到文本末尾
+  // \\\\? 允许末尾有一个孤立的反斜杠（转义序列被截断的情况）
+  const truncatedMatch = rawText.match(new RegExp(`"${escapedFieldName}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)\\\\?$`, "i"));
+  if (truncatedMatch?.[1]) {
+    return truncatedMatch[1]
       .replace(/\\n/g, "\n")
       .replace(/\\r/g, "\r")
       .replace(/\\t/g, "\t")
       .replace(/\\"/g, '"')
-      .replace(/\\\\/g, "\\");
+      .replace(/\\\\/g, "\\")
+      .trimEnd();
   }
+  return "";
 }
 
 function normalizeClarificationQuestions(questions) {
@@ -10889,6 +11080,7 @@ async function requestGeneratedRecommendedRoles(summary, planningBrief = "") {
     "description 要写这个人的身份背景和长期关注点，不要写成任务拆解句。",
     "systemPrompt 要能直接拿去扮演这个人，第一句先说清身份，再说他最关注什么、如何发言、不要越位做什么。",
     `本次话题：${summary}`,
+    planningBrief ? `本地知识库参考（角色生成时请参考）：\n${planningBrief}` : "",
   ];
 
   let lastError = new Error("系统临时角色生成失败：未知错误。");
@@ -10978,6 +11170,7 @@ async function requestSingleRecommendedRole(summary, planningBrief, existingRole
       "如果是历史人物，优先写他最广为人知阶段的大致年龄；如果是虚构人物，写大众最熟悉设定里的年龄；如果是原型专家，请直接编一个合理年龄。",
       "优先保证人物身份准确和互补。如果 systemPrompt 一时写不完整，可以留空，不要为了补 prompt 牺牲人物准确性。",
       `本次话题：${summary}`,
+      planningBrief ? `本地知识库参考（角色生成时请参考）：\n${planningBrief}` : "",
       retryNote,
     ].filter(Boolean).join("\n\n");
 
@@ -11761,7 +11954,7 @@ async function seedDatabase() {
 async function hydrateState() {
   state.peopleRoles = (await dbGetAll(ROLE_STORE)).map(ensureRoleDefaults);
   state.modelProfiles = (await dbGetAll(PROFILE_STORE)).map(normalizeProfile);
-  state.appLanguage = await loadAppState("appLanguage", "zh");
+  state.appLanguage = await loadAppState("appLanguage", navigator.language?.startsWith("zh") ? "zh" : "en");
   state.appTheme = await loadAppState("appTheme", "dark");
   state.knowledgeEnabled = await loadAppState("knowledgeEnabled", true);
   state.voiceReadEnabled = await loadAppState("voiceReadEnabled", false);
@@ -12356,6 +12549,7 @@ function appendUserMessage(content, attachments = []) {
       state.latestReportText = "";
       state.latestReportFileName = "";
       state.discussionRoundNotes = [];
+      state.judgeLog = [];
     }
   }
   appendMarkup(
@@ -12485,7 +12679,22 @@ async function finishSeatGeneration(options = {}) {
     state.recommendedRoles = [];
     renderSeatPicker();
     renderSeatStack();
-    const generationResult = await requestGeneratedRecommendedRolesSequential(currentSummary, "", {
+    // 角色生成前，先检索本地知识库，自动为角色规划提供背景参考
+    let preRoleKnowledgeBrief = "";
+    if (state.knowledgeEnabled) {
+      const knowledgeResult = filterKnowledgeEntries(getKnowledgeScopeEntries(), {
+        queryOverride: currentSummary,
+        categoryOverride: "all",
+      });
+      const knowledgeHits = (knowledgeResult.entries || []).slice(0, 5);
+      if (knowledgeHits.length) {
+        preRoleKnowledgeBrief = [
+          "本地知识库检索结果（请在规划人物时参考以下背景材料）：",
+          ...knowledgeHits.map((e, i) => `${i + 1}. ${e.title}｜${getKnowledgeCategoryLabel(e.category)}｜${e.searchSnippet || summarizeText(e.summary || e.textPreview || "", 80)}`),
+        ].join("\n");
+      }
+    }
+    const generationResult = await requestGeneratedRecommendedRolesSequential(currentSummary, preRoleKnowledgeBrief, {
       onStage: (stage, payload) => {
         if (generationSession !== state.recommendedRoleGenerationSession) {
           return;
@@ -12649,6 +12858,7 @@ function startSeatGeneration(options = {}) {
     state.pendingRoleClarification = [];
     state.taskSupplementMode = false;
     state.discussionRoundNotes = [];
+    state.judgeLog = [];
     state.recommendedRoleGenerationMeta = null;
     state.recommendedRoles = [];
     state.selectedIds.clear();
@@ -12688,6 +12898,7 @@ function startSeatGeneration(options = {}) {
   }
   state.taskSupplementMode = false;
   state.discussionRoundNotes = [];
+  state.judgeLog = [];
   state.recommendedRoleGenerationMeta = null;
   state.selectedIds.clear();
   state.seatAssignments = {};
@@ -12740,6 +12951,9 @@ function seedConversation() {
   state.taskSupplementMode = false;
   state.latestReportText = "";
   state.latestReportFileName = "";
+  state.discussionRoundNotes = [];
+  state.judgeLog = [];
+  state.discussionState = buildEmptyDiscussionState();
   state.recommendedRoles = [];
   state.seatModelAssignments = {};
   state.seatAssignments = {};
