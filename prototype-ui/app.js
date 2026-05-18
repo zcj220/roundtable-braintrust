@@ -1727,13 +1727,19 @@ function buildPreparedTurnInput({
     roleBlock: rolePromptBlock(speakerRole),
     outputBlock: [
       nextRole
-        ? [`下一位角色：${getActiveRoleName(nextRole)}`, `下一位席位：${getActiveRoleSeat(nextRole)}`, `下一位职责：${getActiveRoleDescription(nextRole)}`].join("\n")
+        ? [
+            `下一位角色：${getActiveRoleName(nextRole)}`,
+            `下一位席位：${getActiveRoleSeat(nextRole)}`,
+            `下一位职责：${getActiveRoleDescription(nextRole)}`,
+          ].join("\n")
         : langText("下一位角色：无，本轮到你后将进入主持收束。", "Next role: none. After you, the host will compress the round."),
-      "你这次必须同时完成两件事：第一，输出你自己的正式发言；第二，给下一位角色留下结构化交接。",
+      nextRole
+        ? `你这次必须完成两件事：第一，以「${getActiveRoleName(speakerRole)}」的身份正式发言；第二，发言结束后立刻切换身份，站在下一位发言者「${getActiveRoleName(nextRole)}」（${getActiveRoleDescription(nextRole) || getActiveRoleSeat(nextRole)}）的角度，为系统写一份资料准备需求（handoff），描述下一位最需要先查哪些本地知识、优先哪些类别、是否需要补查网页公开资料。这份 handoff 只给系统用，用户看不到，不要直接替下一位发言。`
+        : "你这次只需正式发言，本轮最后一位发言后将进入主持收束，handoff 字段填空数组即可。",
       "严格输出 JSON 对象，不要 Markdown，不要解释，不要补充多余文字。",
       "JSON 必须包含字段：speaker_message, speaker_claims, speaker_risks, speaker_open_questions, handoff。",
       "handoff 必须包含字段：next_role_id, next_role_focus, local_knowledge_needed, web_search_needed, preferred_categories, preferred_keywords, avoid_categories, missing_evidence_types, current_round_summary, recommended_counterpoints。",
-      "speaker_message 只写当前角色面向用户的正式发言正文。handoff 只写给系统和下一位角色的准备信息，不要把下一位正式发言写出来。",
+      "speaker_message 只写当前角色面向用户的正式发言正文，不要泄露 handoff 内容。handoff 只写给系统和下一位的资料准备信息，不要把下一位的正式发言写出来。",
       "如果没有足够依据，就在 speaker_message 里明确承认；不要为了凑 JSON 字段而编造证据。数组字段没有内容时返回空数组。",
       `speaker_message 篇幅要求：${budgetHint}`,
       "绝对不要输出 thinking process、analyze user input、自检步骤、constraint list 或任何内部推理过程。",
