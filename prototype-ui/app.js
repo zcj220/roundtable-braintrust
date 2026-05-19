@@ -3606,9 +3606,9 @@ function buildKnowledgeEvidenceEntries(hits, query, context = "shared_brief") {
     summary: summarizeText(entry.searchSnippet || entry.summary || entry.textPreview || "", 82),
     createdAt: createdAtBase + index,
     detail: [
-      `目录：${getKnowledgeCategoryLabel(entry.category)}`,
+      langText(`目录：${getKnowledgeCategoryLabel(entry.category)}`, `Folder: ${getKnowledgeCategoryLabel(entry.category)}`),
       entry.searchChunkIndex ? `Chunk：${entry.searchChunkIndex}` : "",
-      query ? `检索词：${query}` : "",
+      query ? langText(`检索词：${query}`, `Query: ${query}`) : "",
       entry.searchSnippet || entry.summary || entry.textPreview || "",
     ].filter(Boolean).join("\n"),
     imageUrl: "",
@@ -3639,7 +3639,7 @@ function appendSharedEvidenceEntries(entries, limit = 40) {
         ...prev,
         _refCount: refCount,
         _baseSourceLabel: baseLabel,
-        sourceLabel: `${baseLabel} · 被 ${refCount} 位发言者引用`,
+        sourceLabel: langText(`${baseLabel} · 被 ${refCount} 位发言者引用`, `${baseLabel} · referenced by ${refCount} speakers`),
       };
     } else {
       merged.push({ ...entry, _refCount: 1, _baseSourceLabel: entry.sourceLabel });
@@ -7205,7 +7205,10 @@ async function requestModelText(profile, prompt, maxTokens = 420, signal, timeou
     } catch (error) {
       requestControl.cleanup();
       if (requestControl.didTimeOut()) {
-        throw new Error(`${profile.displayName} 响应超时。这个模型已接通，但当前请求长时间没有返回。`);
+        throw new Error(langText(
+          `${profile.displayName} 响应超时。这个模型已接通，但当前请求长时间没有返回。`,
+          `${profile.displayName} timed out. The model endpoint is reachable, but this request did not return in time.`
+        ));
       }
       if (error?.name === "AbortError") {
         throw error;
