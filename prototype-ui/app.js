@@ -7072,8 +7072,43 @@ function sanitizeReadAloudText(text) {
   return String(text || "")
     .replace(/\s+/g, " ")
     .replace(/[★•]/g, " ")
-    .trim()
-    .slice(0, 800);
+    .trim();
+}
+
+function splitReadAloudText(text, maxChunkLength = 280) {
+  const normalized = sanitizeReadAloudText(text);
+  if (!normalized) {
+    return [];
+  }
+
+  const chunks = [];
+  let remaining = normalized;
+  while (remaining.length > maxChunkLength) {
+    const windowText = remaining.slice(0, maxChunkLength + 40);
+    const breakCandidates = [
+      windowText.lastIndexOf(". "),
+      windowText.lastIndexOf("! "),
+      windowText.lastIndexOf("? "),
+      windowText.lastIndexOf("; "),
+      windowText.lastIndexOf(", "),
+      windowText.lastIndexOf("。"),
+      windowText.lastIndexOf("！"),
+      windowText.lastIndexOf("？"),
+      windowText.lastIndexOf("；"),
+      windowText.lastIndexOf("，"),
+      windowText.lastIndexOf("、"),
+      windowText.lastIndexOf(" "),
+    ];
+    const splitAt = breakCandidates.find((index) => index >= Math.floor(maxChunkLength * 0.6));
+    const nextIndex = splitAt >= 0 ? splitAt + 1 : maxChunkLength;
+    chunks.push(remaining.slice(0, nextIndex).trim());
+    remaining = remaining.slice(nextIndex).trim();
+  }
+
+  if (remaining) {
+    chunks.push(remaining);
+  }
+  return chunks.filter(Boolean);
 }
 
 function readTextAloud(text, options = {}) {
@@ -7081,17 +7116,17 @@ function readTextAloud(text, options = {}) {
     return;
   }
 
-  const normalized = sanitizeReadAloudText(text);
-  if (!normalized || !window.speechSynthesis) {
+  const chunks = splitReadAloudText(text);
+  if (!chunks.length || !window.speechSynthesis) {
     return;
   }
 
-  readAloudQueue.push({
-    text: normalized,
+  readAloudQueue.push(...chunks.map((chunk) => ({
+    text: chunk,
     speakerId: options.speakerId || options.role?.id || "",
     role: options.role || null,
     element: options.element || null,
-  });
+  })));
   drainReadAloudQueue();
 }
 
