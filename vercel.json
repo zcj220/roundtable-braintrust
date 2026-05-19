@@ -1,0 +1,6 @@
+{
+  "outputDirectory": "prototype-ui",
+  "rewrites": [
+    { "source": "/__roundtable_proxy", "destination": "/api/proxy" }
+  ]
+}

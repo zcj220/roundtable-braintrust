@@ -1621,7 +1621,7 @@ async function prepareNextSpeakerPackage({ summary, speakerRole, previousTurn, k
     preparedInput: null,
   };
   if (localKnowledge.hits.length) {
-    nextPackage.localKnowledgeHits = localKnowledge.hits.map((entry) => `${entry.title}｜${getKnowledgeCategoryLabel(entry.category)}｜${entry.searchSnippet || summarizeText(entry.summary || entry.textPreview || "", 72)}`);
+    nextPackage.localKnowledgeHits = localKnowledge.hits.map((entry) => `${entry.title}｜${getKnowledgeCategoryLabel(entry.category)}${entry.description ? `｜[说明] ${summarizeText(entry.description, 50)}` : ""}｜${entry.searchSnippet || summarizeText(entry.summary || entry.textPreview || "", 72)}`);
     await recordKnowledgeRetrievalHits(localKnowledge.query, localKnowledge.hits, "next_speaker_package");
     appendSharedEvidenceEntries(buildKnowledgeEvidenceEntries(localKnowledge.hits, localKnowledge.query, "next_speaker_package"));
     renderRoundtableEvidenceWorkspace();
@@ -3684,7 +3684,7 @@ function buildLocalKnowledgeDigest(query, limit = 4) {
   const matchedCategories = uniqueStrings(hits.map((entry) => getKnowledgeCategoryLabel(entry.category)));
   return [
     `本地知识库命中目录：${matchedCategories.join("、") || langText("未分类", "Uncategorized")}`,
-    ...hits.map((entry, index) => `${index + 1}. ${entry.title}｜目录：${getKnowledgeCategoryLabel(entry.category)}｜片段：${entry.searchSnippet || summarizeText(entry.summary || entry.textPreview || "", 88)}`),
+    ...hits.map((entry, index) => `${index + 1}. ${entry.title}｜目录：${getKnowledgeCategoryLabel(entry.category)}${entry.description ? `｜说明：${summarizeText(entry.description, 50)}` : ""}｜片段：${entry.searchSnippet || summarizeText(entry.summary || entry.textPreview || "", 88)}`),
   ].join("\n");
 }
 
@@ -3764,6 +3764,9 @@ function renderKnowledgeBaseWorkspace() {
         <button class="knowledge-action-button" type="button" data-knowledge-action="rebuild-normalized" data-knowledge-id="${activeEntry.id}">${escapeHtml(langText("重建标准化", "Rebuild Normalized"))}</button>
         <button class="knowledge-action-button danger" type="button" data-knowledge-action="delete-entry" data-knowledge-id="${activeEntry.id}">${escapeHtml(langText("删除条目", "Delete Entry"))}</button>
       </div>`,
+      `<label class="knowledge-file-note-label" for="knowledge-entry-description">${escapeHtml(langText("文件说明（AI 检索参考）", "File Note (for AI retrieval)"))}</label>`,
+      `<textarea id="knowledge-entry-description" class="knowledge-file-note" rows="3" placeholder="${escapeHtml(langText("一两句话说明这份文件讲什么、属于什么类型、适合回答哪类问题…", "One or two sentences: what this file covers, its type, and when to use it…"))}">${escapeHtml(activeEntry.description || "")}</textarea>`,
+      `<div class="knowledge-action-row"><button class="knowledge-action-button" type="button" data-knowledge-action="generate-description" data-knowledge-id="${activeEntry.id}">${escapeHtml(langText("AI 生成说明", "AI Generate Note"))}</button><button class="knowledge-action-button" type="button" data-knowledge-action="save-description" data-knowledge-id="${activeEntry.id}">${escapeHtml(langText("保存说明", "Save Note"))}</button></div>`,
     ].join("");
   }
   knowledgeDetail.innerHTML = `
@@ -12795,7 +12798,7 @@ async function finishSeatGeneration(options = {}) {
       if (knowledgeHits.length) {
         preRoleKnowledgeBrief = [
           "本地知识库检索结果（请在规划人物时参考以下背景材料）：",
-          ...knowledgeHits.map((e, i) => `${i + 1}. ${e.title}｜${getKnowledgeCategoryLabel(e.category)}｜${e.searchSnippet || summarizeText(e.summary || e.textPreview || "", 80)}`),
+          ...knowledgeHits.map((e, i) => `${i + 1}. ${e.title}｜${getKnowledgeCategoryLabel(e.category)}${e.description ? `｜说明：${summarizeText(e.description, 50)}` : ""}｜${e.searchSnippet || summarizeText(e.summary || e.textPreview || "", 80)}`),
         ].join("\n");
       }
     }
@@ -13211,6 +13214,57 @@ function bindEvents() {
       rebuildKnowledgeEntry(entry.id).catch((error) => {
         console.error("Knowledge rebuild failed", error);
         updateSharedAgentStatus(error?.message || langText("重建标准化失败。", "Failed to rebuild normalized payload."), "error");
+      });
+      return;
+    }
+    if (action === "generate-description") {
+      const profile = getPrimarySummaryProfile();
+      if (!profile) {
+        updateSharedAgentStatus(langText("请先配置 AI 模型后再生成说明。", "Please configure an AI model first."), "error");
+        return;
+      }
+      const textarea = document.getElementById("knowledge-entry-description");
+      if (textarea) {
+        textarea.value = langText("AI 正在生成说明，请稍候…", "Generating note with AI, please wait…");
+        textarea.disabled = true;
+      }
+      const textSample = summarizeText(normalizeKnowledgeText(entry.textPreview || ""), 600);
+      const prompt = [
+        langText("你是一个知识库管理助手。请为以下文档生成一段简短说明（2到3句话），让 AI 在检索时能快速判断这份文件是否相关。", "You are a knowledge base assistant. Generate a brief 2-3 sentence description of the following document so an AI can quickly judge its relevance during retrieval."),
+        langText("说明应覆盖：这份文件主要讲什么、属于什么类型（背景资料/规格/流程/财务/合同等）、适合回答什么类型的问题。", "Cover: what the file mainly discusses, its type (background/specs/process/financial/contract etc.), and what types of questions it helps answer."),
+        langText("只输出说明正文，不要加标题、不要加序号、不要加任何解释。", "Output only the description, no title, no numbering, no extra explanation."),
+        `文件名：${entry.title}`,
+        `目录：${getKnowledgeCategoryLabel(entry.category)}`,
+        `内容节选：\n${textSample}`,
+      ].join("\n");
+      requestModelText(profile, prompt, 120, null, 25000).then((result) => {
+        if (textarea) {
+          textarea.value = result.trim();
+          textarea.disabled = false;
+        }
+      }).catch((error) => {
+        console.error("Generate description failed", error);
+        if (textarea) {
+          textarea.value = "";
+          textarea.disabled = false;
+        }
+        updateSharedAgentStatus(langText("AI 生成说明失败，请手动填写。", "Failed to generate AI note. Please fill it in manually."), "error");
+      });
+      return;
+    }
+    if (action === "save-description") {
+      const textarea = document.getElementById("knowledge-entry-description");
+      const newDescription = (textarea?.value || "").trim();
+      const allEntries = getKnowledgeScopeEntries();
+      const nextEntries = normalizeKnowledgeEntries(allEntries.map((e) =>
+        e.id === entry.id ? { ...e, description: newDescription } : e
+      ));
+      saveKnowledgeEntriesByEntryScope(entry, nextEntries).then(() => {
+        updateSharedAgentStatus(langText(`已保存"${entry.title}"的文件说明。`, `File note saved for "${entry.title}".`), "success");
+        renderKnowledgeBaseWorkspace();
+      }).catch((error) => {
+        console.error("Save description failed", error);
+        updateSharedAgentStatus(langText("保存文件说明失败。", "Failed to save file note."), "error");
       });
       return;
     }

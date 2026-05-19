@@ -1636,6 +1636,32 @@ body.theme-light .discussion-status-phase {
   background: rgba(255, 120, 120, 0.1);
 }
 
+.knowledge-file-note-label {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
+.knowledge-file-note {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  resize: vertical;
+}
+
+.knowledge-file-note:focus {
+  outline: none;
+  border-color: rgba(94, 199, 212, 0.35);
+}
+
 .knowledge-ingestion-card {
   display: grid;
   gap: 8px;
