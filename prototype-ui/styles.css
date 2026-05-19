@@ -1459,13 +1459,15 @@ body.theme-light .discussion-status-phase {
 
 .knowledge-category-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
 }
 
 .knowledge-category-actions .ghost-link {
   padding: 0;
+  white-space: nowrap;
 }
 
 .roundtable-filter-field select {
