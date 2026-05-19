@@ -5375,12 +5375,24 @@ function deriveTopicTitle() {
 function deriveTopicSummary() {
   const activeTopic = getActiveTopic();
   if (activeTopic?.status === "completed" && state.latestReportText) {
-    return "本次讨论已完成，结论可下载。";
+    return langText("本次讨论已完成，结论可下载。", "This discussion is complete. The final report is ready to download.");
   }
   if (state.lastSummary) {
     return formatTaskSummaryForDisplay(state.lastSummary);
   }
   return seatFeedback.textContent.trim() || speakerDescription.textContent.trim() || "等待补充任务定义。";
+}
+
+function normalizeTopicSummaryForLanguage(summary, topicStatus) {
+  if (!summary) {
+    return summary;
+  }
+  if (topicStatus === "completed") {
+    if (summary === "本次讨论已完成，结论可下载。" || summary === "This discussion is complete. The final report is ready to download.") {
+      return langText("本次讨论已完成，结论可下载。", "This discussion is complete. The final report is ready to download.");
+    }
+  }
+  return summary;
 }
 
 function formatTopicTimestamp(timestamp) {
@@ -5507,7 +5519,7 @@ function renderTopicList() {
               <span class="compact-link">${formatTopicTimestamp(topic.updatedAt)}</span>
             </div>
             <h3>${escapeHtml(topic.title)}</h3>
-            <p>${escapeHtml(topic.summary)}</p>
+            <p>${escapeHtml(normalizeTopicSummaryForLanguage(topic.summary, topic.status))}</p>
             <div class="topic-card-actions">
               <button class="ghost-link compact-link" data-topic-action="open" data-topic-id="${topic.id}" type="button">${topic.status === "active" ? langText("继续", "Resume") : langText("打开", "Open")}</button>
               <button class="ghost-link compact-link danger-link" data-topic-action="delete" data-topic-id="${topic.id}" type="button">${langText("删除", "Delete")}</button>
@@ -8149,7 +8161,7 @@ async function runDiscussionFlow() {
     const activeTopic = getActiveTopic();
     if (activeTopic) {
       activeTopic.status = "completed";
-      activeTopic.summary = "本次讨论已完成，结论可下载。";
+      activeTopic.summary = langText("本次讨论已完成，结论可下载。", "This discussion is complete. The final report is ready to download.");
     }
     setSpeakerCardSpeaking(false);
     setSpeakerCard(langText("讨论完成", "Discussion Complete"), langText("主持总结已完成", "Host wrap-up completed"), langText(`已按 ${targetRounds} 轮完成顺序讨论、逐轮主持压缩和最终裁判流程。`, `Completed ${targetRounds} round(s) of ordered discussion, host compression, and final judgment.`), "系");
