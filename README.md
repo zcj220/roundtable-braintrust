@@ -1,72 +1,110 @@
-# 圆桌智囊团 · Roundtable Braintrust
+# Roundtable Braintrust
 
-**多 AI 角色协同讨论工作台原型**
+**Assemble an AI expert panel to debate any question — with live web evidence.**
 
-把一个话题丢进来，AI 自动召集一桌专家，让他们带着各自的立场、证据和知识库打辩论。你来听、来追问、来拍板。
+> 圆桌智囊团 · 多 AI 角色协同讨论工作台
 
----
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-roundtable--braintrust.vercel.app-orange?style=flat-square)](https://roundtable-braintrust.vercel.app)
+[![MIT License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
+[![No Build Required](https://img.shields.io/badge/Build-None%20Required-green?style=flat-square)](#quick-start)
 
-## 核心功能
-
-- **自动召集角色** — 输入话题后，AI 规划 4-8 个差异化人物（立场、背景、风格各不同），无需手动配置
-- **多轮讨论流程** — 每轮发言前系统自动检索网络证据 + 本地知识库，角色基于证据展开论述
-- **本地知识库** — 上传 PDF / Word / Markdown / TXT 等文档，AI 在讨论时自动命中相关片段并引用
-- **证据链追溯** — 每条发言背后的检索来源、命中片段、搜索关键词全部可查
-- **双语界面** — 支持中文 / English 切换，讨论和界面同步切换
-- **文件说明卡片** — 给每份知识文档填写一句话说明，AI 检索时先读说明再深入片段，减少误命中
+Drop in a topic. The AI assembles 4–8 expert personas with opposing stances, searches the web for live evidence, debates in multiple rounds, and delivers a synthesis. You listen, ask follow-ups, and decide.
 
 ---
 
-## 快速开始（本地运行）
+## ✨ Features
 
-**必须用带代理的服务器启动，不要用 Python 静态服务器（网络搜索和证据链会失效）。**
+| Feature | Description |
+|---|---|
+| **Auto-assembled Panel** | AI creates 4–8 distinct personas (background, stance, style) from your topic — no manual config |
+| **Live Web Evidence** | Each speaker searches DuckDuckGo + Wikipedia before responding and cites sources inline |
+| **Private Knowledge Base** | Upload PDF / Word / Markdown / TXT — AI retrieves relevant chunks during the debate |
+| **File Description Cards** | One-sentence summary per document guides retrieval, reducing false hits |
+| **Evidence Trail** | Every message shows its search queries, retrieved snippets, and source URLs |
+| **Any OpenAI-Compatible API** | Works with OpenAI, DeepSeek, Moonshot, Anthropic, local Ollama models — just bring your API key |
+| **100% Browser-Based** | No server, no account, no data leaves your device (IndexedDB storage) |
+| **CN / EN UI** | Full Chinese and English interface, auto-detects browser language |
+
+---
+
+## 🚀 Try It Now
+
+**[→ Live Demo on Vercel](https://roundtable-braintrust.vercel.app)**  
+*(Bring your own API key — enter it in Settings after opening)*
+
+---
+
+## Quick Start (Local)
+
+The local launcher includes a proxy server for web search. Do **not** use a plain static server or evidence search will not work.
 
 ```powershell
-# 方法一：双击启动脚本
+# Windows — double-click or run:
 Start-Dev.bat
 
-# 方法二：手动运行
+# Or manually:
 powershell -ExecutionPolicy Bypass -File launcher/serve-static.ps1 -Root . -Port 4174
 ```
 
-打开浏览器访问：`http://127.0.0.1:4174/prototype-ui/`
+Then open: `http://127.0.0.1:4174/prototype-ui/`
 
 ---
 
-## 技术说明
+## How It Works
 
-| 项目 | 详情 |
-|------|------|
-| 架构 | 纯浏览器单文件 JS，无框架，无构建步骤 |
-| 存储 | IndexedDB（知识库、快照、证据链全部本地存储） |
-| 代理 | `launcher/serve-static.ps1` 提供 `/__roundtable_proxy` 接口，用于转发网络搜索请求（绕过 CORS）|
-| AI 接入 | 支持 OpenAI Compatible / Anthropic Messages，需自备 API Key |
-| 知识检索 | 文档分片（chunk）+ 词向量相似度打分，支持文件说明卡片作为二级过滤层 |
-
----
-
-## 接入模型
-
-在界面右上角「设置」→「模型配置」中填入 API Key 和 Base URL。
-
-支持接入任何兼容 OpenAI API 格式的服务（OpenAI、DeepSeek、Moonshot、硅基流动等）。
-
----
-
-## 知识库使用建议
-
-1. 在「知识库」面板上传文档（PDF / Word / Markdown / TXT）
-2. 为每份文档填写**文件说明**（一两句话：这份文件讲什么、适合回答哪类问题）
-3. 开启「知识库」开关后开始讨论，系统会自动检索并注入相关片段
+```
+Your Topic
+    │
+    ▼
+① AI Moderator organizes the question and assigns expert roles
+    │
+    ▼
+② Each expert searches the web + your knowledge base for evidence
+    │
+    ▼
+③ Multi-round structured debate with citations
+    │
+    ▼
+④ Synthesis & conclusion
+```
 
 ---
 
-## 项目状态
+## Knowledge Base Tips
 
-当前为**原型阶段**，功能持续迭代中。本地运行稳定，尚未提供公网部署版本。
+1. Open **Knowledge Base** panel → upload documents (PDF / Word / Markdown / TXT)
+2. Write a **File Description** for each document (one sentence: what it covers, what questions it answers)
+3. Enable the **Knowledge Base** toggle before starting — relevant chunks are auto-injected into each speaker's context
+
+---
+
+## Model Configuration
+
+Open **Settings → Model Profiles** and enter your API Key + Base URL.
+
+Tested providers: `OpenAI` · `Anthropic` · `DeepSeek` · `Moonshot (Kimi)` · `SiliconFlow` · `Ollama (local)`
+
+---
+
+## Tech Stack
+
+| | |
+|---|---|
+| Architecture | Vanilla JS single-file, zero framework, zero build step |
+| Storage | IndexedDB (knowledge base, discussion history, evidence cache) |
+| Web Proxy | `api/proxy.js` (Vercel Serverless) / `launcher/serve-static.ps1` (local) |
+| Retrieval | Chunked documents + TF-IDF keyword scoring + file description pre-filter |
+| Deployment | Static files on Vercel; no backend required |
+
+---
+
+## Project Status
+
+**Early prototype** — core features stable, actively iterating.  
+See [产品路线图与发布规划-2026.md](产品路线图与发布规划-2026.md) for the roadmap.
 
 ---
 
 ## License
 
-MIT
+[MIT](LICENSE) © 2026 Roundtable Braintrust Contributors
