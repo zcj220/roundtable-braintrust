@@ -101,8 +101,7 @@ Tested providers: `OpenAI` · `Anthropic` · `DeepSeek` · `Moonshot (Kimi)` · 
 
 ## Project Status
 
-**Early prototype** — core features stable, actively iterating.  
-See [产品路线图与发布规划-2026.md](产品路线图与发布规划-2026.md) for the roadmap.
+**Early prototype** — core features stable, actively iterating.
 
 ---
 
