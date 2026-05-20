@@ -1,4 +1,5 @@
 # Roundtable Braintrust
+![Roundtable Braintrust UI](screenshot.png)
 
 **Assemble an AI expert panel to debate any question — with live web evidence.**
 
